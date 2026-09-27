@@ -120,6 +120,17 @@ class App:
         ttk.Label(top, text="ChatGPT").grid(row=3, column=0, sticky="w", **pad)
         chatgpt_opts = ttk.Frame(top)
         chatgpt_opts.grid(row=3, column=1, columnspan=5, sticky="w")
+        ttk.Label(chatgpt_opts, text="Power").pack(side="left", padx=(6, 4))
+        level = self._chatgpt_power()
+        self.power_var = tk.StringVar(value=self._power_choices()[0 if level is None else level + 1])
+        power_box = ttk.Combobox(
+            chatgpt_opts, textvariable=self.power_var, values=self._power_choices(), state="readonly", width=16
+        )
+        power_box.pack(side="left", padx=(0, 12))
+        power_box.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: setattr(self.settings, "chatgpt_power", self._power_choices().index(self.power_var.get()) - 1),
+        )
         self.new_chat_var = tk.BooleanVar(value=self.settings.chatgpt_new_chat)
         ttk.Checkbutton(
             chatgpt_opts,
@@ -200,6 +211,7 @@ class App:
             self.tabs,
             get_session_file=lambda: self.session_file,
             get_max_lines=self._chatgpt_max_lines,
+            get_power=self._chatgpt_power,
             run_chatgpt=self._run_chatgpt,
         )
         self.tabs.add(self.chat, text="Chat")
@@ -370,6 +382,15 @@ class App:
         threading.Thread(target=work, name="chatgpt", daemon=True).start()
         return True
 
+    @staticmethod
+    def _power_choices() -> list[str]:
+        return ["Keep ChatGPT's", *chatgpt.POWER_LEVELS]
+
+    def _chatgpt_power(self) -> int | None:
+        """Power level to set before sending, or None to leave ChatGPT's slider alone."""
+        level = self.settings.chatgpt_power
+        return level if 0 <= level < len(chatgpt.POWER_LEVELS) else None
+
     def _refresh_prompt_versions(self) -> None:
         """Re-read prompts/summarize/ (files may have been added by hand) and keep a valid choice."""
         versions = prompt_versions.list_versions()
@@ -420,8 +441,9 @@ class App:
             return
         # Same ChatGPT conversation as the Chat tab; "New conversation" there also applies here.
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
+        power = self._chatgpt_power()
         self._run_chatgpt(
-            lambda status: chatgpt.ask(prompt, upload, status, new_chat=new_chat),
+            lambda status: chatgpt.ask(prompt, upload, status, new_chat=new_chat, power=power),
             lambda answer: self._summary_received(tfile, answer, new_chat),
             lambda error: messagebox.showerror("Summarize with ChatGPT", error),
         )

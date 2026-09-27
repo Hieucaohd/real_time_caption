@@ -62,6 +62,13 @@ REPLY_COPY_BUTTON = (
     "button[aria-label='Copy response'], "
     "button[data-testid='copy-turn-action-button']"
 )
+# "Power" (reasoning effort) lives in the model picker as a keyboard-driven slider.
+MODEL_PICKER = "button[aria-label='Select ChatGPT model'], button[data-testid='model-switcher-dropdown-button']"
+POWER_ITEM = "[role=menu] [role=menuitem][data-reasoning-slider='true']"
+POWER_SLIDER = "[role=menu] [role=slider]"
+POWER_STATUS = "[role=menu] [role=status]"
+# Names ChatGPT shows for the slider steps (reasoning effort none / medium / high).
+POWER_LEVELS = ["Instant", "Medium", "High"]
 UPLOAD_TIMEOUT_S = 120
 ANSWER_TIMEOUT_S = 600
 SENT_TIMEOUT_S = 20
@@ -225,6 +232,35 @@ def _wait_not_answering(page, on_status: Callable[[str], None]) -> None:
         raise ChatGPTError("ChatGPT is still answering the previous message. Try again when it finishes.") from exc
 
 
+def _set_power(page, level: int) -> str:
+    """Move the model picker's Power slider to ``level`` (0 = lowest); returns ChatGPT's label for it."""
+    picker = page.locator(MODEL_PICKER).first
+    if picker.count() == 0:
+        raise ChatGPTError("Could not find ChatGPT's model picker to set the power level.")
+    picker.click()
+    try:
+        power = page.locator(POWER_ITEM).first
+        try:
+            power.wait_for(state="visible", timeout=5000)
+        except Exception as exc:  # noqa: BLE001
+            raise ChatGPTError("ChatGPT's model picker has no Power slider (the layout may have changed).") from exc
+        slider = page.locator(POWER_SLIDER).first
+        power.focus()
+        target = max(0, min(level, int(slider.get_attribute("aria-valuemax") or len(POWER_LEVELS) - 1)))
+        for _ in range(len(POWER_LEVELS) + 2):
+            current = int(slider.get_attribute("aria-valuenow") or 0)
+            if current == target:
+                break
+            page.keyboard.press("ArrowRight" if current < target else "ArrowLeft")
+            page.wait_for_timeout(250)
+        if int(slider.get_attribute("aria-valuenow") or -1) != target:
+            raise ChatGPTError("Could not move ChatGPT's Power slider to the chosen level.")
+        # Status reads e.g. "Medium, 2 of 3."
+        return page.locator(POWER_STATUS).first.inner_text().split(",")[0].strip()
+    finally:
+        page.keyboard.press("Escape")
+
+
 def _wait_send_enabled(page, timeout_s: float):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
@@ -327,9 +363,12 @@ def ask(
     on_status: Callable[[str], None] = lambda _msg: None,
     new_chat: bool = True,
     tab_name: str = APP_TAB,
+    power: int | None = None,
     dry_run: bool = False,
 ) -> str:
     """Send ``prompt`` (optionally with ``file_path`` attached) and return the answer (markdown).
+
+    ``power`` sets ChatGPT's Power slider first (index into POWER_LEVELS); None leaves it.
 
     ``new_chat`` starts a fresh conversation; otherwise the conversation already open in
     the dedicated tab ``tab_name`` is continued (a new chat is still opened if there is
@@ -365,6 +404,9 @@ def ask(
             ) from exc
         if not (new_chat or created):
             _wait_not_answering(page, on_status)
+        if power is not None:
+            on_status("Setting ChatGPT power…")
+            on_status(f"Power set to {_set_power(page, power)}")
 
         if file_path is not None:
             on_status(f"Uploading {file_path.name}…")

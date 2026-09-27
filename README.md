@@ -37,6 +37,7 @@ Nút **🤖 Summarize (ChatGPT)** chỉ bấm được khi đang có một ngu�
   - Câu trả lời hiện ở tab **ChatGPT summary** trong app. Mỗi câu trả lời mới **thay thế** câu trả lời cũ. Nút **Copy** chép câu trả lời đang hiện vào clipboard.
   - Câu trả lời cũng được lưu cạnh file caption, ví dụ `…_2026-09-26_21-50-48.summary.md`. Mỗi lần tóm tắt được ghi nối thêm vào file này.
   - App lấy câu trả lời bằng cách bấm nút Copy của ChatGPT nhưng chặn lệnh ghi clipboard của trang, nên clipboard thật của bạn không bị ghi đè. Đây cũng là cách ai-orchestrator làm.
+- **Power** (hàng ChatGPT) chọn "độ thông minh" cho ChatGPT, tức thanh trượt Power trong ô chọn model trên chatgpt.com: **Instant** (nhanh, không suy nghĩ thêm), **Medium**, **High** (suy nghĩ kỹ nhất, chậm hơn và tốn hạn mức sử dụng nhanh hơn). Trước mỗi lần gửi (Summarize hoặc Chat), app đặt thanh trượt về mức đã chọn. Chọn **Keep ChatGPT's** để giữ nguyên mức đang đặt trên ChatGPT.
 - **Send the last N caption lines** (hàng ChatGPT, mặc định 300): chỉ gửi N dòng caption mới nhất cho cả Summarize lẫn Chat, để file gửi đi không quá nặng. `0` nghĩa là gửi cả file. File gốc trong `transcripts/` vẫn đầy đủ; app tạo một bản rút gọn trong thư mục tạm (`%TEMP%\real_time_caption\…_last300.txt`) rồi gửi bản đó. Đầu bản rút gọn có ghi chú "the last N of M caption lines" để ChatGPT biết đây chỉ là phần cuối.
 - Ô **ChatGPT → New chat for each Summarize** (mặc định bật) quyết định việc tạo chat mới:
   - Bật: mỗi lần gửi là một cuộc trò chuyện mới.

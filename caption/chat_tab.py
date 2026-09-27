@@ -32,11 +32,13 @@ class ChatPanel(ttk.Frame):
         master: tk.Misc,
         get_session_file: Callable[[], TranscriptFile | None],
         get_max_lines: Callable[[], int],
+        get_power: Callable[[], int | None],
         run_chatgpt: RunChatGPT,
     ):
         super().__init__(master)
         self._get_session_file = get_session_file
         self._get_max_lines = get_max_lines
+        self._get_power = get_power
         self._run_chatgpt = run_chatgpt
         # False = continue the conversation open in the app's ChatGPT tab (shared with Summarize).
         self._new_conversation = False
@@ -125,9 +127,10 @@ class ChatPanel(ttk.Frame):
             prompt = message
 
         new_chat = self._new_conversation
+        power = self._get_power()
 
         def job(status: Callable[[str], None]) -> str:
-            return chatgpt.ask(prompt, file_path, status, new_chat=new_chat)
+            return chatgpt.ask(prompt, file_path, status, new_chat=new_chat, power=power)
 
         if not self._run_chatgpt(job, self._on_answer, self._on_error):
             return
