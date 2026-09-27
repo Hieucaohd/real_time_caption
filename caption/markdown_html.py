@@ -2,20 +2,38 @@
 
 markdown-it-py (CommonMark + GFM tables, the dialect ChatGPT writes) turns markdown
 into HTML, and tkinterweb's ``HtmlFrame`` (Tkhtml) displays it inside Tkinter, so
-tables, code blocks, quotes and nested lists render properly. Raw HTML in answers is
-escaped, and links open in the default browser instead of inside the app.
+tables, code blocks, quotes and nested lists render properly. LaTeX formulas are
+rendered to images by ``math_render`` (chatgpt.com uses KaTeX for these). Raw HTML in
+answers is escaped, and links open in the default browser instead of inside the app.
 """
 
 from __future__ import annotations
 
 import html
+import re
 import webbrowser
 
 import tkinter as tk
 from markdown_it import MarkdownIt
 from tkinterweb import HtmlFrame
 
-_md = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.texmath import texmath_plugin
+
+from . import math_render
+
+# Math is pulled out *before* markdown parsing (like remark-math on chatgpt.com), so
+# backslashes and underscores in formulas aren't eaten as escapes/emphasis. ChatGPT writes
+# \( inline \) and \[ display \]; $...$ / $$...$$ are accepted too.
+_md = (
+    MarkdownIt("commonmark", {"html": False})
+    .enable(["table", "strikethrough"])
+    .use(texmath_plugin, delimiters="brackets")
+    .use(dollarmath_plugin, allow_digits=False, double_inline=True)
+)
+_md.add_render_rule("math_inline", lambda self, tokens, idx, options, env: math_render.inline_html(tokens[idx].content))
+for _rule in ("math_inline_double", "math_block", "math_block_eqno", "math_block_label"):
+    _md.add_render_rule(_rule, lambda self, tokens, idx, options, env: math_render.display_html(tokens[idx].content))
 
 CSS = """
 body { font-family: 'Segoe UI'; font-size: 11pt; color: #202020; background: #ffffff; margin: 6px 10px; }
@@ -40,11 +58,39 @@ a { color: #1a5fb4; }
 .user { background: #d9eaff; margin: 0 8px 4px 22%; padding: 6px 10px; }
 .bot { background: #f1f1f1; margin: 0 22% 4px 0; padding: 4px 10px; }
 .pending { color: #888888; font-style: italic; margin: 8px 0; }
+.math-display { text-align: center; margin: 8px 0; }
+.math-row { margin: 3px 0; }
+.math-boxed { border: 1px solid #8a8a8a; padding: 4px 10px; display: inline-block; }
+img.math-boxed { padding: 2px 4px; }
+code.tex { color: #7a3e00; background: #fff6e5; }
 """
 
 
+_FENCE = re.compile(r"(^|\n)(```|~~~).*?(\n\2[^\n]*(?=\n|$)|$)", re.S)
+_DISPLAY_BRACKETS = re.compile(r"\\\[(.+?)\\\]", re.S)
+
+
+def _prepare_math(markdown: str) -> str:
+    r"""Turn every ``\[ ... \]`` into single-line ``$$ ... $$``.
+
+    ChatGPT often puts a display formula right under a list item or sentence without a
+    blank line; markdown then treats it as paragraph text and ``\[`` as an escaped ``[``.
+    ``$$...$$`` is recognised anywhere (block or inline). Fenced code is left untouched.
+    """
+    def convert(text: str) -> str:
+        return _DISPLAY_BRACKETS.sub(lambda m: "$$" + " ".join(m.group(1).split()) + "$$", text)
+
+    out, pos = [], 0
+    for fence in _FENCE.finditer(markdown):
+        out.append(convert(markdown[pos : fence.start()]))
+        out.append(fence.group(0))
+        pos = fence.end()
+    out.append(convert(markdown[pos:]))
+    return "".join(out)
+
+
 def to_html(markdown: str) -> str:
-    return _md.render(markdown)
+    return _md.render(_prepare_math(markdown))
 
 
 def plain_to_html(text: str) -> str:
@@ -57,6 +103,8 @@ def page(body: str) -> str:
 
 
 def make_view(master: tk.Misc) -> HtmlFrame:
+    # Formula images are rasterised at the real screen DPI so they match the text size.
+    math_render.set_dpi(master.winfo_fpixels("1i"))
     view = HtmlFrame(master, messages_enabled=False, on_link_click=lambda url: webbrowser.open(url))
     view.load_html(page(""))
     return view

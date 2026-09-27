@@ -6,7 +6,10 @@ uiautomation>=2.0
 playwright==1.62.0
 # Rendering ChatGPT's markdown answers (tables, code, lists) inside the Tk window.
 markdown-it-py>=3
+mdit-py-plugins>=0.4
 tkinterweb>=4
+# LaTeX formulas in answers are drawn with matplotlib's mathtext (chatgpt.com uses KaTeX).
+matplotlib>=3.8
 # GPU acceleration (NVIDIA). Safe to install without a GPU; the app falls back to CPU.
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9,<10

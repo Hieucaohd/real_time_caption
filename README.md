@@ -79,5 +79,6 @@ Chọn nguồn **Windows Live Captions (read its text)** rồi bấm Start. App 
 - `caption/livecaptions.py`: đọc `CaptionsTextBlock` của Live Captions. Hai câu cuối được coi là chữ tạm vì Live Captions còn sửa chúng; các câu phía trước được chốt, có chống trùng khi chữ cuộn khỏi màn hình.
 - `caption/gui.py`: giao diện Tkinter, gồm cửa sổ chính và overlay.
 - `caption/markdown_html.py`: hiển thị câu trả lời markdown của ChatGPT. markdown-it-py (CommonMark + bảng GFM) chuyển markdown sang HTML, rồi tkinterweb hiển thị HTML đó. Nhờ vậy bảng, khối code, trích dẫn và danh sách lồng đều hiện đúng; link được mở bằng trình duyệt.
+- `caption/math_render.py`: vẽ công thức toán. chatgpt.com dùng **KaTeX** (thư viện JavaScript) để hiển thị công thức, nhưng engine HTML trong app không chạy được KaTeX. Vì vậy app tách công thức `\( … \)`, `\[ … \]`, `$ … $`, `$$ … $$` ra trước khi đọc markdown (giống cách remark-math làm trên ChatGPT), rồi vẽ từng công thức thành ảnh bằng matplotlib mathtext. Các lệnh mathtext không hỗ trợ (`\boxed`, `\dfrac`, `\underbrace`, `\xrightarrow`, công thức nhiều dòng `\\`/`aligned`, viết tắt `\frac12`) được chuyển sang dạng tương đương trước khi vẽ. Nếu vẫn có công thức không vẽ được, app hiện mã LaTeX gốc trong khung màu cam thay vì làm vỡ câu trả lời.
 
 Nhật ký lỗi được ghi vào `caption.log`.
