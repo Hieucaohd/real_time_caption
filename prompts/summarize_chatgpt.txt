@@ -1,0 +1,10 @@
+File đính kèm ({file_name}) là bản ghi phụ đề tiếng Anh tự động (speech-to-text) từ nguồn "{source}".
+Mỗi dòng có dạng [HH:MM:SS] <nội dung>, sắp xếp từ cũ đến mới. Phiên bắt đầu lúc {started}, hiện tại là {now}.
+
+Hãy tóm tắt nội dung file bằng tiếng Việt, ưu tiên theo thời gian từ GẦN NHẤT đến XA NHẤT:
+1. Trình bày phần mới nhất trước, rồi lùi dần về các phần cũ hơn.
+2. Phần càng gần hiện tại thì tóm tắt càng chi tiết; phần càng cũ thì càng ngắn gọn.
+3. Chia thành các mốc thời gian (ghi rõ khoảng giờ [HH:MM–HH:MM]), mỗi mốc gồm các ý chính dạng gạch đầu dòng.
+4. Cuối cùng thêm mục "Điểm quan trọng / việc cần làm" (nếu có): quyết định, câu hỏi còn bỏ ngỏ, con số, tên riêng.
+
+Lưu ý: văn bản do máy nhận dạng giọng nói nên có thể sai chính tả hoặc sai từ; hãy suy luận theo ngữ cảnh, không bịa thêm thông tin không có trong file.

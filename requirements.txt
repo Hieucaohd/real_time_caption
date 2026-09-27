@@ -1,0 +1,12 @@
+faster-whisper>=1.2
+PyAudioWPatch>=0.2.12
+numpy
+uiautomation>=2.0
+# "Summarize (ChatGPT)": drives the logged-in Chrome over CDP (port 9222). No browser download needed.
+playwright==1.62.0
+# Rendering ChatGPT's markdown answers (tables, code, lists) inside the Tk window.
+markdown-it-py>=3
+tkinterweb>=4
+# GPU acceleration (NVIDIA). Safe to install without a GPU; the app falls back to CPU.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10

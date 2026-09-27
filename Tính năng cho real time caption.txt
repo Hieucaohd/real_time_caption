@@ -1,0 +1,11 @@
+Tính năng cho real time caption:
+- Sửa prompt tóm tắt gửi tới chatgpt và lưu nó thành một phiên bản mới để sau này có thể chọn lại
+- Chỉnh được độ thông minh của chatgpt ngay tại app
+-* Chỉnh lại hiển thị markdown của app vì lắm lúc vẫn thấy lỗi ở công thức toán học, trong khi chatgpt hiển thị rõ, hãy xem tài lieu của chatgpt để xem họ đang dung thư viện nào để hiển thị markdown
+
+
+Ý tưởng về app giống tính năng học từ mới của 4english (gọi là app voca)
+- Hãy liệt kê ra các tính năng của phần học từ mới của 4english trước: lập lộ trình để học từ mới
+- sau đó sẽ bảo AI cần làm phần nào
+- Ý tưởng ban đầu: gặp từ mới, hỏi chatgpt, sau đó tự động lưu lại iịnh nghĩa vào app
+- có nhiều nguồn có thể connect tới và gửi các từ mới tới app này, ví dụ app real time caption sẽ có thể 1 tab để có thể hỏi từ mới và gửi từ mới tới app voca
