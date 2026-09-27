@@ -13,11 +13,12 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable
 
-from . import chatgpt, livecaptions, markdown_html
+from . import chatgpt, livecaptions, markdown_html, prompt_versions
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
 from .livecaptions import LiveCaptionsReader
 from .overlay import CaptionOverlay
+from .prompt_editor import PromptEditor
 from .settings import Settings
 from .transcript_file import TRANSCRIPTS_DIR, TranscriptFile
 from .transcriber import Event, StreamingTranscriber, TranscriberConfig
@@ -133,14 +134,32 @@ class App:
         ).pack(side="left")
         ttk.Label(chatgpt_opts, text="caption lines (0 = whole file)").pack(side="left", padx=4)
 
-        ttk.Label(top, text="Window").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Label(top, text="Summary prompt").grid(row=4, column=0, sticky="w", **pad)
+        prompt_opts = ttk.Frame(top)
+        prompt_opts.grid(row=4, column=1, columnspan=5, sticky="w")
+        self.prompt_var = tk.StringVar(value=prompt_versions.resolve(self.settings.summary_prompt) or "")
+        self.prompt_box = ttk.Combobox(
+            prompt_opts, textvariable=self.prompt_var, state="readonly", width=40,
+            postcommand=self._refresh_prompt_versions,
+        )
+        self.prompt_box.pack(side="left", **pad)
+        self.prompt_box.bind(
+            "<<ComboboxSelected>>", lambda _e: setattr(self.settings, "summary_prompt", self.prompt_var.get())
+        )
+        ttk.Button(prompt_opts, text="Edit / new version…", command=self.edit_summary_prompt).pack(side="left", **pad)
+        ttk.Button(
+            prompt_opts, text="📂", width=3, command=lambda: self._open_folder(prompt_versions.SUMMARY_DIR)
+        ).pack(side="left")
+        self._refresh_prompt_versions()
+
+        ttk.Label(top, text="Window").grid(row=5, column=0, sticky="w", **pad)
         self.on_top_var = tk.BooleanVar(value=self.settings.always_on_top)
         ttk.Checkbutton(
             top,
             text="Always on top (stay visible when you click other apps)",
             variable=self.on_top_var,
             command=lambda: self._set_always_on_top(self.on_top_var.get()),
-        ).grid(row=4, column=1, columnspan=5, sticky="w", **pad)
+        ).grid(row=5, column=1, columnspan=5, sticky="w", **pad)
 
         status = ttk.Frame(self.root, padding=(8, 0))
         status.pack(fill="x")
@@ -351,6 +370,27 @@ class App:
         threading.Thread(target=work, name="chatgpt", daemon=True).start()
         return True
 
+    def _refresh_prompt_versions(self) -> None:
+        """Re-read prompts/summarize/ (files may have been added by hand) and keep a valid choice."""
+        versions = prompt_versions.list_versions()
+        self.prompt_box["values"] = versions
+        chosen = prompt_versions.resolve(self.prompt_var.get())
+        self.prompt_var.set(chosen or "")
+        self.settings.summary_prompt = chosen or ""
+
+    def edit_summary_prompt(self) -> None:
+        base = prompt_versions.resolve(self.prompt_var.get())
+        if base is None:
+            messagebox.showerror("Summary prompt", f"No summary prompt found in {prompt_versions.SUMMARY_DIR}.")
+            return
+
+        def saved(name: str) -> None:
+            self.prompt_var.set(name)
+            self._refresh_prompt_versions()
+            self.status_var.set(f"Saved summary prompt {name} — Summarize will now use it")
+
+        PromptEditor(self.root, base, saved)
+
     def _chatgpt_max_lines(self) -> int:
         """Caption lines to send (newest first kept); 0 = whole file. Invalid input keeps the last value."""
         try:
@@ -371,7 +411,10 @@ class App:
             return
         try:
             upload = tfile.snapshot(self._chatgpt_max_lines())
-            prompt = chatgpt.build_prompt(upload, tfile.source, tfile.started)
+            version = prompt_versions.resolve(self.prompt_var.get())
+            if version is None:
+                raise chatgpt.ChatGPTError(f"No summary prompt found in {prompt_versions.SUMMARY_DIR}.")
+            prompt = chatgpt.build_prompt(upload, tfile.source, tfile.started, prompt_versions.path_for(version))
         except (OSError, chatgpt.ChatGPTError) as exc:
             messagebox.showerror("Summarize", str(exc))
             return
@@ -521,8 +564,12 @@ class App:
         self.status_var.set(f"Exported to {path}")
 
     def open_transcripts_folder(self) -> None:
-        TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-        os.startfile(TRANSCRIPTS_DIR)
+        self._open_folder(TRANSCRIPTS_DIR)
+
+    @staticmethod
+    def _open_folder(folder) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(folder)
 
     def on_close(self) -> None:
         self._chatgpt_max_lines()  # store the spinbox value in settings

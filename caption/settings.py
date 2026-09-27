@@ -26,6 +26,7 @@ class Settings:
     overlay_click_through: bool = False  # mouse passes through the overlay
     chatgpt_new_chat: bool = True  # False = keep sending into the same ChatGPT conversation
     chatgpt_max_lines: int = 300  # caption lines sent to ChatGPT (newest); 0 = the whole file
+    summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)
     overlay_width: int = 0  # 0 = pick from screen size
     overlay_x: int = -1  # -1 = centre near the bottom of the screen
     overlay_y: int = -1

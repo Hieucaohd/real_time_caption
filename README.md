@@ -41,7 +41,11 @@ Nút **🤖 Summarize (ChatGPT)** chỉ bấm được khi đang có một ngu�
 - Ô **ChatGPT → New chat for each Summarize** (mặc định bật) quyết định việc tạo chat mới:
   - Bật: mỗi lần gửi là một cuộc trò chuyện mới.
   - Tắt: gửi tiếp vào cuộc trò chuyện đang mở trong tab riêng. Nếu ChatGPT còn đang trả lời tin trước, app sẽ chờ nó trả lời xong rồi mới gửi. Nếu tab riêng chưa có (lần đầu, hoặc bạn đã đóng tab), app vẫn tạo chat mới.
-- Nội dung prompt nằm ở [prompts/summarize_chatgpt.txt](prompts/summarize_chatgpt.txt). Sửa thoải mái; lần bấm sau sẽ dùng bản mới, không cần mở lại app. Các biến có thể dùng trong prompt: `{file_name}`, `{source}`, `{started}`, `{now}`.
+- **Prompt tóm tắt có nhiều phiên bản**, nằm trong [prompts/summarize/](prompts/summarize/), mỗi phiên bản là một file `v<số> - <tên>.txt`:
+  - Hàng **Summary prompt** trong cửa sổ chính cho chọn phiên bản dùng khi bấm Summarize. Lựa chọn được nhớ cho lần sau.
+  - **Edit / new version…** mở phiên bản đang chọn trong một cửa sổ sửa. **Save as new version** lưu nội dung đã sửa thành phiên bản tiếp theo (ví dụ `v2 - ngắn gọn`) và chọn luôn phiên bản đó. Phiên bản cũ không bao giờ bị ghi đè, nên luôn chọn lại được.
+  - Nút 📂 mở thư mục prompt. Bạn cũng có thể tự thêm hoặc sửa file trong đó; danh sách được đọc lại mỗi khi mở ô chọn.
+  - Các biến có thể dùng trong prompt: `{file_name}`, `{source}`, `{started}`, `{now}`.
 - Nếu ChatGPT đổi giao diện khiến app không gửi được, chỉnh các selector ở đầu [caption/chatgpt.py](caption/chatgpt.py).
 
 ### Chat với ChatGPT về nội dung caption

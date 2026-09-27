@@ -4,7 +4,7 @@ Chrome must be running with ``--remote-debugging-port=9222`` (see
 ``C:\\Users\\ADMIN\\ai-orchestrator\\launch_chrome.bat``). We attach over CDP with
 Playwright and work in a dedicated tab (marked via ``window.name`` so tools driving
 the regular ChatGPT tab are not disturbed): attach the file, type the prompt from
-``prompts/summarize_chatgpt.txt``, send, wait for the answer and return it as
+the selected version in ``prompts/summarize/``, send, wait for the answer and return it as
 markdown.
 
 Waiting/reading follows ai-orchestrator's ChatGPT adapter: remember which turns
@@ -32,8 +32,8 @@ CHATGPT_URL = "https://chatgpt.com/"
 # both continue the same ChatGPT conversation.
 APP_TAB = "real-time-caption-summary"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-PROMPT_PATH = PROMPTS_DIR / "summarize_chatgpt.txt"
 CHAT_PROMPT_PATH = PROMPTS_DIR / "chat_with_caption.txt"
+# Summary prompts are versioned in prompts/summarize/ (see prompt_versions.py).
 
 COMPOSER = (
     "#prompt-textarea, "
@@ -111,7 +111,7 @@ class ChatGPTError(RuntimeError):
 
 
 def build_prompt(
-    file_path: Path, source: str, started: datetime, template_path: Path = PROMPT_PATH, message: str = ""
+    file_path: Path, source: str, started: datetime, template_path: Path, message: str = ""
 ) -> str:
     """Fill ``{file_name}``, ``{source}``, ``{started}``, ``{now}`` and ``{message}`` in an
     editable prompt file."""
