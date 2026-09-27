@@ -28,6 +28,7 @@ class Settings:
     chatgpt_max_lines: int = 300  # caption lines sent to ChatGPT (newest); 0 = the whole file
     summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)
     chatgpt_power: int = -1  # ChatGPT Power slider: -1 = leave as is, 0 Instant, 1 Medium, 2 High
+    chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
     overlay_width: int = 0  # 0 = pick from screen size
     overlay_x: int = -1  # -1 = centre near the bottom of the screen
     overlay_y: int = -1

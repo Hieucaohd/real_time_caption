@@ -63,6 +63,8 @@ a { color: #1a5fb4; }
 .math-boxed { border: 1px solid #8a8a8a; padding: 4px 10px; display: inline-block; }
 img.math-boxed { padding: 2px 4px; }
 code.tex { color: #7a3e00; background: #fff6e5; }
+.shot { margin-top: 6px; }
+.shot img { border: 1px solid #b8c8e0; }
 """
 
 

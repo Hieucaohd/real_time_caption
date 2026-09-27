@@ -10,6 +10,8 @@ mdit-py-plugins>=0.4
 tkinterweb>=4
 # LaTeX formulas in answers are drawn with matplotlib's mathtext (chatgpt.com uses KaTeX).
 matplotlib>=3.8
+# Screenshots attached to chat messages (also a matplotlib dependency).
+Pillow>=10
 # GPU acceleration (NVIDIA). Safe to install without a GPU; the app falls back to CPU.
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9,<10

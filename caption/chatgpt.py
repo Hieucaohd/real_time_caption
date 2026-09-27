@@ -261,6 +261,25 @@ def _set_power(page, level: int) -> str:
         page.keyboard.press("Escape")
 
 
+def _clear_attachments(page) -> int:
+    """Drop attachments left in the composer by an earlier attempt that never got sent.
+
+    The remove buttons only take pointer events on hover, so they are clicked from JS.
+    """
+    removed = 0
+    while removed < 20 and page.evaluate(
+        """() => {
+             const b = document.querySelector('form button[aria-label^="Remove "]');
+             if (!b) return false;
+             b.click();
+             return true;
+           }"""
+    ):
+        removed += 1
+        page.wait_for_timeout(300)
+    return removed
+
+
 def _wait_send_enabled(page, timeout_s: float):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
@@ -359,14 +378,14 @@ def _read_answer(page, turn_id: str) -> str:
 
 def ask(
     prompt: str,
-    file_path: Path | None = None,
+    file_path: Path | list[Path] | None = None,
     on_status: Callable[[str], None] = lambda _msg: None,
     new_chat: bool = True,
     tab_name: str = APP_TAB,
     power: int | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Send ``prompt`` (optionally with ``file_path`` attached) and return the answer (markdown).
+    """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
     ``power`` sets ChatGPT's Power slider first (index into POWER_LEVELS); None leaves it.
 
@@ -408,12 +427,15 @@ def ask(
             on_status("Setting ChatGPT power…")
             on_status(f"Power set to {_set_power(page, power)}")
 
-        if file_path is not None:
-            on_status(f"Uploading {file_path.name}…")
+        attachments = [file_path] if isinstance(file_path, Path) else list(file_path or [])
+        if _clear_attachments(page):
+            log.info("Removed leftover attachments from the ChatGPT composer")
+        if attachments:
+            on_status(f"Uploading {', '.join(p.name for p in attachments)}…")
             file_input = page.locator(FILE_INPUT).first
             if file_input.count() == 0:
                 raise ChatGPTError("Could not find ChatGPT's file upload input (the page layout may have changed).")
-            file_input.set_input_files(str(file_path))
+            file_input.set_input_files([str(p) for p in attachments])
 
         composer.click()
         composer.fill(prompt)
@@ -437,7 +459,7 @@ def ask(
             )
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
-        log.info("Sent message to ChatGPT (tab %s, attachment %s)", tab_name, file_path)
+        log.info("Sent message to ChatGPT (tab %s, attachments %s)", tab_name, [p.name for p in attachments])
 
         on_status("Waiting for ChatGPT's answer…")
         try:

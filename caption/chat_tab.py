@@ -17,7 +17,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable
 
-from . import chatgpt, markdown_html
+from . import chatgpt, markdown_html, screenshot
 from .transcript_file import TRANSCRIPTS_DIR, TranscriptFile
 
 log = logging.getLogger(__name__)
@@ -34,12 +34,16 @@ class ChatPanel(ttk.Frame):
         get_max_lines: Callable[[], int],
         get_power: Callable[[], int | None],
         run_chatgpt: RunChatGPT,
+        capture_screen: Callable[[], Path],
+        screenshot_enabled: bool,
+        on_screenshot_toggled: Callable[[bool], None],
     ):
         super().__init__(master)
         self._get_session_file = get_session_file
         self._get_max_lines = get_max_lines
         self._get_power = get_power
         self._run_chatgpt = run_chatgpt
+        self._capture_screen = capture_screen
         # False = continue the conversation open in the app's ChatGPT tab (shared with Summarize).
         self._new_conversation = False
         self._log_path: Path | None = None
@@ -53,6 +57,13 @@ class ChatPanel(ttk.Frame):
         self.attach_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             bar, text="Attach the running caption file", variable=self.attach_var, command=self.refresh_state
+        ).pack(side="left", padx=8)
+        self.screenshot_var = tk.BooleanVar(value=screenshot_enabled)
+        ttk.Checkbutton(
+            bar,
+            text="Attach a screenshot of the apps behind",
+            variable=self.screenshot_var,
+            command=lambda: on_screenshot_toggled(self.screenshot_var.get()),
         ).pack(side="left", padx=8)
         self.hint_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.hint_var, foreground="#777777").pack(side="left", padx=4)
@@ -126,17 +137,27 @@ class ChatPanel(ttk.Frame):
             file_path = None
             prompt = message
 
+        shot = None
+        if self.screenshot_var.get():
+            try:
+                shot = self._capture_screen()
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Screenshot failed")
+                messagebox.showerror("Chat", f"Could not take the screenshot:\n{exc}")
+                return
+
+        attachments = [p for p in (file_path, shot) if p]
         new_chat = self._new_conversation
         power = self._get_power()
 
         def job(status: Callable[[str], None]) -> str:
-            return chatgpt.ask(prompt, file_path, status, new_chat=new_chat, power=power)
+            return chatgpt.ask(prompt, attachments, status, new_chat=new_chat, power=power)
 
         if not self._run_chatgpt(job, self._on_answer, self._on_error):
             return
         self.entry.delete("1.0", "end")
-        attached = f"  ·  📎 {file_path.name}" if file_path else ""
-        self._add_message("user", f"You · {datetime.now():%H:%M:%S}{attached}", message)
+        attached = f"  ·  attached: {', '.join(p.name for p in attachments)}" if attachments else ""
+        self._add_message("user", f"You · {datetime.now():%H:%M:%S}{attached}", message, image=shot)
         self._set_pending("ChatGPT is thinking…")
 
     def _on_answer(self, answer: str) -> None:
@@ -175,11 +196,15 @@ class ChatPanel(ttk.Frame):
 
     # ---------------------------------------------------------------- display
 
-    def _add_message(self, role: str, header: str, body: str, markdown: bool = False) -> None:
+    def _add_message(
+        self, role: str, header: str, body: str, markdown: bool = False, image: Path | None = None
+    ) -> None:
         body_html = markdown_html.to_html(body) if markdown else markdown_html.plain_to_html(body)
+        if image is not None:
+            body_html += f"<div class='shot'><img src='{screenshot.thumbnail_data_uri(image)}'></div>"
         self._messages.append((role, header, body_html))
         self._render()
-        self._log(header, body)
+        self._log(header, body + (f"\n\n![screenshot]({image.as_uri()})" if image else ""))
 
     def _set_pending(self, text: str | None) -> None:
         self._messages = [m for m in self._messages if m[0] != "pending"]

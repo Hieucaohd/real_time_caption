@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable
 
-from . import chatgpt, livecaptions, markdown_html, prompt_versions
+from . import chatgpt, livecaptions, markdown_html, prompt_versions, screenshot
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
 from .livecaptions import LiveCaptionsReader
@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "distil-large-v3", "large-v3-turbo"]
 COMPUTE = ["auto", "cuda", "cpu"]
 POLL_MS = 50
+SCREENSHOTS_DIR = TRANSCRIPTS_DIR / "screenshots"
 
 
 class App:
@@ -212,6 +213,9 @@ class App:
             get_session_file=lambda: self.session_file,
             get_max_lines=self._chatgpt_max_lines,
             get_power=self._chatgpt_power,
+            capture_screen=self._capture_behind_app,
+            screenshot_enabled=self.settings.chat_screenshot,
+            on_screenshot_toggled=lambda on: setattr(self.settings, "chat_screenshot", on),
             run_chatgpt=self._run_chatgpt,
         )
         self.tabs.add(self.chat, text="Chat")
@@ -381,6 +385,12 @@ class App:
 
         threading.Thread(target=work, name="chatgpt", daemon=True).start()
         return True
+
+    def _capture_behind_app(self):
+        """Screenshot of the monitor the app is on, with all of the app's windows left out."""
+        windows = [self.root, *(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))]
+        image = screenshot.capture_behind(windows, anchor=self.root)
+        return screenshot.save(image, SCREENSHOTS_DIR)
 
     @staticmethod
     def _power_choices() -> list[str]:
