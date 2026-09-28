@@ -33,6 +33,9 @@ COLLECT_ALL = [
     "uiautomation",  # reading Windows Live Captions
     "tkinterweb",  # HTML view for ChatGPT answers
     "tkinterweb_tkhtml",  # its Tkhtml binaries
+    "pythonmonkey",  # JavaScript runtime used by the offline MathJax bridge
+    "pminit",  # PythonMonkey runtime bootstrap files
+    "resvg_py",  # native SVG-to-PNG renderer for MathJax output
     "playwright",  # driver (node.exe) used to talk to Chrome over CDP
 ]
 COLLECT_DATA = ["faster_whisper"]  # bundled Silero VAD model
@@ -60,6 +63,7 @@ def pyinstaller_args(gpu: bool) -> list[str]:
         "--specpath", str(BUILD),
         "--add-data", f"{ROOT / 'prompts'}{sep}prompts",
         "--add-data", f"{ICON}{sep}assets",
+        "--add-data", f"{ROOT / 'assets' / 'mathjax-runtime'}{sep}assets/mathjax-runtime",
     ]
     for pkg in COLLECT_ALL:
         args += ["--collect-all", pkg]

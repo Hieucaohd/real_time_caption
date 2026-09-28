@@ -8,7 +8,10 @@ playwright==1.62.0
 markdown-it-py>=3
 mdit-py-plugins>=0.4
 tkinterweb>=4
-# LaTeX formulas in answers are drawn with matplotlib's mathtext (chatgpt.com uses KaTeX).
+# MathJax runs offline in PythonMonkey and resvg rasterises its SVG for TkinterWeb.
+pythonmonkey==1.3.2
+resvg-py==0.5.0
+# Retained as the safe fallback if MathJax cannot initialise in a packaged build.
 matplotlib>=3.8
 # Screenshots attached to chat messages (also a matplotlib dependency).
 Pillow>=10

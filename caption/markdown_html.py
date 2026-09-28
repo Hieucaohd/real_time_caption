@@ -3,8 +3,8 @@
 markdown-it-py (CommonMark + GFM tables, the dialect ChatGPT writes) turns markdown
 into HTML, and tkinterweb's ``HtmlFrame`` (Tkhtml) displays it inside Tkinter, so
 tables, code blocks, quotes and nested lists render properly. LaTeX formulas are
-rendered to images by ``math_render`` (chatgpt.com uses KaTeX for these). Raw HTML in
-answers is escaped, and links open in the default browser instead of inside the app.
+rendered by MathJax and embedded as images. Raw HTML in answers is escaped, and links
+open in the default browser instead of inside the app.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from tkinterweb import HtmlFrame
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.texmath import texmath_plugin
 
-from . import math_render
+from . import mathjax_render
 
 # Math is pulled out *before* markdown parsing (like remark-math on chatgpt.com), so
 # backslashes and underscores in formulas aren't eaten as escapes/emphasis. ChatGPT writes
@@ -31,9 +31,9 @@ _md = (
     .use(texmath_plugin, delimiters="brackets")
     .use(dollarmath_plugin, allow_digits=False, double_inline=True)
 )
-_md.add_render_rule("math_inline", lambda self, tokens, idx, options, env: math_render.inline_html(tokens[idx].content))
+_md.add_render_rule("math_inline", lambda self, tokens, idx, options, env: mathjax_render.inline_html(tokens[idx].content))
 for _rule in ("math_inline_double", "math_block", "math_block_eqno", "math_block_label"):
-    _md.add_render_rule(_rule, lambda self, tokens, idx, options, env: math_render.display_html(tokens[idx].content))
+    _md.add_render_rule(_rule, lambda self, tokens, idx, options, env: mathjax_render.display_html(tokens[idx].content))
 
 CSS = """
 body { font-family: 'Segoe UI'; font-size: 11pt; color: #202020; background: #ffffff; margin: 6px 10px; }
@@ -124,7 +124,7 @@ def page(body: str) -> str:
 
 def make_view(master: tk.Misc) -> HtmlFrame:
     # Formula images are rasterised at the real screen DPI so they match the text size.
-    math_render.set_dpi(master.winfo_fpixels("1i"))
+    mathjax_render.set_dpi(master.winfo_fpixels("1i"))
     view = HtmlFrame(master, messages_enabled=False, on_link_click=lambda url: webbrowser.open(url))
     view.load_html(page(""))
     return view

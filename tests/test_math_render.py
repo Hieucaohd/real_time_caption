@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from caption import markdown_html, math_render
+from caption import markdown_html, math_render, mathjax_render
 
 
 ARRAY = r"""\begin{array}{c|c}
@@ -25,8 +25,19 @@ class MathArrayRenderTests(unittest.TestCase):
 
     def test_array_survives_markdown_math_parsing(self) -> None:
         result = markdown_html.to_html("Trên bảng:\n\\[" + ARRAY + "\\]")
-        self.assertIn('class="math-array"', result)
-        self.assertNotIn("\\begin{array}", result)
+        self.assertIn('class="math-block"', result)
+        self.assertIn("data:image/png;base64,", result)
+        self.assertNotIn("<code class='tex'>", result)
+
+    def test_mathjax_handles_array_and_nested_fraction(self) -> None:
+        for tex in (
+            ARRAY,
+            r"\frac{1^2+\cdots+n^2}{n^3} \approx \frac{\frac13n^3}{n^3} = \frac13,",
+            r"\begin{aligned}x&=1\\y&=2\end{aligned}",
+        ):
+            result = mathjax_render.display_html(tex)
+            self.assertIn("data:image/png;base64,", result)
+            self.assertNotIn("<code class='tex'>", result)
 
     def test_nested_fraction_with_shorthand_arguments(self) -> None:
         tex = r"\frac{1^2+\cdots+n^2}{n^3} \approx \frac{\frac13n^3}{n^3} = \frac13,"

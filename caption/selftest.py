@@ -74,12 +74,14 @@ def _checks(wav: Path | None, model: str) -> list[tuple[str, Callable[[], str]]]
             return f"connected over CDP, {len(tabs)} ChatGPT tab(s)"
 
     def math() -> str:
-        from . import math_render
+        from . import mathjax_render
 
-        out = math_render.display_html(r"\frac{f(x+h)-f(x)}{h} = \text{đạo hàm}")
+        out = mathjax_render.display_html(
+            r"\begin{array}{c|c}f(x)&\int_0^b f(x)\,dx\\\hline x^2&\frac{b^3}{3}\end{array}"
+        )
         if "data:image/png" not in out:
             raise RuntimeError("formula was not rendered")
-        return "mathtext renders formulas"
+        return "offline MathJax renders formulas"
 
     def html_view() -> str:
         import tkinter as tk
