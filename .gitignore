@@ -4,6 +4,9 @@ models/
 settings.json
 caption.log
 transcripts/
+conversations.sqlite3
+conversations.sqlite3-shm
+conversations.sqlite3-wal
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

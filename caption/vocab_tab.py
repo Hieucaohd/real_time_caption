@@ -18,7 +18,7 @@ from typing import Callable
 
 from . import chatgpt, markdown_html, vocab
 from .settings import Settings
-from .transcript_file import TranscriptFile
+from .conversations import ConversationTranscript
 from .voca_client import VocaClient, VocaError
 
 log = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class VocabPanel(ttk.Frame):
         self,
         master: tk.Misc,
         settings: Settings,
-        get_session_file: Callable[[], TranscriptFile | None],
+        get_session_file: Callable[[], ConversationTranscript | None],
         get_power: Callable[[], int | None],
         run_chatgpt: RunChatGPT,
     ):
@@ -103,9 +103,9 @@ class VocabPanel(ttk.Frame):
         if not self.settings.voca_api_key:
             self.hint_var.set("Add your Voca API key (Voca → Cài đặt → Ứng dụng kết nối) to save words")
         elif tfile is None:
-            self.hint_var.set("No source running — words are saved without a caption sentence")
+            self.hint_var.set("No conversation selected — words are saved without a caption sentence")
         else:
-            self.hint_var.set(f"Context sentences come from {tfile.path.name}")
+            self.hint_var.set("Context sentences come from the selected conversation")
         self.send_btn.configure(state="disabled" if self._busy else "normal")
 
     def _save_key(self) -> None:

@@ -9,19 +9,20 @@ import queue
 import threading
 import tkinter as tk
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable
 
 from . import chatgpt, livecaptions, markdown_html, prompt_versions, screenshot
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
+from .conversations import Conversation, ConversationStore, ConversationTranscript
 from .vocab_tab import VocabPanel
 from .livecaptions import LiveCaptionsReader
 from .overlay import CaptionOverlay
 from .prompt_editor import PromptEditor
 from .settings import Settings
-from .transcript_file import TRANSCRIPTS_DIR, TranscriptFile
+from .transcript_file import TRANSCRIPTS_DIR
 from .transcriber import Event, StreamingTranscriber, TranscriberConfig
 
 log = logging.getLogger(__name__)
@@ -29,23 +30,29 @@ log = logging.getLogger(__name__)
 MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "distil-large-v3", "large-v3-turbo"]
 COMPUTE = ["auto", "cuda", "cpu"]
 POLL_MS = 50
-SCREENSHOTS_DIR = TRANSCRIPTS_DIR / "screenshots"
 
 
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.settings = Settings.load()
+        self.store = ConversationStore()
+        imported = self.store.import_legacy()
+        if imported:
+            log.info("Imported %s legacy transcript(s) into conversations", imported)
         # Each event carries the transcript file of the session that produced it, so text
         # flushed after Stop still lands in the right file even if a new session started.
-        self.events: "queue.Queue[tuple[TranscriptFile, Event]]" = queue.Queue()
-        self._open_files: set[TranscriptFile] = set()
-        self.session_file: TranscriptFile | None = None  # file of the source being captured now
+        self.events: "queue.Queue[tuple[ConversationTranscript, Event]]" = queue.Queue()
+        self._open_files: set[ConversationTranscript] = set()
+        self.current_conversation: Conversation | None = None
+        self.session_file: ConversationTranscript | None = None
         self._sending_to_chatgpt = False
         self._ui_calls: "queue.Queue[Callable[[], None]]" = queue.Queue()  # from worker threads
         self.devices: list[AudioDevice] = []
         self.capture: AudioCapture | None = None
         self.transcriber: StreamingTranscriber | LiveCaptionsReader | None = None
+        self._capture_file: ConversationTranscript | None = None
+        self._stopping = False
         self._line_open = False  # transcript's current line already has text
         self._closing = False
 
@@ -67,6 +74,7 @@ class App:
 
         self._set_always_on_top(self.settings.always_on_top)
         self.refresh_devices()
+        self._refresh_conversations()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(POLL_MS, self._poll)
 
@@ -95,7 +103,7 @@ class App:
             top, textvariable=self.compute_var, values=COMPUTE, state="readonly", width=8
         )
         self.compute_box.grid(row=1, column=3, sticky="w", **pad)
-        self.start_btn = ttk.Button(top, text="▶ Start", command=self.toggle)
+        self.start_btn = ttk.Button(top, text="▶ Start new", command=self.toggle)
         self.start_btn.grid(row=1, column=5, sticky="ew", **pad)
 
         ttk.Label(top, text="Overlay").grid(row=2, column=0, sticky="w", **pad)
@@ -189,8 +197,37 @@ class App:
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(status, textvariable=self.status_var).pack(side="left", padx=6)
 
-        self.tabs = ttk.Notebook(self.root)
-        self.tabs.pack(fill="both", expand=True, padx=12, pady=8)
+        workspace = ttk.Panedwindow(self.root, orient="horizontal")
+        workspace.pack(fill="both", expand=True, padx=12, pady=8)
+
+        conversations = ttk.Frame(workspace, width=250)
+        conversations.pack_propagate(False)
+        ttk.Label(conversations, text="Conversations", font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", padx=4, pady=(4, 6)
+        )
+        conversation_actions = ttk.Frame(conversations)
+        conversation_actions.pack(fill="x", padx=2, pady=(0, 6))
+        self.new_conversation_btn = ttk.Button(
+            conversation_actions, text="+ New & start", command=self.new_conversation
+        )
+        self.new_conversation_btn.pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Button(conversation_actions, text="Rename", command=self.rename_conversation).pack(side="left", padx=2)
+        self.conversation_tree = ttk.Treeview(
+            conversations, columns=("updated",), show="tree headings", selectmode="browse", height=12
+        )
+        self.conversation_tree.heading("#0", text="Name")
+        self.conversation_tree.heading("updated", text="Last used")
+        self.conversation_tree.column("#0", width=155, minwidth=100)
+        self.conversation_tree.column("updated", width=82, minwidth=70, anchor="center")
+        self.conversation_tree.pack(fill="both", expand=True)
+        self.conversation_tree.bind("<<TreeviewSelect>>", self._conversation_selected)
+        ttk.Button(conversations, text="Open conversation folder", command=self.open_conversation_folder).pack(
+            fill="x", padx=4, pady=6
+        )
+        workspace.add(conversations, weight=0)
+
+        self.tabs = ttk.Notebook(workspace)
+        workspace.add(self.tabs, weight=1)
 
         self.transcript = ScrolledText(
             self.tabs, wrap="word", font=("Segoe UI", 11), padx=8, pady=6, state="disabled"
@@ -213,6 +250,8 @@ class App:
         self.chat = ChatPanel(
             self.tabs,
             get_session_file=lambda: self.session_file,
+            get_conversation_id=self._conversation_id,
+            store=self.store,
             get_max_lines=self._chatgpt_max_lines,
             get_power=self._chatgpt_power,
             capture_screen=self._capture_behind_app,
@@ -238,6 +277,113 @@ class App:
                     panel.entry.focus_set()
 
         self.tabs.bind("<<NotebookTabChanged>>", focus_entry)
+
+    # ---------------------------------------------------------- conversations
+
+    def _conversation_id(self) -> str | None:
+        return self.current_conversation.id if self.current_conversation else None
+
+    def _refresh_conversations(self, select_id: str | None = None) -> None:
+        conversations = self.store.list()
+        wanted = select_id or self._conversation_id() or (conversations[0].id if conversations else None)
+        for item in self.conversation_tree.get_children():
+            self.conversation_tree.delete(item)
+        for conversation in conversations:
+            updated = datetime.fromisoformat(conversation.updated_at).strftime("%m-%d %H:%M")
+            marker = " ●" if conversation.status == "recording" else ""
+            self.conversation_tree.insert(
+                "", "end", iid=conversation.id, text=conversation.title + marker, values=(updated,)
+            )
+        if wanted and self.conversation_tree.exists(wanted):
+            self.conversation_tree.selection_set(wanted)
+            self.conversation_tree.focus(wanted)
+            self._load_conversation(wanted)
+        elif not conversations:
+            self.current_conversation = None
+            self.session_file = None
+            self._set_running(False)
+
+    def _conversation_selected(self, _event=None) -> None:
+        selected = self.conversation_tree.selection()
+        if not selected:
+            return
+        conversation_id = selected[0]
+        if (self.transcriber or self._sending_to_chatgpt) and conversation_id != self._conversation_id():
+            if self.current_conversation:
+                self.conversation_tree.selection_set(self.current_conversation.id)
+            messagebox.showinfo("Conversation", "Pause recording and wait for ChatGPT before switching.")
+            return
+        self._load_conversation(conversation_id)
+
+    def _load_conversation(self, conversation_id: str) -> None:
+        conversation = self.store.get(conversation_id)
+        if conversation is None:
+            return
+        self.current_conversation = conversation
+        self.session_file = ConversationTranscript(conversation, self.store)
+        if conversation.source in self.device_box["values"]:
+            self.device_var.set(conversation.source)
+        self._show_saved_transcript()
+        self.chat.load_conversation()
+        latest = self.store.latest_summary(conversation.id)
+        if latest:
+            self._latest_summary = latest.content
+            meta = markdown_html.plain_to_html(f"Saved · {conversation.title}")
+            markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(latest.content))
+        else:
+            self._latest_summary = ""
+            markdown_html.show(self.summary, "")
+        self._set_running(self.transcriber is not None)
+        self.status_var.set(f"Selected: {conversation.title}")
+
+    def _show_saved_transcript(self) -> None:
+        content = self.session_file.read_text() if self.session_file else ""
+        self.transcript.configure(state="normal")
+        self.transcript.delete("1.0", "end")
+        if content:
+            self.transcript.insert("1.0", content + "\n")
+        self.transcript.configure(state="disabled")
+        self.transcript.see("end")
+        self._line_open = False
+        self.overlay.clear()
+
+    def new_conversation(self) -> None:
+        if self.transcriber or self._sending_to_chatgpt:
+            messagebox.showinfo("Conversation", "Pause recording and wait for ChatGPT before starting a new one.")
+            return
+        source = self.device_var.get()
+        if not source:
+            messagebox.showwarning("Conversation", "Please choose an audio source first.")
+            return
+        try:
+            conversation = self.store.create(source)
+        except OSError as exc:
+            messagebox.showerror("Conversation", f"Could not create the conversation:\n{exc}")
+            return
+        self._refresh_conversations(conversation.id)
+        self.start()
+
+    def rename_conversation(self) -> None:
+        if self.current_conversation is None:
+            return
+        if self.transcriber or self._sending_to_chatgpt:
+            messagebox.showinfo("Rename", "Pause recording and wait for ChatGPT before renaming it.")
+            return
+        title = simpledialog.askstring(
+            "Rename conversation", "Conversation name:", initialvalue=self.current_conversation.title, parent=self.root
+        )
+        if title is None:
+            return
+        try:
+            conversation = self.store.rename(self.current_conversation.id, title)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Rename conversation", str(exc))
+            return
+        self._refresh_conversations(conversation.id)
+
+    def open_conversation_folder(self) -> None:
+        if self.current_conversation:
+            self._open_folder(self.current_conversation.folder)
 
     def refresh_devices(self) -> None:
         try:
@@ -268,12 +414,23 @@ class App:
         self.overlay.set_click_through(enabled)
 
     def _set_running(self, running: bool) -> None:
-        self.start_btn.configure(text="■ Stop" if running else "▶ Start")
+        if self._stopping:
+            self.start_btn.configure(text="Stopping…", state="disabled")
+            self.device_box.configure(state="disabled")
+            self.compute_box.configure(state="disabled")
+            self.model_box.configure(state="disabled")
+            self.refresh_btn.configure(state="disabled")
+            self.new_conversation_btn.configure(state="disabled")
+            self._update_chatgpt_controls()
+            return
+        idle_text = "▶ Continue" if self.current_conversation else "▶ Start new"
+        self.start_btn.configure(text="■ Pause" if running else idle_text, state="normal")
         state = "disabled" if running else "readonly"
         self.device_box.configure(state=state)
         self.compute_box.configure(state=state)
         self.model_box.configure(state="disabled" if running else "normal")
         self.refresh_btn.configure(state="disabled" if running else "normal")
+        self.new_conversation_btn.configure(state="disabled" if running else "normal")
         self._update_chatgpt_controls()
 
     def _update_chatgpt_controls(self) -> None:
@@ -285,15 +442,24 @@ class App:
     # -------------------------------------------------------------- start/stop
 
     def toggle(self) -> None:
+        if self._stopping:
+            return
         if self.transcriber:
             self.stop()
         else:
-            self.start()
+            if self.current_conversation is None:
+                self.new_conversation()
+            else:
+                self.start()
 
     def _new_session_file(self, source_label: str):
-        """Create this session's auto-save file; returns (file, event sink) or None on failure."""
+        """Resume the selected conversation's transcript and return its event sink."""
+        if self.current_conversation is None:
+            return None
         try:
-            tfile = TranscriptFile(source_label)
+            tfile = ConversationTranscript(self.current_conversation, self.store)
+            tfile.begin_segment(source_label)
+            self.store.set_status(self.current_conversation.id, "recording")
         except OSError as exc:
             log.exception("Could not create transcript file")
             messagebox.showerror("Real-time Caption", f"Could not create the transcript file:\n{exc}")
@@ -301,17 +467,21 @@ class App:
         self._open_files.add(tfile)
         return tfile, lambda event: self.events.put((tfile, event))
 
-    def _close_session_file(self, tfile: TranscriptFile) -> None:
+    def _close_session_file(self, tfile: ConversationTranscript) -> None:
         tfile.close()
         self._open_files.discard(tfile)
 
     def start(self) -> None:
+        if self.current_conversation is None:
+            self.new_conversation()
+            return
         if self.device_var.get() == livecaptions.LABEL:
             session = self._new_session_file(livecaptions.LABEL)
             if session is None:
                 return
             tfile, sink = session
             self.transcriber = LiveCaptionsReader(sink)
+            self._capture_file = tfile
             self.transcriber.start()
             self.session_file = tfile
             self.settings.device_label = livecaptions.LABEL
@@ -341,8 +511,10 @@ class App:
             self.capture = None
             self.transcriber = None
             self._close_session_file(tfile)
+            self.store.set_status(self.current_conversation.id, "paused")
             messagebox.showerror("Audio", f"Could not open {device.label}:\n{exc}")
             return
+        self._capture_file = tfile
         self.transcriber.start()
         self.session_file = tfile
 
@@ -353,15 +525,31 @@ class App:
         self.status_var.set("Starting…")
 
     def stop(self) -> None:
+        if self._stopping:
+            return
         if self.capture:
             self.capture.stop()
             self.capture = None
         if self.transcriber:
             self.transcriber.stop()  # flushes the last utterance, then emits "stopped"
-            self.transcriber = None
-        self.session_file = None
+            self._stopping = True
+            self._set_running(False)
+            self.status_var.set("Stopping… waiting for the caption reader to finish")
+            return
+        self._finish_stop()
+
+    def _finish_stop(self) -> None:
+        self.transcriber = None
+        self._capture_file = None
+        self._stopping = False
+        if self.current_conversation:
+            self.store.set_status(self.current_conversation.id, "paused")
+            refreshed = self.store.get(self.current_conversation.id)
+            if refreshed:
+                self.current_conversation = refreshed
         self._set_running(False)
-        self.status_var.set("Stopped")
+        self._refresh_conversations(self._conversation_id())
+        self.status_var.set("Paused — select Continue to append more captions later")
 
     # --------------------------------------------------------------- ChatGPT
 
@@ -406,7 +594,9 @@ class App:
         """Screenshot of the monitor the app is on, with all of the app's windows left out."""
         windows = [self.root, *(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))]
         image = screenshot.capture_behind(windows, anchor=self.root)
-        return screenshot.save(image, SCREENSHOTS_DIR)
+        if self.current_conversation is None:
+            raise RuntimeError("Select a conversation before taking a screenshot.")
+        return screenshot.save(image, self.current_conversation.screenshots_dir)
 
     @staticmethod
     def _power_choices() -> list[str]:
@@ -449,7 +639,7 @@ class App:
         return value
 
     def summarize_with_chatgpt(self) -> None:
-        """Send the running session's transcript file to ChatGPT with the editable summary prompt."""
+        """Summarize the selected conversation, whether it is recording or paused."""
         tfile = self.session_file
         if tfile is None or self._sending_to_chatgpt:
             return
@@ -469,26 +659,33 @@ class App:
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
         power = self._chatgpt_power()
         self._run_chatgpt(
-            lambda status: chatgpt.ask(prompt, upload, status, new_chat=new_chat, power=power),
+            lambda status: chatgpt.ask(
+                prompt,
+                [p for p in (upload, self.store.chat_context_path(tfile.conversation_id)) if p],
+                status,
+                new_chat=new_chat,
+                tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
+                power=power,
+            ),
             lambda answer: self._summary_received(tfile, answer, new_chat),
             lambda error: messagebox.showerror("Summarize with ChatGPT", error),
         )
 
-    def _summary_received(self, tfile: TranscriptFile, answer: str, started_new_chat: bool) -> None:
+    def _summary_received(self, tfile: ConversationTranscript, answer: str, started_new_chat: bool) -> None:
         self.chat.add_summary_exchange(tfile.path.name, answer, started_new_chat)
         self._show_summary(tfile, answer)
         saved = self._save_summary(tfile, answer)
         self.status_var.set("ChatGPT: summary received" + (f" — saved to {saved.name}" if saved else ""))
 
-    def _show_summary(self, tfile: TranscriptFile, answer: str) -> None:
+    def _show_summary(self, tfile: ConversationTranscript, answer: str) -> None:
         """Replace the displayed summary with the new one (history stays in the .summary.md file)."""
         self._latest_summary = answer
         meta = markdown_html.plain_to_html(f"Received {datetime.now():%H:%M:%S} · {tfile.path.name}")
         markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(answer))
         self.tabs.select(self._summary_tab)
 
-    def _save_summary(self, tfile: TranscriptFile, answer: str):
-        path = tfile.path.with_name(tfile.path.stem + ".summary.md")
+    def _save_summary(self, tfile: ConversationTranscript, answer: str):
+        path = tfile.folder / "summaries.md"
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(f"<!-- ChatGPT summary, {datetime.now():%Y-%m-%d %H:%M:%S} -->\n\n{answer}\n\n---\n\n")
@@ -536,17 +733,19 @@ class App:
         self.overlay.tick()
         self.root.after(POLL_MS, self._poll)
 
-    def _handle(self, tfile: TranscriptFile, event: Event) -> None:
+    def _handle(self, tfile: ConversationTranscript, event: Event) -> None:
         if event.kind == "status":
             self.status_var.set(event.text)
         elif event.kind == "ready":
             self.status_var.set(f"{event.text} — saving to {tfile.path.name}")
         elif event.kind == "partial":
-            self._set_transcript_partial(event.text)
+            if tfile.conversation_id == self._conversation_id():
+                self._set_transcript_partial(event.text)
             self.overlay.set_partial(event.text)
         elif event.kind == "final":
             tfile.write(event.text, event.end_of_utterance)
-            self._append_transcript(event.text, event.end_of_utterance)
+            if tfile.conversation_id == self._conversation_id():
+                self._append_transcript(event.text, event.end_of_utterance)
             self.overlay.add_final(event.text)
         elif event.kind == "error":
             self.status_var.set("Error")
@@ -555,7 +754,9 @@ class App:
                 self.stop()
         elif event.kind == "stopped":
             self._close_session_file(tfile)
-            self._set_transcript_partial("")
+            if tfile is self._capture_file:
+                self._set_transcript_partial("")
+                self._finish_stop()
 
     # ------------------------------------------------------------- transcript
 
@@ -567,7 +768,7 @@ class App:
             t.delete(ranges[0], ranges[-1])
         if text:
             if not self._line_open:
-                t.insert("end", datetime.now().strftime("[%H:%M:%S] "), "time")
+                t.insert("end", datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "), "time")
                 self._line_open = True
             t.insert("end", text, "partial")
         t.configure(state="disabled")
@@ -578,7 +779,7 @@ class App:
         t = self.transcript
         t.configure(state="normal")
         if not self._line_open:
-            t.insert("end", datetime.now().strftime("[%H:%M:%S] "), "time")
+            t.insert("end", datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "), "time")
         t.insert("end", text + ("\n" if end_of_utterance else " "))
         self._line_open = not end_of_utterance
         t.configure(state="disabled")

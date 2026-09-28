@@ -18,7 +18,7 @@ from .paths import PROMPTS_DIR
 VOCAB_PROMPT_PATH = PROMPTS_DIR / "vocabulary.txt"
 VOCA_SOURCE = "realtime_caption"  # shown in Voca as "via realtime_caption"
 
-_CAPTION_LINE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$")
+_CAPTION_LINE = re.compile(r"^\[(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{2}:\d{2}:\d{2})\]\s*(.*)$")
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S | re.I)
 
 
@@ -75,11 +75,12 @@ def find_context(transcript: Path | None, word: str) -> tuple[str, str]:
     pattern = _word_pattern(word)
     for line in reversed(lines):
         m = _CAPTION_LINE.match(line)
-        if not m or not pattern.search(m.group(2)):
+        if not m or not pattern.search(m.group(3)):
             continue
-        sentences = re.split(r"(?<=[.!?])\s+", m.group(2).strip())
-        sentence = next((s for s in reversed(sentences) if pattern.search(s)), m.group(2))
-        return sentence.strip()[:2000], m.group(1)
+        sentences = re.split(r"(?<=[.!?])\s+", m.group(3).strip())
+        sentence = next((s for s in reversed(sentences) if pattern.search(s)), m.group(3))
+        stamp = f"{m.group(1)} {m.group(2)}" if m.group(1) else m.group(2)
+        return sentence.strip()[:2000], stamp
     return "", ""
 
 

@@ -62,6 +62,13 @@ a { color: #1a5fb4; }
 .math-row { margin: 3px 0; }
 .math-boxed { border: 1px solid #8a8a8a; padding: 4px 10px; display: inline-block; }
 img.math-boxed { padding: 2px 4px; }
+.math-array-wrap { overflow-x: auto; }
+table.math-array { border-collapse: collapse; margin: 4px auto; }
+table.math-array td.math-array-cell { border: 0; padding: 3px 10px; vertical-align: middle; }
+table.math-array td.math-array-vbar { border-left: 1px solid #505050; }
+table.math-array td.math-array-right { border-right: 1px solid #505050; }
+table.math-array tr.math-array-rule td { border-top: 1px solid #505050; }
+table.math-array tr.math-array-bottom-rule td { border-bottom: 1px solid #505050; }
 code.tex { color: #7a3e00; background: #fff6e5; }
 .vcard { margin: 2px 0 8px 0; }
 .vw { font-size: 13pt; }
