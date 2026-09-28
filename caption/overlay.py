@@ -61,8 +61,11 @@ class CaptionOverlay:
         self.settings = settings
         self.win = tk.Toplevel(master)
         self.win.withdraw()
+        self.win.title("Caption overlay")
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
+        # A WM_CLOSE (e.g. from another program) would otherwise destroy the overlay for good.
+        self.win.protocol("WM_DELETE_WINDOW", lambda: self.hide())
 
         self.font = tkfont.Font(family="Segoe UI", size=settings.overlay_font_size, weight="bold")
         self.canvas = tk.Canvas(self.win, bd=0, highlightthickness=0, cursor="fleur")

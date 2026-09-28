@@ -13,6 +13,27 @@ run.bat        :: mở app
 
 Lần đầu bấm **Start**, app sẽ tải model Whisper vào thư mục `models/` (small.en khoảng 480 MB).
 
+## Đóng gói thành .exe cho máy khác
+
+Máy đích không cần cài Python hay thư viện nào. Trên máy dev (đã chạy `setup.bat`):
+
+```bat
+build_exe.bat                       :: bản CPU, khoảng 380 MB, chạy trên mọi máy Windows 10/11
+build_exe.bat --gpu                 :: kèm cuBLAS/cuDNN của NVIDIA, khoảng 2,4 GB, phiên âm bằng GPU
+build_exe.bat --with-models         :: kèm model Whisper đã tải trong models/, máy đích khỏi phải tải
+build_exe.bat --gpu --with-models --zip   :: kết hợp tuỳ ý; --zip tạo thêm dist\RealTimeCaption-<cpu|gpu>.zip
+```
+
+Kết quả là thư mục `dist\RealTimeCaption\`. Copy nguyên thư mục (hoặc file zip) sang máy khác rồi chạy `RealTimeCaption.exe`. Thư mục này có sẵn `HUONG-DAN.txt` cho người dùng, và `Open Chrome for ChatGPT.bat` để mở Chrome ở cổng 9222 cho các tính năng ChatGPT.
+
+- Đây là bản PyInstaller dạng thư mục (`onedir`), không phải một file exe duy nhất. Dạng một file phải giải nén hàng trăm MB ra thư mục tạm ở mỗi lần mở, nên rất chậm.
+- Cài đặt, prompt, transcript, model và log nằm **cạnh file .exe**, nên cả thư mục mang đi đâu cũng được. Nếu thư mục đó không ghi được (ví dụ nằm trong `Program Files`), app dùng `%LOCALAPPDATA%\RealTimeCaption`. Lần đầu chạy, các prompt trong `prompts/` được chép ra cạnh exe để sửa được.
+- Bản CPU chạy trên máy có GPU NVIDIA vẫn an toàn: app chỉ thử CUDA khi nạp được cuBLAS/cuDNN, nếu không thì dùng CPU.
+- Kiểm tra một bản build: `RealTimeCaption.exe --self-test [--wav file.wav --model tiny.en]` ghi kết quả vào `selftest.txt` cạnh exe (exit code 0 = tất cả đều ổn). Các mục được kiểm tra: model Whisper, thiết bị âm thanh, UI Automation, Playwright/Chrome, vẽ công thức, hiển thị HTML, chụp màn hình.
+- App chưa được ký số, nên lần đầu mở Windows SmartScreen có thể cảnh báo: bấm "More info" → "Run anyway".
+
+Mã build nằm trong `packaging/`: `build_exe.py` (tham số PyInstaller), `make_icon.py` (vẽ `assets/icon.ico`), và các file đặt kèm vào gói.
+
 ## Sử dụng
 
 | Mục | Ý nghĩa |

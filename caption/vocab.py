@@ -13,7 +13,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-VOCAB_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "vocabulary.txt"
+from .paths import PROMPTS_DIR
+
+VOCAB_PROMPT_PATH = PROMPTS_DIR / "vocabulary.txt"
 VOCA_SOURCE = "realtime_caption"  # shown in Voca as "via realtime_caption"
 
 _CAPTION_LINE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$")

@@ -10,7 +10,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-SUMMARY_DIR = Path(__file__).resolve().parent.parent / "prompts" / "summarize"
+from .paths import PROMPTS_DIR
+
+SUMMARY_DIR = PROMPTS_DIR / "summarize"
 PLACEHOLDERS = ("{file_name}", "{source}", "{started}", "{now}")
 
 _VERSION = re.compile(r"^v(\d+)\b", re.IGNORECASE)

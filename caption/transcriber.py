@@ -24,10 +24,11 @@ from typing import Callable
 import numpy as np
 
 from .audio import TARGET_RATE as SR
+from .cuda_setup import cuda_runtime_available
+from .paths import MODELS_DIR
 
 log = logging.getLogger(__name__)
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
 # Loaded models survive Start/Stop cycles, keyed by (model name, device preference).
 _model_cache: dict[tuple[str, str], tuple[object, str]] = {}
@@ -65,11 +66,18 @@ def load_model(name: str, device: str, on_status: Callable[[str], None]):
             return cached
 
         candidates: list[tuple[str, str]] = []
-        if device in ("auto", "cuda") and ctranslate2.get_cuda_device_count() > 0:
+        has_gpu = ctranslate2.get_cuda_device_count() > 0
+        has_cuda_libs = has_gpu and cuda_runtime_available()
+        if device in ("auto", "cuda") and has_cuda_libs:
             candidates.append(("cuda", "float16"))
         if device in ("auto", "cpu"):
             candidates.append(("cpu", "int8"))
         if not candidates:
+            if has_gpu:
+                raise RuntimeError(
+                    "This build has no CUDA libraries (cuBLAS/cuDNN). Choose 'cpu' or 'auto', "
+                    "or use the GPU build of the app."
+                )
             raise RuntimeError("No CUDA GPU detected. Choose 'cpu' or 'auto'.")
 
         errors: list[str] = []

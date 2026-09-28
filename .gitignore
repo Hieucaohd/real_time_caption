@@ -225,3 +225,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Output of RealTimeCaption.exe --self-test
+selftest.txt

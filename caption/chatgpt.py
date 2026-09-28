@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from .paths import PROMPTS_DIR
+
 log = logging.getLogger(__name__)
 
 CDP_URL = "http://localhost:9222"
@@ -31,7 +33,6 @@ CHATGPT_URL = "https://chatgpt.com/"
 # The app's own Chrome tab (marked via window.name), shared by Summarize and the Chat tab so
 # both continue the same ChatGPT conversation.
 APP_TAB = "real-time-caption-summary"
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 CHAT_PROMPT_PATH = PROMPTS_DIR / "chat_with_caption.txt"
 # Summary prompts are versioned in prompts/summarize/ (see prompt_versions.py).
 

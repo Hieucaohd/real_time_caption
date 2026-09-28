@@ -1,0 +1,32 @@
+REAL-TIME CAPTION – HƯỚNG DẪN NHANH
+====================================
+
+Không cần cài Python hay thư viện nào. Hãy giữ nguyên cả thư mục này (RealTimeCaption.exe
+phải nằm cạnh thư mục _internal). Có thể đặt thư mục ở bất kỳ đâu, ví dụ D:\Apps\RealTimeCaption.
+
+1. Mở app: bấm đúp RealTimeCaption.exe.
+   - Nếu Windows hiện "Windows protected your PC": bấm "More info" → "Run anyway".
+     App chưa được ký số nên Windows cảnh báo ở lần đầu.
+
+2. Phụ đề: chọn Source (System audio = âm thanh các app đang phát, Microphone, hoặc
+   Windows Live Captions) rồi bấm Start.
+   - Lần đầu dùng một model Whisper, app tự tải model (small.en khoảng 480 MB) vào thư mục
+     models\ cạnh file .exe, nên cần có Internet. Những lần sau dùng offline được.
+   - Bản CPU: nên chọn Model = base.en hoặc small.en. Bản GPU (card NVIDIA) chạy nhanh hơn nhiều.
+
+3. Các tính năng ChatGPT (Summarize, Chat, New words) cần Google Chrome:
+   - Bấm đúp "Open Chrome for ChatGPT.bat", đăng nhập ChatGPT trong cửa sổ Chrome đó
+     (chỉ lần đầu), và để Chrome mở trong lúc dùng app.
+
+4. Lưu từ mới vào Voca: tab "New words" → dán API key của bạn (Voca → Cài đặt →
+   Ứng dụng kết nối) → Save key.
+
+Dữ liệu của bạn nằm ngay trong thư mục này:
+   settings.json   cài đặt (kể cả Voca API key – đừng chia sẻ file này)
+   prompts\        prompt gửi ChatGPT, sửa được
+   transcripts\    phụ đề, tóm tắt, lịch sử chat, ảnh chụp màn hình
+   models\         model Whisper đã tải
+   caption.log     nhật ký lỗi, gửi kèm khi báo lỗi
+   cache\          bộ nhớ đệm, xoá được bất cứ lúc nào
+Nếu thư mục này không ghi được (ví dụ đặt trong Program Files), dữ liệu sẽ nằm ở
+%LOCALAPPDATA%\RealTimeCaption.

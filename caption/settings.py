@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass, fields
-from pathlib import Path
+
+from .paths import SETTINGS_PATH
 
 log = logging.getLogger(__name__)
-
-SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 
 
 @dataclass
