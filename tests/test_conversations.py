@@ -38,13 +38,18 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertIn("first day", transcript.snapshot(0).read_text(encoding="utf-8"))
         self.assertIn("second day", transcript.snapshot(1).read_text(encoding="utf-8"))
 
-        self.store.add_message(item.id, "user", "You", "What did we discuss?")
+        self.store.add_message(item.id, "user", "You", "Summarize this conversation", kind="summary")
         self.store.add_message(item.id, "bot", "ChatGPT", "Two sessions.", kind="summary")
+        self.store.add_message(item.id, "bot", "ChatGPT", "A newer summary.", kind="summary")
         renamed = self.store.rename(item.id, "Long-running project")
 
         self.assertTrue(renamed.folder.exists())
         self.assertFalse(item.folder.exists())
-        self.assertEqual(self.store.latest_summary(item.id).content, "Two sessions.")
+        self.assertEqual(self.store.latest_summary(item.id).content, "A newer summary.")
+        self.assertEqual(
+            [message.content for message in self.store.summaries(item.id)],
+            ["Two sessions.", "A newer summary."],
+        )
         self.assertTrue(self.store.chat_context_path(item.id).exists())
 
     def test_legacy_import_is_non_destructive_and_idempotent(self) -> None:

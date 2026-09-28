@@ -23,10 +23,15 @@ class Settings:
     overlay_alpha: float = 0.82
     overlay_transparent: bool = False  # text only, no background bar
     overlay_click_through: bool = False  # mouse passes through the overlay
-    chatgpt_new_chat: bool = True  # False = keep sending into the same ChatGPT conversation
-    chatgpt_max_lines: int = 300  # caption lines sent to ChatGPT (newest); 0 = the whole file
+    summary_new_chat: bool = True
+    summary_max_lines: int = 300  # newest caption lines; 0 = the whole transcript
+    chat_max_lines: int = 300
     summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)
-    chatgpt_power: int = -1  # ChatGPT Power slider: -1 = leave as is, 0 Instant, 1 Medium, 2 High
+    chat_prompt: str = ""  # version name in prompts/chat/ ("" = newest)
+    summary_chatgpt_power: int = -1
+    chat_chatgpt_power: int = -1
+    vocab_chatgpt_power: int = -1
+    chat_attach_history: bool = False  # local history is large and normally unnecessary
     chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
     voca_api_key: str = ""  # personal key from Voca → Cài đặt → Ứng dụng kết nối (kept only in settings.json)
     voca_collection_id: str = ""  # "" = the app's default collection in Voca
@@ -43,6 +48,16 @@ class Settings:
         except (OSError, ValueError):
             log.exception("Ignoring unreadable settings file")
             return cls()
+        # One-time migration from the former global ChatGPT settings.  Each tab can
+        # diverge after this file is saved again.
+        old_power = data.get("chatgpt_power", -1)
+        old_lines = data.get("chatgpt_max_lines", 300)
+        data.setdefault("summary_chatgpt_power", old_power)
+        data.setdefault("chat_chatgpt_power", old_power)
+        data.setdefault("vocab_chatgpt_power", old_power)
+        data.setdefault("summary_max_lines", old_lines)
+        data.setdefault("chat_max_lines", old_lines)
+        data.setdefault("summary_new_chat", data.get("chatgpt_new_chat", True))
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
 

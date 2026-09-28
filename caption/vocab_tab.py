@@ -35,13 +35,11 @@ class VocabPanel(ttk.Frame):
         master: tk.Misc,
         settings: Settings,
         get_session_file: Callable[[], ConversationTranscript | None],
-        get_power: Callable[[], int | None],
         run_chatgpt: RunChatGPT,
     ):
         super().__init__(master)
         self.settings = settings
         self._get_session_file = get_session_file
-        self._get_power = get_power
         self._run_chatgpt = run_chatgpt
         self._busy = False
         self._new_conversation = False
@@ -69,6 +67,15 @@ class VocabPanel(ttk.Frame):
         bar = ttk.Frame(self, padding=(0, 2))
         bar.pack(fill="x")
         ttk.Button(bar, text="New ChatGPT chat", command=self.new_conversation).pack(side="left", padx=4)
+        ttk.Label(bar, text="Power").pack(side="left", padx=(10, 4))
+        level = settings.vocab_chatgpt_power
+        level = level if -1 <= level < len(chatgpt.POWER_LEVELS) else -1
+        self.power_var = tk.StringVar(value=self._power_choices()[level + 1])
+        self.power_box = ttk.Combobox(
+            bar, textvariable=self.power_var, values=self._power_choices(), state="readonly", width=15
+        )
+        self.power_box.pack(side="left", padx=(0, 8))
+        self.power_box.bind("<<ComboboxSelected>>", lambda _e: self._save_power())
         self.hint_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.hint_var, foreground="#777777").pack(side="left", padx=8)
 
@@ -107,6 +114,21 @@ class VocabPanel(ttk.Frame):
         else:
             self.hint_var.set("Context sentences come from the selected conversation")
         self.send_btn.configure(state="disabled" if self._busy else "normal")
+
+    @staticmethod
+    def _power_choices() -> list[str]:
+        return ["Keep ChatGPT's", *chatgpt.POWER_LEVELS]
+
+    def _save_power(self) -> None:
+        self.settings.vocab_chatgpt_power = self._power_choices().index(self.power_var.get()) - 1
+
+    def _power(self) -> int | None:
+        self._save_power()
+        level = self.settings.vocab_chatgpt_power
+        return level if 0 <= level < len(chatgpt.POWER_LEVELS) else None
+
+    def persist_settings(self) -> None:
+        self._save_power()
 
     def _save_key(self) -> None:
         self.settings.voca_api_key = self.key_var.get().strip()
@@ -184,7 +206,7 @@ class VocabPanel(ttk.Frame):
         collection_id = self.settings.voca_collection_id
         started = tfile.started if tfile else datetime.now()
         source_title = f"Real-time caption · {started:%Y-%m-%d %H:%M}"
-        new_chat, power = self._new_conversation, self._get_power()
+        new_chat, power = self._new_conversation, self._power()
 
         def job(status: Callable[[str], None]) -> list[vocab.NewWord]:
             answer = chatgpt.ask(prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power)

@@ -48,6 +48,7 @@ Chữ **xám** là phần đang nghe và có thể còn thay đổi. Chữ **tr�
 
 ### Conversation kéo dài qua nhiều ngày
 
+- Activity bar ngoài cùng bên trái mở **Conversations** hoặc **Settings**. Bấm lại biểu tượng đang chọn, hoặc nút `×`, để ẩn sidebar. Các tuỳ chọn Overlay và Always on top nằm trong sidebar Settings.
 - **+ New & start** tạo một conversation mới từ nguồn đang chọn rồi bắt đầu nghe. **Pause** chỉ dừng thu âm; conversation vẫn còn trong danh sách bên trái.
 - Chọn một conversation đã pause rồi bấm **Continue** để ghi nối transcript vào đúng conversation đó. Mỗi đoạn có mốc ngày/giờ nên phân biệt được nội dung của các ngày khác nhau.
 - **Rename** đổi cả tên hiển thị lẫn tên folder vật lý. Tên folder luôn giữ thời điểm tạo và ID ngắn để không trùng nhau.
@@ -64,16 +65,16 @@ Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, 
 - Cần có Chrome mở sẵn với remote debugging ở cổng 9222 và đã đăng nhập ChatGPT. Ví dụ, mở bằng `C:\Users\ADMIN\ai-orchestrator\launch_chrome.bat`.
 - App làm mọi thứ **ở nền**: Chrome không bị kéo lên trước màn hình, và tab mới (nếu cần tạo) cũng được mở ở nền. Chrome chỉ cần đang chạy, có thể nằm khuất sau các cửa sổ khác.
 - App dùng một **tab riêng** để không đụng vào tab ChatGPT mà công cụ khác đang dùng. Tab này được đánh dấu qua `window.name`. Mỗi lần bấm, app đính kèm file `.txt`, điền prompt rồi gửi. Sau đó app chờ ChatGPT trả lời xong (tối đa 10 phút) và lấy câu trả lời dạng markdown về:
-  - Câu trả lời hiện ở tab **ChatGPT summary** trong app. Mỗi câu trả lời mới **thay thế** câu trả lời cũ. Nút **Copy** chép câu trả lời đang hiện vào clipboard.
+  - Câu trả lời hiện ở tab **ChatGPT summary** và được thêm vào **Saved summaries**. Chọn một bản trong danh sách để xem lại; **Copy selected** chép bản đang xem vào clipboard.
   - Câu trả lời được lưu vào SQLite và ghi nối thêm vào `summaries.md` trong folder conversation.
   - App lấy câu trả lời bằng cách bấm nút Copy của ChatGPT nhưng chặn lệnh ghi clipboard của trang, nên clipboard thật của bạn không bị ghi đè. Đây cũng là cách ai-orchestrator làm.
-- **Power** (hàng ChatGPT) chọn "độ thông minh" cho ChatGPT, tức thanh trượt Power trong ô chọn model trên chatgpt.com: **Instant** (nhanh, không suy nghĩ thêm), **Medium**, **High** (suy nghĩ kỹ nhất, chậm hơn và tốn hạn mức sử dụng nhanh hơn). Trước mỗi lần gửi (Summarize hoặc Chat), app đặt thanh trượt về mức đã chọn. Chọn **Keep ChatGPT's** để giữ nguyên mức đang đặt trên ChatGPT.
-- **Send the last N caption lines** (hàng ChatGPT, mặc định 300): chỉ gửi N dòng caption mới nhất cho cả Summarize lẫn Chat, để file gửi đi không quá nặng. `0` nghĩa là gửi cả file. File gốc trong `transcripts/` vẫn đầy đủ; app tạo một bản rút gọn trong thư mục tạm (`%TEMP%\real_time_caption\…_last300.txt`) rồi gửi bản đó. Đầu bản rút gọn có ghi chú "the last N of M caption lines" để ChatGPT biết đây chỉ là phần cuối.
-- Ô **ChatGPT → New chat for each Summarize** (mặc định bật) quyết định việc tạo chat mới:
+- Tab Summary có activity bar con: **History** mở danh sách các summary đã lưu; **Settings** mở Power, giới hạn số dòng, lựa chọn prompt và các nút quản lý prompt. Sidebar con cũng có thể ẩn bằng nút `×` hoặc bấm lại biểu tượng.
+- Mỗi tab **ChatGPT summary**, **Chat**, **New words** có **Power riêng**: **Instant**, **Medium**, **High**, hoặc **Keep ChatGPT's**. Summary và Chat cũng có giới hạn **Send last N lines riêng**; `0` nghĩa là gửi toàn bộ transcript.
+- Ô **New ChatGPT thread for each summary** quyết định việc tạo chat mới:
   - Bật: mỗi lần gửi là một cuộc trò chuyện mới.
   - Tắt: gửi tiếp vào cuộc trò chuyện đang mở trong tab riêng. Nếu ChatGPT còn đang trả lời tin trước, app sẽ chờ nó trả lời xong rồi mới gửi. Nếu tab riêng chưa có (lần đầu, hoặc bạn đã đóng tab), app vẫn tạo chat mới.
 - **Prompt tóm tắt có nhiều phiên bản**, nằm trong [prompts/summarize/](prompts/summarize/), mỗi phiên bản là một file `v<số> - <tên>.txt`:
-  - Hàng **Summary prompt** trong cửa sổ chính cho chọn phiên bản dùng khi bấm Summarize. Lựa chọn được nhớ cho lần sau.
+  - Phần **Summary settings** cho chọn phiên bản dùng khi bấm Summarize. Lựa chọn được nhớ cho lần sau.
   - **Edit / new version…** mở phiên bản đang chọn trong một cửa sổ sửa. **Save as new version** lưu nội dung đã sửa thành phiên bản tiếp theo (ví dụ `v2 - ngắn gọn`) và chọn luôn phiên bản đó. Phiên bản cũ không bao giờ bị ghi đè, nên luôn chọn lại được.
   - Nút 📂 mở thư mục prompt. Bạn cũng có thể tự thêm hoặc sửa file trong đó; danh sách được đọc lại mỗi khi mở ô chọn.
   - Các biến có thể dùng trong prompt: `{file_name}`, `{source}`, `{started}`, `{now}`.
@@ -84,7 +85,8 @@ Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, 
 Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm bên phải (xanh), câu trả lời của ChatGPT nằm bên trái (xám, có định dạng markdown).
 
 - Gõ câu hỏi vào ô dưới cùng rồi bấm **Send ➤** hoặc Enter. Shift+Enter để xuống dòng.
-- Khi ô **Attach this conversation's context** được chọn, mỗi tin nhắn sẽ đính kèm transcript (tự ghép các part) và lịch sử ChatGPT của conversation đang chọn. Câu bạn gõ được bọc bởi prompt trong [prompts/chat_with_caption.txt](prompts/chat_with_caption.txt), sửa được; biến `{message}` là chỗ đặt câu bạn gõ. Bỏ chọn ô này thì chỉ gửi đúng câu bạn gõ.
+- **Chat prompt** cho chọn prompt mặc định trong [prompts/chat/](prompts/chat/). Bạn chỉ cần nhập câu hỏi; app chèn nó vào biến `{message}` của prompt đang chọn. **Edit / new version…** tạo phiên bản mới mà không ghi đè phiên bản cũ, còn nút 📁 mở thư mục prompt. Có thể dùng thêm `{file_name}`, `{source}`, `{started}`, `{now}`.
+- **Attach transcript** gửi transcript đã tự ghép các part. Prompt vẫn được áp dụng khi không đính kèm transcript. **Attach saved chat history** là lựa chọn riêng và mặc định tắt để phản hồi nhanh hơn; chỉ bật khi thực sự cần gửi lại lịch sử cục bộ cho ChatGPT.
 - Chat và Summarize **dùng chung một cuộc trò chuyện ChatGPT của conversation đang chọn**, nên bạn hỏi tiếp dựa trên bản tóm tắt được mà không lẫn sang conversation khác. Mỗi lần Summarize, yêu cầu và câu trả lời cũng hiện trong lịch sử Chat cục bộ.
 - **New ChatGPT thread**: tin nhắn tiếp theo (kể cả Summarize) mở một thread mới ở ChatGPT, nhưng lịch sử cục bộ trong app không bị xoá.
 - **Attach a screenshot of the apps behind** (mặc định bật): mỗi tin nhắn chat gửi kèm một ảnh chụp màn hình nơi app đang nằm, **không có cửa sổ của app này** (cả cửa sổ chính lẫn thanh phụ đề). App dùng `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` của Windows 10 2004+ để ẩn cửa sổ của mình khỏi ảnh chụp chỉ trong khoảng 0,2 giây lúc chụp. Trên màn hình bạn không thấy gì thay đổi, và những lúc khác vẫn chụp hay chia sẻ màn hình app bình thường. Ảnh được thu về tối đa rộng 1920px, lưu trong `screenshots/` của conversation đang chọn, và hiện dạng thu nhỏ trong bong bóng tin nhắn.

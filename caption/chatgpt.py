@@ -24,8 +24,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from .paths import PROMPTS_DIR
-
 log = logging.getLogger(__name__)
 
 CDP_URL = "http://localhost:9222"
@@ -33,8 +31,7 @@ CHATGPT_URL = "https://chatgpt.com/"
 # The app's own Chrome tab (marked via window.name), shared by Summarize and the Chat tab so
 # both continue the same ChatGPT conversation.
 APP_TAB = "real-time-caption-summary"
-CHAT_PROMPT_PATH = PROMPTS_DIR / "chat_with_caption.txt"
-# Summary prompts are versioned in prompts/summarize/ (see prompt_versions.py).
+# Summary and Chat prompts are versioned in their own folders (see prompt_versions.py).
 
 COMPOSER = (
     "#prompt-textarea, "
@@ -119,7 +116,11 @@ class ChatGPTError(RuntimeError):
 
 
 def build_prompt(
-    file_path: Path, source: str, started: datetime, template_path: Path, message: str = ""
+    file_path: Path | None,
+    source: str,
+    started: datetime | None,
+    template_path: Path,
+    message: str = "",
 ) -> str:
     """Fill ``{file_name}``, ``{source}``, ``{started}``, ``{now}`` and ``{message}`` in an
     editable prompt file."""
@@ -128,9 +129,9 @@ def build_prompt(
     except OSError as exc:
         raise ChatGPTError(f"Could not read the prompt file {template_path}:\n{exc}") from exc
     values = {
-        "file_name": file_path.name,
+        "file_name": file_path.name if file_path else "",
         "source": source,
-        "started": f"{started:%Y-%m-%d %H:%M:%S}",
+        "started": f"{started:%Y-%m-%d %H:%M:%S}" if started else "",
         "now": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
         "message": message.strip(),
     }

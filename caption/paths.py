@@ -55,6 +55,14 @@ def install_default_prompts() -> None:
     source = BUNDLE_DIR / "prompts"
     if source.resolve() == PROMPTS_DIR.resolve() or not source.is_dir():
         return
+    # Preserve the editable single-file Chat prompt used by older releases.  Giving
+    # it the new default-version path also prevents the bundled default from
+    # overwriting it below.
+    legacy_chat = PROMPTS_DIR / "chat_with_caption.txt"
+    chat_dir = PROMPTS_DIR / "chat"
+    if legacy_chat.is_file() and not any(chat_dir.glob("*.txt")):
+        chat_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy_chat, chat_dir / "v1 - default.txt")
     for src in source.rglob("*.txt"):
         dst = PROMPTS_DIR / src.relative_to(source)
         if not dst.exists():

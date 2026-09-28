@@ -254,6 +254,16 @@ class ConversationStore:
             ).fetchone()
         return ChatMessage(**dict(row)) if row else None
 
+    def summaries(self, conversation_id: str) -> list[ChatMessage]:
+        """All saved ChatGPT summary answers for a conversation, oldest first."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM chat_messages WHERE conversation_id=? AND kind='summary' "
+                "AND role='bot' ORDER BY id",
+                (conversation_id,),
+            ).fetchall()
+        return [ChatMessage(**dict(row)) for row in rows]
+
     def chat_context_path(self, conversation_id: str) -> Path | None:
         messages = self.messages(conversation_id)
         if not messages:

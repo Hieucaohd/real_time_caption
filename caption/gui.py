@@ -16,7 +16,7 @@ from typing import Callable
 from . import chatgpt, livecaptions, markdown_html, prompt_versions, screenshot
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
-from .conversations import Conversation, ConversationStore, ConversationTranscript
+from .conversations import ChatMessage, Conversation, ConversationStore, ConversationTranscript
 from .vocab_tab import VocabPanel
 from .livecaptions import LiveCaptionsReader
 from .overlay import CaptionOverlay
@@ -106,105 +106,44 @@ class App:
         self.start_btn = ttk.Button(top, text="▶ Start new", command=self.toggle)
         self.start_btn.grid(row=1, column=5, sticky="ew", **pad)
 
-        ttk.Label(top, text="Overlay").grid(row=2, column=0, sticky="w", **pad)
-        overlay_opts = ttk.Frame(top)
-        overlay_opts.grid(row=2, column=1, columnspan=5, sticky="w")
-        self.overlay_var = tk.BooleanVar(value=self.settings.show_overlay)
-        ttk.Checkbutton(
-            overlay_opts, text="Show", variable=self.overlay_var, command=self._toggle_overlay
-        ).pack(side="left", **pad)
-        self.transparent_var = tk.BooleanVar(value=self.settings.overlay_transparent)
-        ttk.Checkbutton(
-            overlay_opts,
-            text="Transparent (text only)",
-            variable=self.transparent_var,
-            command=lambda: self.overlay.set_transparent(self.transparent_var.get()),
-        ).pack(side="left", **pad)
-        self.click_through_var = tk.BooleanVar(value=self.settings.overlay_click_through)
-        ttk.Checkbutton(
-            overlay_opts,
-            text="Click-through (lock position)",
-            variable=self.click_through_var,
-            command=lambda: self._set_click_through(self.click_through_var.get()),
-        ).pack(side="left", **pad)
-
-        ttk.Label(top, text="ChatGPT").grid(row=3, column=0, sticky="w", **pad)
-        chatgpt_opts = ttk.Frame(top)
-        chatgpt_opts.grid(row=3, column=1, columnspan=5, sticky="w")
-        ttk.Label(chatgpt_opts, text="Power").pack(side="left", padx=(6, 4))
-        level = self._chatgpt_power()
-        self.power_var = tk.StringVar(value=self._power_choices()[0 if level is None else level + 1])
-        power_box = ttk.Combobox(
-            chatgpt_opts, textvariable=self.power_var, values=self._power_choices(), state="readonly", width=16
-        )
-        power_box.pack(side="left", padx=(0, 12))
-        power_box.bind(
-            "<<ComboboxSelected>>",
-            lambda _e: setattr(self.settings, "chatgpt_power", self._power_choices().index(self.power_var.get()) - 1),
-        )
-        self.new_chat_var = tk.BooleanVar(value=self.settings.chatgpt_new_chat)
-        ttk.Checkbutton(
-            chatgpt_opts,
-            text="New chat for each Summarize",
-            variable=self.new_chat_var,
-            command=lambda: setattr(self.settings, "chatgpt_new_chat", self.new_chat_var.get()),
-        ).pack(side="left", **pad)
-        ttk.Label(chatgpt_opts, text="Send the last").pack(side="left", padx=(18, 4))
-        self.max_lines_var = tk.StringVar(value=str(self.settings.chatgpt_max_lines))
-        ttk.Spinbox(
-            chatgpt_opts, from_=0, to=100_000, increment=50, width=7, textvariable=self.max_lines_var
-        ).pack(side="left")
-        ttk.Label(chatgpt_opts, text="caption lines (0 = whole file)").pack(side="left", padx=4)
-
-        ttk.Label(top, text="Summary prompt").grid(row=4, column=0, sticky="w", **pad)
-        prompt_opts = ttk.Frame(top)
-        prompt_opts.grid(row=4, column=1, columnspan=5, sticky="w")
-        self.prompt_var = tk.StringVar(value=prompt_versions.resolve(self.settings.summary_prompt) or "")
-        self.prompt_box = ttk.Combobox(
-            prompt_opts, textvariable=self.prompt_var, state="readonly", width=40,
-            postcommand=self._refresh_prompt_versions,
-        )
-        self.prompt_box.pack(side="left", **pad)
-        self.prompt_box.bind(
-            "<<ComboboxSelected>>", lambda _e: setattr(self.settings, "summary_prompt", self.prompt_var.get())
-        )
-        ttk.Button(prompt_opts, text="Edit / new version…", command=self.edit_summary_prompt).pack(side="left", **pad)
-        ttk.Button(
-            prompt_opts, text="📂", width=3, command=lambda: self._open_folder(prompt_versions.SUMMARY_DIR)
-        ).pack(side="left")
-        self._refresh_prompt_versions()
-
-        ttk.Label(top, text="Window").grid(row=5, column=0, sticky="w", **pad)
-        self.on_top_var = tk.BooleanVar(value=self.settings.always_on_top)
-        ttk.Checkbutton(
-            top,
-            text="Always on top (stay visible when you click other apps)",
-            variable=self.on_top_var,
-            command=lambda: self._set_always_on_top(self.on_top_var.get()),
-        ).grid(row=5, column=1, columnspan=5, sticky="w", **pad)
-
         status = ttk.Frame(self.root, padding=(8, 0))
         status.pack(fill="x")
         self.level = ttk.Progressbar(status, maximum=100, length=140)
         self.level.pack(side="left", padx=6)
-        self.summarize_btn = ttk.Button(
-            status, text="🤖 Summarize (ChatGPT)", command=self.summarize_with_chatgpt, state="disabled"
-        )
-        self.summarize_btn.pack(side="right", padx=6)
         ttk.Button(status, text="⭳ Export text…", command=self.export_transcript).pack(side="right", padx=6)
         ttk.Button(status, text="📂 Saved files", command=self.open_transcripts_folder).pack(side="right", padx=6)
         ttk.Button(status, text="Clear", command=self.clear_transcript).pack(side="right", padx=6)
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(status, textvariable=self.status_var).pack(side="left", padx=6)
 
-        workspace = ttk.Panedwindow(self.root, orient="horizontal")
-        workspace.pack(fill="both", expand=True, padx=12, pady=8)
+        workspace = ttk.Frame(self.root)
+        workspace.pack(fill="both", expand=True, padx=(6, 10), pady=8)
 
-        conversations = ttk.Frame(workspace, width=250)
-        conversations.pack_propagate(False)
-        ttk.Label(conversations, text="Conversations", font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", padx=4, pady=(4, 6)
+        activity = ttk.Frame(workspace, width=58, padding=(2, 4))
+        activity.pack(side="left", fill="y")
+        activity.pack_propagate(False)
+        ttk.Button(
+            activity, text="☰\nChats", width=7, command=lambda: self._show_sidebar("conversations")
+        ).pack(fill="x", pady=2)
+        ttk.Button(
+            activity, text="⚙\nSettings", width=7, command=lambda: self._show_sidebar("settings")
+        ).pack(fill="x", pady=2)
+
+        self.sidebar = ttk.Frame(workspace, width=270, padding=(4, 0))
+        self.sidebar.pack(side="left", fill="y", padx=(0, 6))
+        self.sidebar.pack_propagate(False)
+        sidebar_header = ttk.Frame(self.sidebar)
+        sidebar_header.pack(fill="x", pady=(2, 5))
+        self.sidebar_title = tk.StringVar(value="Conversations")
+        ttk.Label(sidebar_header, textvariable=self.sidebar_title, font=("Segoe UI", 11, "bold")).pack(
+            side="left", padx=4
         )
+        ttk.Button(sidebar_header, text="×", width=3, command=self._hide_sidebar).pack(side="right")
+        sidebar_content = ttk.Frame(self.sidebar)
+        sidebar_content.pack(fill="both", expand=True)
+
+        conversations = ttk.Frame(sidebar_content)
+        conversations.pack_propagate(False)
         conversation_actions = ttk.Frame(conversations)
         conversation_actions.pack(fill="x", padx=2, pady=(0, 6))
         self.new_conversation_btn = ttk.Button(
@@ -224,10 +163,46 @@ class App:
         ttk.Button(conversations, text="Open conversation folder", command=self.open_conversation_folder).pack(
             fill="x", padx=4, pady=6
         )
-        workspace.add(conversations, weight=0)
 
-        self.tabs = ttk.Notebook(workspace)
-        workspace.add(self.tabs, weight=1)
+        settings_panel = ttk.Frame(sidebar_content, padding=(8, 4))
+        ttk.Label(settings_panel, text="Overlay", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(2, 5))
+        self.overlay_var = tk.BooleanVar(value=self.settings.show_overlay)
+        ttk.Checkbutton(
+            settings_panel, text="Show caption overlay", variable=self.overlay_var, command=self._toggle_overlay
+        ).pack(anchor="w", pady=3)
+        self.transparent_var = tk.BooleanVar(value=self.settings.overlay_transparent)
+        ttk.Checkbutton(
+            settings_panel,
+            text="Transparent (text only)",
+            variable=self.transparent_var,
+            command=lambda: self.overlay.set_transparent(self.transparent_var.get()),
+        ).pack(anchor="w", pady=3)
+        self.click_through_var = tk.BooleanVar(value=self.settings.overlay_click_through)
+        ttk.Checkbutton(
+            settings_panel,
+            text="Click-through (lock position)",
+            variable=self.click_through_var,
+            command=lambda: self._set_click_through(self.click_through_var.get()),
+        ).pack(anchor="w", pady=3)
+        ttk.Separator(settings_panel).pack(fill="x", pady=10)
+        ttk.Label(settings_panel, text="Window", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(2, 5))
+        self.on_top_var = tk.BooleanVar(value=self.settings.always_on_top)
+        ttk.Checkbutton(
+            settings_panel,
+            text="Always on top",
+            variable=self.on_top_var,
+            command=lambda: self._set_always_on_top(self.on_top_var.get()),
+        ).pack(anchor="w", pady=3)
+
+        self._sidebar_pages = {"conversations": conversations, "settings": settings_panel}
+        self._sidebar_name: str | None = None
+
+        main_area = ttk.Frame(workspace)
+        main_area.pack(side="left", fill="both", expand=True)
+        self._main_area = main_area
+        self.tabs = ttk.Notebook(main_area)
+        self.tabs.pack(fill="both", expand=True)
+        self._show_sidebar("conversations")
 
         self.transcript = ScrolledText(
             self.tabs, wrap="word", font=("Segoe UI", 11), padx=8, pady=6, state="disabled"
@@ -237,23 +212,129 @@ class App:
         self.tabs.add(self.transcript, text="Transcript")
 
         summary_tab = ttk.Frame(self.tabs)
-        summary_bar = ttk.Frame(summary_tab, padding=(0, 4))
-        summary_bar.pack(fill="x")
-        ttk.Button(summary_bar, text="Copy", command=self.copy_latest_summary).pack(side="left", padx=4)
-        ttk.Button(summary_bar, text="Clear", command=self.clear_summaries).pack(side="left", padx=4)
-        self.summary = markdown_html.make_view(summary_tab)
-        self.summary.pack(fill="both", expand=True)
+        summary_actions = ttk.Frame(summary_tab, padding=(4, 4))
+        summary_actions.pack(fill="x")
+        self.summarize_btn = ttk.Button(
+            summary_actions,
+            text="🤖 Summarize (ChatGPT)",
+            command=self.summarize_with_chatgpt,
+            state="disabled",
+        )
+        self.summarize_btn.pack(side="left", padx=4)
+        ttk.Button(summary_actions, text="Copy selected", command=self.copy_latest_summary).pack(side="right", padx=4)
+        ttk.Button(summary_actions, text="Hide content", command=self.clear_summaries).pack(side="right", padx=4)
+
+        summary_body = ttk.Frame(summary_tab)
+        summary_body.pack(fill="both", expand=True)
+        summary_activity = ttk.Frame(summary_body, width=58, padding=(2, 3))
+        summary_activity.pack(side="left", fill="y")
+        summary_activity.pack_propagate(False)
+        ttk.Button(
+            summary_activity, text="☷\nHistory", width=7, command=lambda: self._show_summary_sidebar("history")
+        ).pack(fill="x", pady=2)
+        ttk.Button(
+            summary_activity, text="⚙\nSettings", width=7, command=lambda: self._show_summary_sidebar("settings")
+        ).pack(fill="x", pady=2)
+
+        self.summary_sidebar = ttk.Frame(summary_body, width=290, padding=(4, 0))
+        self.summary_sidebar.pack(side="left", fill="y", padx=(0, 5))
+        self.summary_sidebar.pack_propagate(False)
+        summary_header = ttk.Frame(self.summary_sidebar)
+        summary_header.pack(fill="x", pady=(2, 5))
+        self.summary_sidebar_title = tk.StringVar(value="Saved summaries")
+        ttk.Label(
+            summary_header, textvariable=self.summary_sidebar_title, font=("Segoe UI", 10, "bold")
+        ).pack(side="left", padx=4)
+        ttk.Button(summary_header, text="×", width=3, command=self._hide_summary_sidebar).pack(side="right")
+        summary_side_content = ttk.Frame(self.summary_sidebar)
+        summary_side_content.pack(fill="both", expand=True)
+
+        summary_history = ttk.Frame(summary_side_content)
+        self.summary_tree = ttk.Treeview(
+            summary_history,
+            columns=("created",),
+            show="tree headings",
+            selectmode="browse",
+        )
+        self.summary_tree.heading("#0", text="Preview")
+        self.summary_tree.heading("created", text="Created")
+        self.summary_tree.column("#0", width=150, minwidth=100)
+        self.summary_tree.column("created", width=110, minwidth=95, anchor="center")
+        self.summary_tree.pack(fill="both", expand=True, pady=(0, 4))
+        self.summary_tree.bind("<<TreeviewSelect>>", self._summary_selected)
+
+        summary_settings = ttk.Frame(summary_side_content, padding=(6, 3))
+        ttk.Label(summary_settings, text="ChatGPT Power").pack(anchor="w", pady=(2, 2))
+        summary_level = self.settings.summary_chatgpt_power
+        summary_level = summary_level if -1 <= summary_level < len(chatgpt.POWER_LEVELS) else -1
+        self.summary_power_var = tk.StringVar(value=self._power_choices()[summary_level + 1])
+        self.summary_power_box = ttk.Combobox(
+            summary_settings,
+            textvariable=self.summary_power_var,
+            values=self._power_choices(),
+            state="readonly",
+        )
+        self.summary_power_box.pack(fill="x", pady=(0, 8))
+        self.summary_power_box.bind("<<ComboboxSelected>>", lambda _e: self._save_summary_power())
+        ttk.Label(summary_settings, text="Send the last caption lines (0 = all)").pack(anchor="w", pady=(2, 2))
+        self.summary_max_lines_var = tk.StringVar(value=str(self.settings.summary_max_lines))
+        ttk.Spinbox(
+            summary_settings,
+            from_=0,
+            to=100_000,
+            increment=50,
+            textvariable=self.summary_max_lines_var,
+        ).pack(fill="x", pady=(0, 8))
+        self.new_chat_var = tk.BooleanVar(value=self.settings.summary_new_chat)
+        ttk.Checkbutton(
+            summary_settings,
+            text="New ChatGPT thread for each summary",
+            variable=self.new_chat_var,
+            command=lambda: setattr(self.settings, "summary_new_chat", self.new_chat_var.get()),
+        ).pack(anchor="w", pady=(0, 10))
+        ttk.Separator(summary_settings).pack(fill="x", pady=5)
+        ttk.Label(summary_settings, text="Summary prompt").pack(anchor="w", pady=(4, 2))
+        self.prompt_var = tk.StringVar(value=prompt_versions.resolve(self.settings.summary_prompt) or "")
+        self.prompt_box = ttk.Combobox(
+            summary_settings,
+            textvariable=self.prompt_var,
+            state="readonly",
+            postcommand=self._refresh_prompt_versions,
+        )
+        self.prompt_box.pack(fill="x", pady=(0, 5))
+        self.prompt_box.bind(
+            "<<ComboboxSelected>>", lambda _e: setattr(self.settings, "summary_prompt", self.prompt_var.get())
+        )
+        prompt_actions = ttk.Frame(summary_settings)
+        prompt_actions.pack(fill="x")
+        ttk.Button(prompt_actions, text="Edit / new version…", command=self.edit_summary_prompt).pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Button(
+            prompt_actions,
+            text="📂",
+            width=3,
+            command=lambda: self._open_folder(prompt_versions.SUMMARY_DIR),
+        ).pack(side="left", padx=(4, 0))
+        self._refresh_prompt_versions()
+
+        self._summary_sidebar_pages = {"history": summary_history, "settings": summary_settings}
+        self._summary_sidebar_name: str | None = None
+        self.summary = markdown_html.make_view(summary_body)
+        self.summary.pack(side="left", fill="both", expand=True)
+        self._summary_main = self.summary
+        self._show_summary_sidebar("history")
         self.tabs.add(summary_tab, text="ChatGPT summary")
         self._summary_tab = summary_tab
         self._latest_summary = ""
+        self._summary_messages: dict[str, ChatMessage] = {}
 
         self.chat = ChatPanel(
             self.tabs,
             get_session_file=lambda: self.session_file,
             get_conversation_id=self._conversation_id,
             store=self.store,
-            get_max_lines=self._chatgpt_max_lines,
-            get_power=self._chatgpt_power,
+            settings=self.settings,
             capture_screen=self._capture_behind_app,
             screenshot_enabled=self.settings.chat_screenshot,
             on_screenshot_toggled=lambda on: setattr(self.settings, "chat_screenshot", on),
@@ -265,18 +346,50 @@ class App:
             self.tabs,
             settings=self.settings,
             get_session_file=lambda: self.session_file,
-            get_power=self._chatgpt_power,
             run_chatgpt=self._run_chatgpt,
         )
         self.tabs.add(self.vocab, text="New words")
 
         def focus_entry(_event) -> None:
             selected = self.tabs.select()
+            if selected == str(self._summary_tab) and self.sidebar.winfo_manager():
+                self._hide_sidebar()
             for panel in (self.chat, self.vocab):
                 if selected == str(panel):
                     panel.entry.focus_set()
 
         self.tabs.bind("<<NotebookTabChanged>>", focus_entry)
+
+    def _show_sidebar(self, name: str) -> None:
+        if self._sidebar_name == name and self.sidebar.winfo_manager():
+            self._hide_sidebar()
+            return
+        for page in self._sidebar_pages.values():
+            page.pack_forget()
+        page = self._sidebar_pages[name]
+        page.pack(fill="both", expand=True)
+        self.sidebar_title.set("Conversations" if name == "conversations" else "Settings")
+        if not self.sidebar.winfo_manager():
+            self.sidebar.pack(side="left", fill="y", padx=(0, 6), before=self._main_area)
+        self._sidebar_name = name
+
+    def _hide_sidebar(self) -> None:
+        self.sidebar.pack_forget()
+
+    def _show_summary_sidebar(self, name: str) -> None:
+        if self._summary_sidebar_name == name and self.summary_sidebar.winfo_manager():
+            self._hide_summary_sidebar()
+            return
+        for page in self._summary_sidebar_pages.values():
+            page.pack_forget()
+        self._summary_sidebar_pages[name].pack(fill="both", expand=True)
+        self.summary_sidebar_title.set("Saved summaries" if name == "history" else "Summary settings")
+        if not self.summary_sidebar.winfo_manager():
+            self.summary_sidebar.pack(side="left", fill="y", padx=(0, 5), before=self._summary_main)
+        self._summary_sidebar_name = name
+
+    def _hide_summary_sidebar(self) -> None:
+        self.summary_sidebar.pack_forget()
 
     # ---------------------------------------------------------- conversations
 
@@ -325,16 +438,57 @@ class App:
             self.device_var.set(conversation.source)
         self._show_saved_transcript()
         self.chat.load_conversation()
-        latest = self.store.latest_summary(conversation.id)
-        if latest:
-            self._latest_summary = latest.content
-            meta = markdown_html.plain_to_html(f"Saved · {conversation.title}")
-            markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(latest.content))
-        else:
-            self._latest_summary = ""
-            markdown_html.show(self.summary, "")
+        self._refresh_summary_history(select_latest=True)
         self._set_running(self.transcriber is not None)
         self.status_var.set(f"Selected: {conversation.title}")
+
+    def _refresh_summary_history(self, select_latest: bool = False, select_id: int | None = None) -> None:
+        """Reload the selected conversation's saved summaries from SQLite."""
+        for item in self.summary_tree.get_children():
+            self.summary_tree.delete(item)
+        self._summary_messages = {}
+        conversation_id = self._conversation_id()
+        summaries = self.store.summaries(conversation_id) if conversation_id else []
+        for index, message in reversed(list(enumerate(summaries, start=1))):
+            item_id = str(message.id)
+            self._summary_messages[item_id] = message
+            preview = " ".join(message.content.split())
+            if len(preview) > 52:
+                preview = preview[:49].rstrip() + "…"
+            try:
+                created = datetime.fromisoformat(message.created_at).strftime("%m-%d %H:%M")
+            except ValueError:
+                created = message.created_at
+            self.summary_tree.insert(
+                "", "end", iid=item_id, text=preview or f"Summary {index}", values=(created,)
+            )
+
+        wanted = str(select_id) if select_id is not None else (str(summaries[-1].id) if summaries and select_latest else "")
+        if wanted and self.summary_tree.exists(wanted):
+            self.summary_tree.selection_set(wanted)
+            self.summary_tree.focus(wanted)
+            self.summary_tree.see(wanted)
+            self._show_summary_message(self._summary_messages[wanted])
+        elif not summaries:
+            self._latest_summary = ""
+            markdown_html.show(self.summary, "<div class='meta'>No saved summaries for this conversation.</div>")
+
+    def _summary_selected(self, _event=None) -> None:
+        selected = self.summary_tree.selection()
+        if not selected:
+            return
+        message = self._summary_messages.get(selected[0])
+        if message is not None:
+            self._show_summary_message(message)
+
+    def _show_summary_message(self, message: ChatMessage) -> None:
+        self._latest_summary = message.content
+        try:
+            created = datetime.fromisoformat(message.created_at).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            created = message.created_at
+        meta = markdown_html.plain_to_html(f"Saved {created}")
+        markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(message.content))
 
     def _show_saved_transcript(self) -> None:
         content = self.session_file.read_text() if self.session_file else ""
@@ -602,9 +756,13 @@ class App:
     def _power_choices() -> list[str]:
         return ["Keep ChatGPT's", *chatgpt.POWER_LEVELS]
 
-    def _chatgpt_power(self) -> int | None:
-        """Power level to set before sending, or None to leave ChatGPT's slider alone."""
-        level = self.settings.chatgpt_power
+    def _save_summary_power(self) -> None:
+        self.settings.summary_chatgpt_power = self._power_choices().index(self.summary_power_var.get()) - 1
+
+    def _summary_power(self) -> int | None:
+        """Summary tab's Power level, or None to leave ChatGPT's slider alone."""
+        self._save_summary_power()
+        level = self.settings.summary_chatgpt_power
         return level if 0 <= level < len(chatgpt.POWER_LEVELS) else None
 
     def _refresh_prompt_versions(self) -> None:
@@ -628,14 +786,14 @@ class App:
 
         PromptEditor(self.root, base, saved)
 
-    def _chatgpt_max_lines(self) -> int:
-        """Caption lines to send (newest first kept); 0 = whole file. Invalid input keeps the last value."""
+    def _summary_max_lines(self) -> int:
+        """Summary tab's caption-line limit; 0 means the whole transcript."""
         try:
-            value = max(0, int(self.max_lines_var.get().strip()))
+            value = max(0, int(self.summary_max_lines_var.get().strip()))
         except ValueError:
-            value = self.settings.chatgpt_max_lines
-        self.settings.chatgpt_max_lines = value
-        self.max_lines_var.set(str(value))
+            value = self.settings.summary_max_lines
+        self.settings.summary_max_lines = value
+        self.summary_max_lines_var.set(str(value))
         return value
 
     def summarize_with_chatgpt(self) -> None:
@@ -647,7 +805,7 @@ class App:
             messagebox.showinfo("Summarize", "No captions have been saved for this session yet.")
             return
         try:
-            upload = tfile.snapshot(self._chatgpt_max_lines())
+            upload = tfile.snapshot(self._summary_max_lines())
             version = prompt_versions.resolve(self.prompt_var.get())
             if version is None:
                 raise chatgpt.ChatGPTError(f"No summary prompt found in {prompt_versions.SUMMARY_DIR}.")
@@ -657,7 +815,7 @@ class App:
             return
         # Same ChatGPT conversation as the Chat tab; "New conversation" there also applies here.
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
-        power = self._chatgpt_power()
+        power = self._summary_power()
         self._run_chatgpt(
             lambda status: chatgpt.ask(
                 prompt,
@@ -673,16 +831,12 @@ class App:
 
     def _summary_received(self, tfile: ConversationTranscript, answer: str, started_new_chat: bool) -> None:
         self.chat.add_summary_exchange(tfile.path.name, answer, started_new_chat)
-        self._show_summary(tfile, answer)
         saved = self._save_summary(tfile, answer)
+        latest = self.store.latest_summary(tfile.conversation_id)
+        if latest and tfile.conversation_id == self._conversation_id():
+            self._refresh_summary_history(select_id=latest.id)
+            self.tabs.select(self._summary_tab)
         self.status_var.set("ChatGPT: summary received" + (f" — saved to {saved.name}" if saved else ""))
-
-    def _show_summary(self, tfile: ConversationTranscript, answer: str) -> None:
-        """Replace the displayed summary with the new one (history stays in the .summary.md file)."""
-        self._latest_summary = answer
-        meta = markdown_html.plain_to_html(f"Received {datetime.now():%H:%M:%S} · {tfile.path.name}")
-        markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(answer))
-        self.tabs.select(self._summary_tab)
 
     def _save_summary(self, tfile: ConversationTranscript, answer: str):
         path = tfile.folder / "summaries.md"
@@ -703,6 +857,7 @@ class App:
 
     def clear_summaries(self) -> None:
         self._latest_summary = ""
+        self.summary_tree.selection_remove(*self.summary_tree.selection())
         markdown_html.show(self.summary, "")
 
     # ------------------------------------------------------------ event pump
@@ -823,7 +978,11 @@ class App:
         os.startfile(folder)
 
     def on_close(self) -> None:
-        self._chatgpt_max_lines()  # store the spinbox value in settings
+        self._summary_max_lines()
+        self._save_summary_power()
+        self.settings.summary_new_chat = self.new_chat_var.get()
+        self.chat.persist_settings()
+        self.vocab.persist_settings()
         self.stop()
         self._closing = True
         for tfile in list(self._open_files):
