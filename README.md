@@ -61,6 +61,22 @@ Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm b�
 - Mỗi lúc chỉ chạy một yêu cầu ChatGPT (Chat hoặc Summarize). Trong lúc chờ, các nút gửi bị khoá.
 - Nội dung cuộc chat được lưu vào `transcripts/chat_<ngày-giờ>.md`.
 
+### Lưu từ mới vào Voca
+
+Tab **New words** dùng để lưu những từ tiếng Anh bạn chưa biết khi xem video vào [Voca](https://voca-zeta-five.vercel.app/), app học từ vựng của bạn.
+
+1. **Lần đầu**: trong Voca vào **Cài đặt → Ứng dụng kết nối**, tạo một ứng dụng và copy API key (chỉ hiện một lần). Dán key vào ô **Voca API key** rồi bấm **Save key**. Key chỉ được lưu trong `settings.json` trên máy bạn; file này không được đưa vào git.
+2. Chọn bộ từ đích ở ô **Save to**, hoặc để **Default** để dùng bộ từ mặc định đã chọn trong Voca (nếu không chọn thì là Hộp thư từ mới). Nút ↻ tải lại danh sách bộ từ.
+3. Dán một hoặc nhiều từ/cụm từ (mỗi dòng một từ) rồi bấm **Translate & save ➤** hoặc Enter.
+
+App sẽ:
+- **Tìm câu phụ đề gần nhất chứa từ** trong file caption đang chạy, khớp cả dạng biến đổi (`settle` tìm ra "It settles about here.") và cụm từ. Câu đó được dùng làm ngữ cảnh.
+- Nhờ ChatGPT dịch cả danh sách trong một lần: nghĩa tiếng Việt đúng với câu, định nghĩa tiếng Anh, loại từ, phiên âm IPA, bản dịch câu. ChatGPT trả về JSON theo prompt trong [prompts/vocabulary.txt](prompts/vocabulary.txt). Bạn sửa được prompt này, nhưng cần giữ yêu cầu trả về mảng JSON với các trường như trong file. Tab dùng một cuộc trò chuyện ChatGPT riêng (tab Chrome `real-time-caption-vocab`) để không làm rối cuộc trò chuyện tóm tắt/chat. Nút **New ChatGPT chat** bắt đầu lại cuộc trò chuyện đó. Mức **Power** ở hàng ChatGPT cũng áp dụng cho tab này.
+- Gửi cả danh sách lên Voca bằng API batch, với `source = realtime_caption`. Ngữ cảnh gồm câu, bản dịch, mốc giờ, và nguồn `Real-time caption · <ngày giờ bắt đầu phiên>`, nên trong Voca bạn lọc được các từ theo từng buổi xem. Voca tự chống trùng: gửi lại một từ đã có chỉ bổ sung nghĩa hoặc ngữ cảnh mới.
+- Hiện mỗi từ thành một thẻ kèm trạng thái: **Saved to Voca** (mới hoặc đã bổ sung), **Already in Voca**, hoặc **Not saved** kèm lý do. Chưa có API key thì app vẫn dịch, chỉ không lưu.
+
+Code: `caption/vocab_tab.py` (giao diện), `caption/vocab.py` (tìm ngữ cảnh, prompt, đọc JSON), `caption/voca_client.py` (client chép nguyên từ `voca/docs/external-api/`).
+
 Thao tác với thanh phụ đề nổi:
 - Kéo chuột trái để di chuyển.
 - Lăn chuột để đổi cỡ chữ, giữ Ctrl + lăn chuột để đổi độ rộng.

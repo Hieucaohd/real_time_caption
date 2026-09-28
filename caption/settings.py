@@ -29,6 +29,8 @@ class Settings:
     summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)
     chatgpt_power: int = -1  # ChatGPT Power slider: -1 = leave as is, 0 Instant, 1 Medium, 2 High
     chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
+    voca_api_key: str = ""  # personal key from Voca → Cài đặt → Ứng dụng kết nối (kept only in settings.json)
+    voca_collection_id: str = ""  # "" = the app's default collection in Voca
     overlay_width: int = 0  # 0 = pick from screen size
     overlay_x: int = -1  # -1 = centre near the bottom of the screen
     overlay_y: int = -1

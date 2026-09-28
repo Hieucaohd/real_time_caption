@@ -16,6 +16,7 @@ from typing import Callable
 from . import chatgpt, livecaptions, markdown_html, prompt_versions, screenshot
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
+from .vocab_tab import VocabPanel
 from .livecaptions import LiveCaptionsReader
 from .overlay import CaptionOverlay
 from .prompt_editor import PromptEditor
@@ -46,6 +47,7 @@ class App:
         self.capture: AudioCapture | None = None
         self.transcriber: StreamingTranscriber | LiveCaptionsReader | None = None
         self._line_open = False  # transcript's current line already has text
+        self._closing = False
 
         root.title("Real-time Caption")
         # Tk sizes are in physical pixels once the process is DPI-aware, so scale them.
@@ -219,10 +221,23 @@ class App:
             run_chatgpt=self._run_chatgpt,
         )
         self.tabs.add(self.chat, text="Chat")
-        self.tabs.bind(
-            "<<NotebookTabChanged>>",
-            lambda _e: self.chat.entry.focus_set() if self.tabs.select() == str(self.chat) else None,
+
+        self.vocab = VocabPanel(
+            self.tabs,
+            settings=self.settings,
+            get_session_file=lambda: self.session_file,
+            get_power=self._chatgpt_power,
+            run_chatgpt=self._run_chatgpt,
         )
+        self.tabs.add(self.vocab, text="New words")
+
+        def focus_entry(_event) -> None:
+            selected = self.tabs.select()
+            for panel in (self.chat, self.vocab):
+                if selected == str(panel):
+                    panel.entry.focus_set()
+
+        self.tabs.bind("<<NotebookTabChanged>>", focus_entry)
 
     def refresh_devices(self) -> None:
         try:
@@ -265,6 +280,7 @@ class App:
         enabled = self.session_file is not None and not self._sending_to_chatgpt
         self.summarize_btn.configure(state="normal" if enabled else "disabled")
         self.chat.set_busy(self._sending_to_chatgpt)
+        self.vocab.set_busy(self._sending_to_chatgpt)
 
     # -------------------------------------------------------------- start/stop
 
@@ -495,6 +511,8 @@ class App:
     # ------------------------------------------------------------ event pump
 
     def _poll(self) -> None:
+        if self._closing:  # widgets are being destroyed; late events are dropped
+            return
         try:
             while True:
                 self._handle(*self.events.get_nowait())
@@ -606,6 +624,7 @@ class App:
     def on_close(self) -> None:
         self._chatgpt_max_lines()  # store the spinbox value in settings
         self.stop()
+        self._closing = True
         for tfile in list(self._open_files):
             self._close_session_file(tfile)
         self.settings.show_overlay = self.overlay_var.get()

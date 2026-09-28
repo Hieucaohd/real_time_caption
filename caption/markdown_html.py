@@ -63,6 +63,17 @@ a { color: #1a5fb4; }
 .math-boxed { border: 1px solid #8a8a8a; padding: 4px 10px; display: inline-block; }
 img.math-boxed { padding: 2px 4px; }
 code.tex { color: #7a3e00; background: #fff6e5; }
+.vcard { margin: 2px 0 8px 0; }
+.vw { font-size: 13pt; }
+.vphon { color: #555555; font-family: 'Segoe UI'; }
+.vpos { color: #8a5a00; }
+.vtr { font-size: 12pt; margin: 2px 0; }
+.vmean { color: #444444; }
+.vtime { color: #888888; }
+.vstat { font-size: 9pt; margin-top: 4px; }
+.vstat-ok { color: #1e7b34; }
+.vstat-same { color: #777777; }
+.vstat-bad { color: #b3261e; }
 .shot { margin-top: 6px; }
 .shot img { border: 1px solid #b8c8e0; }
 """
