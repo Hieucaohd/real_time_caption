@@ -36,11 +36,13 @@ class VocabPanel(ttk.Frame):
         settings: Settings,
         get_session_file: Callable[[], ConversationTranscript | None],
         run_chatgpt: RunChatGPT,
+        on_save_settings: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self.settings = settings
         self._get_session_file = get_session_file
         self._run_chatgpt = run_chatgpt
+        self._on_save_settings = on_save_settings or self._save_settings_here
         self._busy = False
         self._new_conversation = False
         self._messages: list[tuple[str, str, str]] = []  # (role, header, body html)
@@ -78,6 +80,7 @@ class VocabPanel(ttk.Frame):
         self.power_box.bind("<<ComboboxSelected>>", lambda _e: self._save_power())
         self.hint_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.hint_var, foreground="#777777").pack(side="left", padx=8)
+        ttk.Button(bar, text="Save settings", command=self._on_save_settings).pack(side="right", padx=4)
 
         # Input first (bottom) so the expanding history can't push it out of view.
         ttk.Label(
@@ -129,6 +132,12 @@ class VocabPanel(ttk.Frame):
 
     def persist_settings(self) -> None:
         self._save_power()
+        self.settings.voca_api_key = self.key_var.get().strip()
+        self.settings.voca_collection_id = self._collections.get(self.collection_var.get(), "")
+
+    def _save_settings_here(self) -> None:
+        self.persist_settings()
+        self.settings.save()
 
     def _save_key(self) -> None:
         self.settings.voca_api_key = self.key_var.get().strip()

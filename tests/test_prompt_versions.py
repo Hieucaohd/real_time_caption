@@ -22,6 +22,11 @@ class PromptVersionTests(unittest.TestCase):
             self.assertEqual(prompt_versions.list_versions(prompt_dir), ["v1 - default", "v2 - concise"])
             self.assertIn("{message}", prompt_versions.read(saved, prompt_dir))
 
+            updated = prompt_versions.update_version("v1 - default", "Updated: {message}", prompt_dir)
+            self.assertEqual(updated, "v1 - default")
+            self.assertEqual(prompt_versions.read(updated, prompt_dir), "Updated: {message}\n")
+            self.assertEqual(prompt_versions.list_versions(prompt_dir), ["v1 - default", "v2 - concise"])
+
     def test_chat_prompt_is_filled_without_a_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             prompt = Path(folder) / "chat.txt"

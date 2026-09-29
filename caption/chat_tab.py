@@ -31,6 +31,7 @@ class ChatPanel(ttk.Frame):
         capture_screen: Callable[[], Path],
         screenshot_enabled: bool,
         on_screenshot_toggled: Callable[[bool], None],
+        on_save_settings: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self._get_session_file = get_session_file
@@ -39,6 +40,7 @@ class ChatPanel(ttk.Frame):
         self.settings = settings
         self._run_chatgpt = run_chatgpt
         self._capture_screen = capture_screen
+        self._on_save_settings = on_save_settings or self._save_settings_here
         self._new_conversation = False
         self._busy = False
         self._messages: list[tuple[str, str, str]] = []
@@ -107,6 +109,16 @@ class ChatPanel(ttk.Frame):
         self.prompt_box.bind("<<ComboboxSelected>>", lambda _e: self._save_prompt())
         ttk.Button(prompt_bar, text="Edit / new version…", command=self._edit_prompt).pack(side="left")
         ttk.Button(prompt_bar, text="📁", width=3, command=self._open_prompt_folder).pack(side="left", padx=5)
+
+        history_actions = ttk.Frame(self, padding=(4, 2))
+        history_actions.pack(fill="x")
+        ttk.Button(history_actions, text="Save settings", command=self._on_save_settings).pack(side="left", padx=4)
+        ttk.Button(history_actions, text="↓ Bottom", command=lambda: self._scroll_history(1.0)).pack(
+            side="right", padx=2
+        )
+        ttk.Button(history_actions, text="↑ Top", command=lambda: self._scroll_history(0.0)).pack(
+            side="right", padx=2
+        )
 
         ttk.Label(self, text="Enter to send · Shift+Enter for a new line", foreground="#999999").pack(
             side="bottom", anchor="w"
@@ -208,6 +220,13 @@ class ChatPanel(ttk.Frame):
         self._save_power()
         self.settings.chat_attach_history = self.history_var.get()
         self._save_prompt()
+
+    def _save_settings_here(self) -> None:
+        self.persist_settings()
+        self.settings.save()
+
+    def _scroll_history(self, fraction: float) -> None:
+        self.history.after_idle(lambda: self.history.yview_moveto(fraction))
 
     def load_conversation(self) -> None:
         self._messages.clear()

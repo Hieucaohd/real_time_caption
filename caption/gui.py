@@ -190,6 +190,9 @@ class App:
             variable=self.on_top_var,
             command=lambda: self._set_always_on_top(self.on_top_var.get()),
         ).pack(anchor="w", pady=3)
+        ttk.Button(settings_panel, text="Save settings", command=self.save_settings).pack(
+            fill="x", pady=(14, 4)
+        )
 
         self._sidebar_pages = {"conversations": conversations, "settings": settings_panel}
         self._sidebar_name: str | None = None
@@ -324,6 +327,9 @@ class App:
             width=3,
             command=lambda: self._open_folder(prompt_versions.SUMMARY_DIR),
         ).pack(side="left", padx=(4, 0))
+        ttk.Button(summary_settings, text="Save settings", command=self.save_settings).pack(
+            fill="x", pady=(12, 4)
+        )
         self._refresh_prompt_versions()
 
         self._summary_sidebar_pages = {"history": summary_history, "settings": summary_settings}
@@ -347,6 +353,7 @@ class App:
             screenshot_enabled=self.settings.chat_screenshot,
             on_screenshot_toggled=lambda on: setattr(self.settings, "chat_screenshot", on),
             run_chatgpt=self._run_chatgpt,
+            on_save_settings=self.save_settings,
         )
         self.tabs.add(self.chat, text="Chat")
 
@@ -355,6 +362,7 @@ class App:
             settings=self.settings,
             get_session_file=lambda: self.session_file,
             run_chatgpt=self._run_chatgpt,
+            on_save_settings=self.save_settings,
         )
         self.tabs.add(self.vocab, text="New words")
 
@@ -985,20 +993,25 @@ class App:
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(folder)
 
-    def on_close(self) -> None:
+    def save_settings(self, notify: bool = True) -> None:
         self._summary_max_lines()
         self._save_summary_power()
         self.settings.summary_new_chat = self.new_chat_var.get()
         self.chat.persist_settings()
         self.vocab.persist_settings()
-        self.stop()
-        self._closing = True
-        for tfile in list(self._open_files):
-            self._close_session_file(tfile)
         self.settings.show_overlay = self.overlay_var.get()
         self.settings.model = self.model_var.get().strip() or self.settings.model
         self.settings.compute = self.compute_var.get()
         if self.device_var.get():
             self.settings.device_label = self.device_var.get()
         self.settings.save()
+        if notify:
+            self.status_var.set("Settings saved")
+
+    def on_close(self) -> None:
+        self.save_settings(notify=False)
+        self.stop()
+        self._closing = True
+        for tfile in list(self._open_files):
+            self._close_session_file(tfile)
         self.root.destroy()

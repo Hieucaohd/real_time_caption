@@ -12,7 +12,7 @@ from . import prompt_versions
 
 
 class PromptEditor(tk.Toplevel):
-    """Opens with the text of ``base_version``; "Save as new version" never overwrites it."""
+    """Edit ``base_version`` in place or save the text as a new version."""
 
     def __init__(
         self,
@@ -27,6 +27,7 @@ class PromptEditor(tk.Toplevel):
     ):
         super().__init__(master)
         self._on_saved = on_saved
+        self._base_version = base_version
         self._prompt_dir = prompt_dir
         self._prompt_name = prompt_name
         self._required_placeholder = required_placeholder
@@ -47,6 +48,7 @@ class PromptEditor(tk.Toplevel):
         buttons.pack(side="bottom", fill="x")
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
         ttk.Button(buttons, text="Save as new version", command=self._save).pack(side="right", padx=6)
+        ttk.Button(buttons, text="Update current version", command=self._update).pack(side="right")
 
         name_row = ttk.Frame(body, padding=(0, 8, 0, 0))
         name_row.pack(side="bottom", fill="x")
@@ -64,17 +66,11 @@ class PromptEditor(tk.Toplevel):
         self.text.focus_set()
         self.grab_set()  # modal: the choice list can't change underneath us
 
-    def _save(self) -> None:
+    def _validated_text(self) -> str | None:
         text = self.text.get("1.0", "end").strip()
-        label = self.name_var.get().strip()
         if not text:
             messagebox.showwarning(self._prompt_name, "The prompt is empty.", parent=self)
-            return
-        if not label:
-            messagebox.showwarning(
-                self._prompt_name, "Give this version a short name, e.g. 'shorter' or 'english'.", parent=self
-            )
-            return
+            return None
         if self._required_placeholder not in text:
             if self._required_placeholder == "{message}":
                 warning = (
@@ -87,11 +83,35 @@ class PromptEditor(tk.Toplevel):
                     "Save anyway?"
                 )
             if not messagebox.askyesno(self._prompt_name, warning, parent=self):
-                return
+                return None
+        return text
+
+    def _save(self) -> None:
+        text = self._validated_text()
+        if text is None:
+            return
+        label = self.name_var.get().strip()
+        if not label:
+            messagebox.showwarning(
+                self._prompt_name, "Give this version a short name, e.g. 'shorter' or 'english'.", parent=self
+            )
+            return
         try:
             name = prompt_versions.save_new_version(text, label, self._prompt_dir)
         except OSError as exc:
             messagebox.showerror(self._prompt_name, f"Could not save the prompt:\n{exc}", parent=self)
+            return
+        self.destroy()
+        self._on_saved(name)
+
+    def _update(self) -> None:
+        text = self._validated_text()
+        if text is None:
+            return
+        try:
+            name = prompt_versions.update_version(self._base_version, text, self._prompt_dir)
+        except OSError as exc:
+            messagebox.showerror(self._prompt_name, f"Could not update the prompt:\n{exc}", parent=self)
             return
         self.destroy()
         self._on_saved(name)

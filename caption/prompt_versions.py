@@ -58,3 +58,12 @@ def save_new_version(text: str, label: str, prompt_dir: Path = SUMMARY_DIR) -> s
     prompt_dir.mkdir(parents=True, exist_ok=True)
     path_for(name, prompt_dir).write_text(text.strip() + "\n", encoding="utf-8")
     return name
+
+
+def update_version(name: str, text: str, prompt_dir: Path = SUMMARY_DIR) -> str:
+    """Overwrite an existing prompt version and return its unchanged name."""
+    path = path_for(name, prompt_dir)
+    if not path.is_file():
+        raise FileNotFoundError(f"Prompt version not found: {name}")
+    path.write_text(text.strip() + "\n", encoding="utf-8")
+    return name

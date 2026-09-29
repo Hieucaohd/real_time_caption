@@ -48,7 +48,7 @@ Chữ **xám** là phần đang nghe và có thể còn thay đổi. Chữ **tr�
 
 ### Conversation kéo dài qua nhiều ngày
 
-- Activity bar ngoài cùng bên trái mở **Conversations** hoặc **Settings**. Bấm lại biểu tượng đang chọn, hoặc nút `×`, để ẩn sidebar. Các tuỳ chọn Overlay và Always on top nằm trong sidebar Settings.
+- Activity bar ngoài cùng bên trái mở **Conversations** hoặc **Settings**. Bấm lại biểu tượng đang chọn, hoặc nút `×`, để ẩn sidebar. Các tuỳ chọn Overlay và Always on top nằm trong sidebar Settings; bấm **Save settings** để ghi ngay các lựa chọn xuống `settings.json`.
 - **+ New & start** tạo một conversation mới từ nguồn đang chọn rồi bắt đầu nghe. **Pause** chỉ dừng thu âm; conversation vẫn còn trong danh sách bên trái.
 - Chọn một conversation đã pause rồi bấm **Continue** để ghi nối transcript vào đúng conversation đó. Mỗi đoạn có mốc ngày/giờ nên phân biệt được nội dung của các ngày khác nhau.
 - **Rename** đổi cả tên hiển thị lẫn tên folder vật lý. Tên folder luôn giữ thời điểm tạo và ID ngắn để không trùng nhau.
@@ -75,7 +75,7 @@ Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, 
   - Tắt: gửi tiếp vào cuộc trò chuyện đang mở trong tab riêng. Nếu ChatGPT còn đang trả lời tin trước, app sẽ chờ nó trả lời xong rồi mới gửi. Nếu tab riêng chưa có (lần đầu, hoặc bạn đã đóng tab), app vẫn tạo chat mới.
 - **Prompt tóm tắt có nhiều phiên bản**, nằm trong [prompts/summarize/](prompts/summarize/), mỗi phiên bản là một file `v<số> - <tên>.txt`:
   - Phần **Summary settings** cho chọn phiên bản dùng khi bấm Summarize. Lựa chọn được nhớ cho lần sau.
-  - **Edit / new version…** mở phiên bản đang chọn trong một cửa sổ sửa. **Save as new version** lưu nội dung đã sửa thành phiên bản tiếp theo (ví dụ `v2 - ngắn gọn`) và chọn luôn phiên bản đó. Phiên bản cũ không bao giờ bị ghi đè, nên luôn chọn lại được.
+  - **Edit / new version…** mở phiên bản đang chọn trong một cửa sổ sửa. **Update current version** ghi thay đổi vào đúng phiên bản hiện tại; **Save as new version** tạo phiên bản tiếp theo (ví dụ `v2 - ngắn gọn`).
   - Nút 📂 mở thư mục prompt. Bạn cũng có thể tự thêm hoặc sửa file trong đó; danh sách được đọc lại mỗi khi mở ô chọn.
   - Các biến có thể dùng trong prompt: `{file_name}`, `{source}`, `{started}`, `{now}`.
 - Nếu ChatGPT đổi giao diện khiến app không gửi được, chỉnh các selector ở đầu [caption/chatgpt.py](caption/chatgpt.py).
@@ -85,7 +85,8 @@ Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, 
 Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm bên phải (xanh), câu trả lời của ChatGPT nằm bên trái (xám, có định dạng markdown).
 
 - Gõ câu hỏi vào ô dưới cùng rồi bấm **Send ➤** hoặc Enter. Shift+Enter để xuống dòng.
-- **Chat prompt** cho chọn prompt mặc định trong [prompts/chat/](prompts/chat/). Bạn chỉ cần nhập câu hỏi; app chèn nó vào biến `{message}` của prompt đang chọn. **Edit / new version…** tạo phiên bản mới mà không ghi đè phiên bản cũ, còn nút 📁 mở thư mục prompt. Có thể dùng thêm `{file_name}`, `{source}`, `{started}`, `{now}`.
+- Hai nút **↑ Top** và **↓ Bottom** cuộn nhanh lịch sử chat lên đầu hoặc xuống cuối.
+- **Chat prompt** cho chọn prompt mặc định trong [prompts/chat/](prompts/chat/). Bạn chỉ cần nhập câu hỏi; app chèn nó vào biến `{message}` của prompt đang chọn. Trong cửa sổ sửa, **Update current version** cập nhật đúng phiên bản hiện tại, còn **Save as new version** tạo phiên bản mới. Nút 📁 mở thư mục prompt. Có thể dùng thêm `{file_name}`, `{source}`, `{started}`, `{now}`.
 - **Attach transcript** gửi transcript đã tự ghép các part. Prompt vẫn được áp dụng khi không đính kèm transcript. **Attach saved chat history** là lựa chọn riêng và mặc định tắt để phản hồi nhanh hơn; chỉ bật khi thực sự cần gửi lại lịch sử cục bộ cho ChatGPT.
 - Chat và Summarize **dùng chung một cuộc trò chuyện ChatGPT của conversation đang chọn**, nên bạn hỏi tiếp dựa trên bản tóm tắt được mà không lẫn sang conversation khác. Mỗi lần Summarize, yêu cầu và câu trả lời cũng hiện trong lịch sử Chat cục bộ.
 - **New ChatGPT thread**: tin nhắn tiếp theo (kể cả Summarize) mở một thread mới ở ChatGPT, nhưng lịch sử cục bộ trong app không bị xoá.
