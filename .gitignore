@@ -7,6 +7,7 @@ transcripts/
 conversations.sqlite3
 conversations.sqlite3-shm
 conversations.sqlite3-wal
+web_data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

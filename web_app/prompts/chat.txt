@@ -1,0 +1,4 @@
+Use the attached transcript when relevant. Answer clearly and directly.
+
+User message:
+{message}
