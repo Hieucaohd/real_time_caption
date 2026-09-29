@@ -53,14 +53,14 @@ Chữ **xám** là phần đang nghe và có thể còn thay đổi. Chữ **tr�
 - Chọn một conversation đã pause rồi bấm **Continue** để ghi nối transcript vào đúng conversation đó. Mỗi đoạn có mốc ngày/giờ nên phân biệt được nội dung của các ngày khác nhau.
 - **Rename** đổi cả tên hiển thị lẫn tên folder vật lý. Tên folder luôn giữ thời điểm tạo và ID ngắn để không trùng nhau.
 - Mỗi conversation có folder riêng trong `transcripts/conversations/`, chứa `transcript.txt` (và các part `transcript-0002.txt` nếu file vượt 5 MB), `summaries.md`, `chat_history.md`, `conversation.json` và folder `screenshots/`.
-- `conversations.sqlite3` quản lý metadata và lịch sử ChatGPT. Transcript/summary/ảnh vẫn là file thường để dễ mở, sao lưu và phục hồi. Khi cần context, app tự ghép toàn bộ các part transcript và đính kèm cả lịch sử chat đã lưu.
+- `conversations.sqlite3` quản lý metadata và lịch sử ChatGPT. Transcript/summary/ảnh vẫn là file thường để dễ mở, sao lưu và phục hồi. Khi cần transcript, app tự ghép toàn bộ các part trước khi gửi.
 - Lần chạy đầu sau khi nâng cấp, các transcript `.txt` cũ ở ngay trong `transcripts/` được **sao chép** vào cấu trúc conversation mới; file gốc không bị xoá hay di chuyển.
 
-Câu nào được chốt là ghi ngay xuống đĩa, nên app bị tắt đột ngột cũng không mất phần đã chốt. Nút **📂 Saved files** mở kho dữ liệu và **Open conversation folder** mở đúng folder đang chọn. Nút **⭳ Export text…** lưu nội dung đang xem ra một nơi khác.
+Câu nào được chốt là ghi ngay xuống đĩa, nên app bị tắt đột ngột cũng không mất phần đã chốt. Trong tab **Transcript**, **📂 Saved files** mở kho dữ liệu, **⭳ Export text…** lưu nội dung đang xem ra một nơi khác và **Clear** xoá phần transcript đang hiển thị. **Open conversation folder** mở đúng folder đang chọn.
 
 ### Tóm tắt bằng ChatGPT
 
-Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, kể cả khi đã pause. App gửi transcript cùng lịch sử chat của conversation đó lên ChatGPT và yêu cầu tóm tắt, ưu tiên từ đoạn gần nhất tới đoạn xa nhất về thời gian.
+Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, kể cả khi đã pause. App chỉ gửi transcript cùng prompt tóm tắt; `chat_history.md` không được đính kèm. Nội dung chat và các summary cũ vẫn được lưu cục bộ để xem lại.
 
 - Cần có Chrome mở sẵn với remote debugging ở cổng 9222 và đã đăng nhập ChatGPT. Ví dụ, mở bằng `C:\Users\ADMIN\ai-orchestrator\launch_chrome.bat`.
 - App làm mọi thứ **ở nền**: Chrome không bị kéo lên trước màn hình, và tab mới (nếu cần tạo) cũng được mở ở nền. Chrome chỉ cần đang chạy, có thể nằm khuất sau các cửa sổ khác.

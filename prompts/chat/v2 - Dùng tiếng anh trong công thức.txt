@@ -1,2 +1,3 @@
-Lưu ý không được dùng tiếng việt trong phần công thức, phải dùng tiếng anh
 {message}
+
+Lưu ý: không được dùng tiếng việt trong phần công thức, phải dùng tiếng anh

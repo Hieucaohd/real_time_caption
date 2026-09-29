@@ -110,9 +110,6 @@ class App:
         status.pack(fill="x")
         self.level = ttk.Progressbar(status, maximum=100, length=140)
         self.level.pack(side="left", padx=6)
-        ttk.Button(status, text="⭳ Export text…", command=self.export_transcript).pack(side="right", padx=6)
-        ttk.Button(status, text="📂 Saved files", command=self.open_transcripts_folder).pack(side="right", padx=6)
-        ttk.Button(status, text="Clear", command=self.clear_transcript).pack(side="right", padx=6)
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(status, textvariable=self.status_var).pack(side="left", padx=6)
 
@@ -204,12 +201,23 @@ class App:
         self.tabs.pack(fill="both", expand=True)
         self._show_sidebar("conversations")
 
+        transcript_tab = ttk.Frame(self.tabs)
+        transcript_actions = ttk.Frame(transcript_tab, padding=(4, 4))
+        transcript_actions.pack(fill="x")
+        ttk.Button(transcript_actions, text="⭳ Export text…", command=self.export_transcript).pack(
+            side="right", padx=4
+        )
+        ttk.Button(transcript_actions, text="📂 Saved files", command=self.open_transcripts_folder).pack(
+            side="right", padx=4
+        )
+        ttk.Button(transcript_actions, text="Clear", command=self.clear_transcript).pack(side="right", padx=4)
         self.transcript = ScrolledText(
-            self.tabs, wrap="word", font=("Segoe UI", 11), padx=8, pady=6, state="disabled"
+            transcript_tab, wrap="word", font=("Segoe UI", 11), padx=8, pady=6, state="disabled"
         )
         self.transcript.tag_configure("time", foreground="#888888")
         self.transcript.tag_configure("partial", foreground="#8a8a8a")
-        self.tabs.add(self.transcript, text="Transcript")
+        self.transcript.pack(fill="both", expand=True)
+        self.tabs.add(transcript_tab, text="Transcript")
 
         summary_tab = ttk.Frame(self.tabs)
         summary_actions = ttk.Frame(summary_tab, padding=(4, 4))
@@ -819,7 +827,7 @@ class App:
         self._run_chatgpt(
             lambda status: chatgpt.ask(
                 prompt,
-                [p for p in (upload, self.store.chat_context_path(tfile.conversation_id)) if p],
+                upload,
                 status,
                 new_chat=new_chat,
                 tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",

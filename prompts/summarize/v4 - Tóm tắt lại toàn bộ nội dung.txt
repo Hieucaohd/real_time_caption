@@ -1,0 +1,6 @@
+File đính kèm ({file_name}) là bản ghi phụ đề tiếng Anh tự động (speech-to-text) từ nguồn "{source}".
+Mỗi dòng có dạng [HH:MM:SS] <nội dung>, sắp xếp từ cũ đến mới. Phiên bắt đầu lúc {started}, hiện tại là {now}.
+
+Tóm tắt lại toàn bộ nội dung
+
+Lưu ý: văn bản do máy nhận dạng giọng nói nên có thể sai chính tả hoặc sai từ; hãy suy luận theo ngữ cảnh, không bịa thêm thông tin không có trong file.
