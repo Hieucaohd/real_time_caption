@@ -48,5 +48,54 @@ class MathArrayRenderTests(unittest.TestCase):
         self.assertNotIn("<code class='tex'>", result)
 
 
+class HtmlScrollTests(unittest.TestCase):
+    def test_show_pins_chat_to_bottom_across_layout_passes(self) -> None:
+        class View:
+            def __init__(self):
+                self.loaded = None
+                self.fragment = None
+                self.delays = []
+                self.positions = []
+
+            def load_html(self, html, fragment=None):
+                self.loaded = html
+                self.fragment = fragment
+
+            def after(self, delay, callback):
+                self.delays.append(delay)
+                callback()
+
+            def yview_moveto(self, fraction):
+                self.positions.append(fraction)
+
+        view = View()
+        markdown_html.show(view, "<p>Answer</p>", scroll_to_end=True)
+
+        self.assertEqual(view.fragment, "rtc-chat-end")
+        self.assertIn("id='rtc-chat-end'", view.loaded)
+        self.assertEqual(view.delays, [0, 40, 120, 300, 700])
+        self.assertEqual(view.positions, [1.0] * 5)
+
+    def test_latest_scroll_request_cancels_older_delayed_moves(self) -> None:
+        class View:
+            def __init__(self):
+                self.callbacks = []
+                self.positions = []
+
+            def after(self, _delay, callback):
+                self.callbacks.append(callback)
+
+            def yview_moveto(self, fraction):
+                self.positions.append(fraction)
+
+        view = View()
+        markdown_html.scroll_to(view, 1.0)
+        markdown_html.scroll_to(view, 0.0)
+        for callback in view.callbacks:
+            callback()
+
+        self.assertEqual(view.positions, [0.0] * 5)
+
+
 if __name__ == "__main__":
     unittest.main()

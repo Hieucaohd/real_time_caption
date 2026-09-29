@@ -131,7 +131,29 @@ def make_view(master: tk.Misc) -> HtmlFrame:
 
 
 def show(view: HtmlFrame, body: str, scroll_to_end: bool = False) -> None:
-    view.load_html(page(body))
     if scroll_to_end:
-        # Layout happens after idle; scroll once it has.
-        view.after(80, lambda: view.yview_moveto(1.0))
+        # Tkhtml can perform several layout passes (especially when formulas or
+        # screenshots are present).  The fragment handles the initial load and the
+        # repeated moves keep the view pinned after later geometry changes.
+        anchor = "rtc-chat-end"
+        view.load_html(page(body + f"<div id='{anchor}'></div>"), fragment=anchor)
+        scroll_to(view, 1.0)
+    else:
+        view.load_html(page(body))
+
+
+def scroll_to(view: HtmlFrame, fraction: float) -> None:
+    """Reliably scroll an HTML view after all of Tkhtml's layout passes."""
+    generation = getattr(view, "_rtc_scroll_generation", 0) + 1
+    view._rtc_scroll_generation = generation
+
+    def move() -> None:
+        if getattr(view, "_rtc_scroll_generation", 0) != generation:
+            return
+        try:
+            view.yview_moveto(fraction)
+        except tk.TclError:
+            pass  # the app may have closed while a delayed move was pending
+
+    for delay in (0, 40, 120, 300, 700):
+        view.after(delay, move)

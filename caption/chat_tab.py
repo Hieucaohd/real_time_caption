@@ -226,7 +226,7 @@ class ChatPanel(ttk.Frame):
         self.settings.save()
 
     def _scroll_history(self, fraction: float) -> None:
-        self.history.after_idle(lambda: self.history.yview_moveto(fraction))
+        markdown_html.scroll_to(self.history, fraction)
 
     def load_conversation(self) -> None:
         self._messages.clear()
