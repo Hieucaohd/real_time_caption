@@ -12,6 +12,7 @@ import queue
 import threading
 import tkinter as tk
 import webbrowser
+from dataclasses import dataclass
 from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Callable
@@ -29,6 +30,14 @@ DEFAULT_COLLECTION = "Default (chosen in Voca)"
 RunChatGPT = Callable[[Callable, Callable, Callable], bool]
 
 
+@dataclass
+class VocabRequest:
+    text: str
+    job: Callable | None = None
+    failed: bool = False
+    active: bool = False
+
+
 class VocabPanel(ttk.Frame):
     def __init__(
         self,
@@ -37,15 +46,21 @@ class VocabPanel(ttk.Frame):
         get_session_file: Callable[[], ConversationTranscript | None],
         run_chatgpt: RunChatGPT,
         on_save_settings: Callable[[], None] | None = None,
+        on_stop_chatgpt: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self.settings = settings
         self._get_session_file = get_session_file
         self._run_chatgpt = run_chatgpt
         self._on_save_settings = on_save_settings or self._save_settings_here
+        self._on_stop_chatgpt = on_stop_chatgpt or (lambda: None)
         self._busy = False
         self._new_conversation = False
-        self._messages: list[tuple[str, str, str]] = []  # (role, header, body html)
+        self._messages: list[tuple[str, str, str, str | None]] = []
+        self._requests: dict[str, VocabRequest] = {}
+        self._request_sequence = 0
+        self._active_request_id: str | None = None
+        self._active_job: Callable | None = None
         self._collections: dict[str, str] = {DEFAULT_COLLECTION: ""}  # name -> id
         self._results: "queue.Queue[Callable[[], None]]" = queue.Queue()
 
@@ -94,7 +109,7 @@ class VocabPanel(ttk.Frame):
         self.send_btn = ttk.Button(entry_row, text="Translate & save ➤", command=self.send)
         self.send_btn.pack(side="left", padx=(6, 0), fill="y")
 
-        self.history = markdown_html.make_view(self)
+        self.history = markdown_html.make_view(self, self._on_history_link)
         self.history.pack(fill="both", expand=True)
 
         self.refresh_state()
@@ -107,6 +122,7 @@ class VocabPanel(ttk.Frame):
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.refresh_state()
+        self._render()
 
     def refresh_state(self) -> None:
         tfile = self._get_session_file()
@@ -196,12 +212,16 @@ class VocabPanel(ttk.Frame):
 
     def send(self) -> None:
         text = self.entry.get("1.0", "end")
+        if self._send_text(text):
+            self.entry.delete("1.0", "end")
+
+    def _send_text(self, text: str) -> bool:
         words = [vocab.NewWord(w) for w in vocab.parse_input(text)]
         if not words or self._busy:
-            return
+            return False
         if len(words) > 100:
             messagebox.showinfo("New words", "Please send at most 100 words at a time.")
-            return
+            return False
         tfile = self._get_session_file()
         for w in words:
             w.sentence, w.time = vocab.find_context(tfile.path if tfile else None, w.word)
@@ -209,7 +229,7 @@ class VocabPanel(ttk.Frame):
             prompt = vocab.build_prompt(words)
         except vocab.VocabError as exc:
             messagebox.showerror("New words", str(exc))
-            return
+            return False
 
         api_key = self.settings.voca_api_key
         collection_id = self.settings.voca_collection_id
@@ -217,8 +237,11 @@ class VocabPanel(ttk.Frame):
         source_title = f"Real-time caption · {started:%Y-%m-%d %H:%M}"
         new_chat, power = self._new_conversation, self._power()
 
-        def job(status: Callable[[str], None]) -> list[vocab.NewWord]:
-            answer = chatgpt.ask(prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power)
+        def job(status: Callable[[str], None], cancel_event) -> list[vocab.NewWord]:
+            answer = chatgpt.ask(
+                prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power,
+                cancel_event=cancel_event,
+            )
             try:
                 vocab.parse_answer(answer, words)
             except vocab.VocabError as exc:
@@ -228,53 +251,128 @@ class VocabPanel(ttk.Frame):
                 _save_to_voca(api_key, collection_id, words, source_title)
             return words
 
+        self._active_job = job
         if not self._run_chatgpt(job, self._on_done, self._on_error):
-            return
-        self.entry.delete("1.0", "end")
+            self._active_job = None
+            return False
         listing = "\n".join(w.word + (f"   [{w.time}] {w.sentence}" if w.sentence else "") for w in words)
-        self._add("user", f"You · {datetime.now():%H:%M:%S}", markdown_html.plain_to_html(listing))
+        action_id = self._add(
+            "user", f"You · {datetime.now():%H:%M:%S}", markdown_html.plain_to_html(listing), render=False
+        )
+        self._requests[action_id] = VocabRequest(text=text, job=job, active=True)
+        self._active_request_id = action_id
         self._set_pending("ChatGPT is translating…")
+        return True
 
     def _on_done(self, words: list[vocab.NewWord]) -> None:
         self._new_conversation = False
+        request = self._requests.get(self._active_request_id or "")
+        if request:
+            request.active = False
+            request.failed = False
+        self._active_job = None
         self._set_pending(None)
         saved = sum(w.voca_status in ("created", "updated") for w in words)
         header = f"ChatGPT · {datetime.now():%H:%M:%S}" + (f" · {saved} saved to Voca" if saved else "")
         self._add("bot", header, "".join(vocab.card_html(w) for w in words))
+        self._active_request_id = None
 
     def _on_error(self, error: str) -> None:
+        request = self._requests.get(self._active_request_id or "")
+        if request:
+            request.active = False
+            request.failed = True
+            request.job = self._active_job
+        self._active_job = None
         self._set_pending(None)
         self._add("bot", f"Error · {datetime.now():%H:%M:%S}", markdown_html.plain_to_html(error))
-        messagebox.showerror("New words", error.split("\n\nChatGPT answered:")[0])
+        self._active_request_id = None
+        if error != chatgpt.CANCELLED_MESSAGE:
+            messagebox.showerror("New words", error.split("\n\nChatGPT answered:")[0])
+
+    def retry(self, request_id: str) -> None:
+        if self._busy:
+            return
+        request = self._requests.get(request_id)
+        if request is None:
+            return
+        if request.failed and request.job:
+            request.active = True
+            self._active_request_id = request_id
+            self._active_job = request.job
+            if not self._run_chatgpt(request.job, self._on_done, self._on_error):
+                request.active = False
+                self._active_request_id = None
+                self._active_job = None
+                return
+            self._set_pending("Retrying with ChatGPT…")
+            return
+        self._send_text(request.text)
+
+    def _on_history_link(self, url: str) -> None:
+        if url.startswith("rtc-vocab-retry:"):
+            self.retry(url.removeprefix("rtc-vocab-retry:"))
+        elif url.startswith("rtc-vocab-stop:"):
+            request_id = url.removeprefix("rtc-vocab-stop:")
+            if request_id == self._active_request_id:
+                self._on_stop_chatgpt()
+        else:
+            webbrowser.open(url)
 
     def new_conversation(self) -> None:
         if self._busy:
             return
         self._new_conversation = True
         self._messages.clear()
+        self._requests.clear()
+        self._active_request_id = None
         self._render()
 
     # ---------------------------------------------------------------- display
 
-    def _add(self, role: str, header: str, body_html: str) -> None:
-        self._messages.append((role, header, body_html))
-        self._render()
+    def _add(self, role: str, header: str, body_html: str, render: bool = True) -> str:
+        action_id = None
+        if role == "user":
+            self._request_sequence += 1
+            action_id = f"vocab-{self._request_sequence}"
+        self._messages.append((role, header, body_html, action_id))
+        if render:
+            self._render()
+        return action_id or ""
 
     def _set_pending(self, text: str | None) -> None:
         self._messages = [m for m in self._messages if m[0] != "pending"]
         if text:
-            self._messages.append(("pending", "", markdown_html.plain_to_html(text)))
+            self._messages.append(("pending", "", markdown_html.plain_to_html(text), None))
         self._render()
 
     def _render(self) -> None:
         parts = []
-        for role, header, body in self._messages:
+        for role, header, body, action_id in self._messages:
             if role == "pending":
                 parts.append(f"<div class='pending'>{body}</div>")
                 continue
             meta = "meta meta-right" if role == "user" else "meta"
-            parts.append(f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div><div class='{role}'>{body}</div>")
+            actions = self._request_actions(action_id) if action_id else ""
+            parts.append(
+                f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div>"
+                f"<div class='{role}'>{body}{actions}</div>"
+            )
         markdown_html.show(self.history, "".join(parts), scroll_to_end=True)
+
+    def _request_actions(self, request_id: str) -> str:
+        request = self._requests.get(request_id)
+        retry = (
+            f"<a href='rtc-vocab-retry:{request_id}'>↻ Retry</a>"
+            if request and not self._busy
+            else "<span class='disabled'>↻ Retry</span>"
+        )
+        stop = (
+            f"<a href='rtc-vocab-stop:{request_id}'>■ Stop</a>"
+            if request and request.active and self._busy
+            else "<span class='disabled'>■ Stop</span>"
+        )
+        return f"<div class='message-actions'>{retry}{stop}</div>"
 
 
 def _voca_message(err: VocaError) -> str:

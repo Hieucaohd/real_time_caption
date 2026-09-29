@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import re
 import webbrowser
+from typing import Callable
 
 import tkinter as tk
 from markdown_it import MarkdownIt
@@ -83,6 +84,9 @@ code.tex { color: #7a3e00; background: #fff6e5; }
 .vstat-bad { color: #b3261e; }
 .shot { margin-top: 6px; }
 .shot img { border: 1px solid #b8c8e0; }
+.message-actions { font-size: 9pt; margin-top: 6px; text-align: right; }
+.message-actions a { margin-left: 10px; text-decoration: none; }
+.message-actions .disabled { color: #999999; margin-left: 10px; }
 """
 
 
@@ -122,10 +126,14 @@ def page(body: str) -> str:
     return f"<html><head><style>{CSS}</style></head><body>{body}</body></html>"
 
 
-def make_view(master: tk.Misc) -> HtmlFrame:
+def make_view(master: tk.Misc, on_link_click: Callable[[str], None] | None = None) -> HtmlFrame:
     # Formula images are rasterised at the real screen DPI so they match the text size.
     mathjax_render.set_dpi(master.winfo_fpixels("1i"))
-    view = HtmlFrame(master, messages_enabled=False, on_link_click=lambda url: webbrowser.open(url))
+    view = HtmlFrame(
+        master,
+        messages_enabled=False,
+        on_link_click=on_link_click or (lambda url: webbrowser.open(url)),
+    )
     view.load_html(page(""))
     return view
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +35,7 @@ class SummaryAttachmentTests(unittest.TestCase):
             app._summary_received = Mock()
 
             def run(job, _on_answer, _on_error):
-                job(lambda _status: None)
+                job(lambda _status: None, threading.Event())
                 return True
 
             app._run_chatgpt = run
@@ -49,6 +50,8 @@ class SummaryAttachmentTests(unittest.TestCase):
 
             build_prompt.assert_called_once()
             self.assertEqual(ask.call_args.args[1], upload)
+            self.assertIsNotNone(app._summary_retry)
+            self.assertFalse(ask.call_args.kwargs["cancel_event"].is_set())
 
 
 if __name__ == "__main__":

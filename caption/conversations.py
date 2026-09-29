@@ -220,7 +220,7 @@ class ConversationStore:
         *,
         kind: str = "chat",
         attachment: Path | None = None,
-    ) -> None:
+    ) -> int:
         created = _now()
         relative = None
         conversation = self.get(conversation_id)
@@ -230,13 +230,14 @@ class ConversationStore:
             except ValueError:
                 relative = str(attachment)
         with self._connect() as db:
-            db.execute(
+            cursor = db.execute(
                 "INSERT INTO chat_messages(conversation_id,role,kind,header,content,attachment,created_at) "
                 "VALUES(?,?,?,?,?,?,?)",
                 (conversation_id, role, kind, header, content, relative, created),
             )
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (created, conversation_id))
         self._write_chat_markdown(conversation_id)
+        return int(cursor.lastrowid)
 
     def messages(self, conversation_id: str) -> list[ChatMessage]:
         with self._connect() as db:
@@ -271,6 +272,16 @@ class ConversationStore:
         self._write_chat_markdown(conversation_id)
         conversation = self.get(conversation_id)
         return conversation.folder / "chat_history.md" if conversation else None
+
+    def chat_context_snapshot(self, conversation_id: str) -> Path | None:
+        """Return an immutable copy so adding the outgoing turn cannot change an upload in flight."""
+        source = self.chat_context_path(conversation_id)
+        if source is None:
+            return None
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        target = SNAPSHOT_DIR / f"{conversation_id}_chat_{uuid.uuid4().hex}.md"
+        shutil.copy2(source, target)
+        return target
 
     def _write_chat_markdown(self, conversation_id: str) -> None:
         conversation = self.get(conversation_id)

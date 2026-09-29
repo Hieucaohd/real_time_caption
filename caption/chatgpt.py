@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -112,6 +113,13 @@ _TURN_ID_JS = """
 
 
 class ChatGPTError(RuntimeError):
+    pass
+
+
+CANCELLED_MESSAGE = "Cancelled by user. You can press Retry to send the same request again."
+
+
+class ChatGPTCancelled(ChatGPTError):
     pass
 
 
@@ -302,23 +310,46 @@ def _wait_send_enabled(page, timeout_s: float):
 # ---------------------------------------------------------------- reading answers
 
 
-def _wait_new_answer(page, known: list[str], timeout_s: float) -> str:
+def _cancel_if_requested(page, cancel_event: threading.Event | None) -> None:
+    if not cancel_event or not cancel_event.is_set():
+        return
+    try:
+        stop = page.locator(STOP_BUTTON).first
+        if stop.count() and stop.is_visible():
+            stop.click(timeout=2000)
+    except Exception:  # noqa: BLE001 - cancellation must still complete if the button changed
+        pass
+    raise ChatGPTCancelled(CANCELLED_MESSAGE)
+
+
+def _wait_new_answer(
+    page, known: list[str], timeout_s: float, cancel_event: threading.Event | None = None
+) -> str:
     """Wait until a turn that wasn't answered before gets its Copy button; return its id."""
-    handle = page.wait_for_function(
-        "(a) => {" + _TURN_ID_JS + """
-           const known = new Set(a.known);
-           const buttons = [...document.querySelectorAll(a.copy)];
-           for (let i = buttons.length - 1; i >= 0; i--) {
-             const id = turnId(buttons[i], a);
-             if (id && !known.has(id)) return id;
-           }
-           return false;
-         }""",
-        arg={**_js_args(), "known": known},
-        timeout=timeout_s * 1000,
-        polling=500,
-    )
-    return handle.json_value()
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _cancel_if_requested(page, cancel_event)
+        try:
+            handle = page.wait_for_function(
+                "(a) => {" + _TURN_ID_JS + """
+                   const known = new Set(a.known);
+                   const buttons = [...document.querySelectorAll(a.copy)];
+                   for (let i = buttons.length - 1; i >= 0; i--) {
+                     const id = turnId(buttons[i], a);
+                     if (id && !known.has(id)) return id;
+                   }
+                   return false;
+                 }""",
+                arg={**_js_args(), "known": known},
+                timeout=750,
+                polling=150,
+            )
+            return handle.json_value()
+        except PlaywrightTimeoutError:
+            continue
+    raise ChatGPTError(f"ChatGPT did not finish answering within {timeout_s // 60} minutes.")
 
 
 def _answer_text_length(page, turn_id: str) -> int:
@@ -329,11 +360,12 @@ def _answer_text_length(page, turn_id: str) -> int:
         return -1
 
 
-def _wait_stable(page, turn_id: str, timeout_s: float) -> None:
+def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.Event | None = None) -> None:
     """The Copy button can flash up mid-answer on some builds; also require the text to settle."""
     deadline = time.monotonic() + timeout_s
     last, since = -2, time.monotonic()
     while time.monotonic() < deadline:
+        _cancel_if_requested(page, cancel_event)
         n = _answer_text_length(page, turn_id)
         now = time.monotonic()
         if n != last:
@@ -386,6 +418,7 @@ def ask(
     tab_name: str = APP_TAB,
     power: int | None = None,
     dry_run: bool = False,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
@@ -398,6 +431,8 @@ def ask(
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
+        if cancel_event and cancel_event.is_set():
+            raise ChatGPTCancelled(CANCELLED_MESSAGE)
         on_status("Connecting to Chrome…")
         try:
             browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
@@ -465,11 +500,13 @@ def ask(
 
         on_status("Waiting for ChatGPT's answer…")
         try:
-            turn_id = _wait_new_answer(page, answered_before, ANSWER_TIMEOUT_S)
+            turn_id = _wait_new_answer(page, answered_before, ANSWER_TIMEOUT_S, cancel_event)
+        except ChatGPTCancelled:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError(
                 f"ChatGPT did not finish answering within {ANSWER_TIMEOUT_S // 60} minutes. See the Chrome tab."
             ) from exc
-        _wait_stable(page, turn_id, 60)
+        _wait_stable(page, turn_id, 60, cancel_event)
         on_status("Reading the answer…")
         return _read_answer(page, turn_id)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
+import webbrowser
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -16,7 +18,17 @@ from .prompt_editor import PromptEditor
 from .settings import Settings
 
 log = logging.getLogger(__name__)
-RunChatGPT = Callable[[Callable[[Callable[[str], None]], str], Callable[[str], None], Callable[[str], None]], bool]
+RunChatGPT = Callable[[Callable, Callable[[str], None], Callable[[str], None]], bool]
+
+
+@dataclass
+class ChatRequest:
+    message: str
+    image: Path | None
+    conversation_id: str
+    job: Callable | None = None
+    failed: bool = False
+    active: bool = False
 
 
 class ChatPanel(ttk.Frame):
@@ -32,6 +44,7 @@ class ChatPanel(ttk.Frame):
         screenshot_enabled: bool,
         on_screenshot_toggled: Callable[[bool], None],
         on_save_settings: Callable[[], None] | None = None,
+        on_stop_chatgpt: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self._get_session_file = get_session_file
@@ -41,10 +54,14 @@ class ChatPanel(ttk.Frame):
         self._run_chatgpt = run_chatgpt
         self._capture_screen = capture_screen
         self._on_save_settings = on_save_settings or self._save_settings_here
+        self._on_stop_chatgpt = on_stop_chatgpt or (lambda: None)
         self._new_conversation = False
         self._busy = False
-        self._messages: list[tuple[str, str, str]] = []
+        self._messages: list[tuple[str, str, str, str | None]] = []
+        self._requests: dict[str, ChatRequest] = {}
+        self._active_request_id: str | None = None
         self._pending_conversation_id: str | None = None
+        self._active_job: Callable | None = None
 
         bar = ttk.Frame(self, padding=(0, 4))
         bar.pack(fill="x")
@@ -130,13 +147,14 @@ class ChatPanel(ttk.Frame):
         self.entry.bind("<Return>", self._on_return)
         self.send_btn = ttk.Button(entry_row, text="Send ➤", command=self.send)
         self.send_btn.pack(side="left", padx=(6, 0), fill="y")
-        self.history = markdown_html.make_view(self)
+        self.history = markdown_html.make_view(self, self._on_history_link)
         self.history.pack(fill="both", expand=True)
         self.refresh_state()
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.refresh_state()
+        self._render()
 
     def refresh_state(self) -> None:
         if self._get_conversation_id() is None:
@@ -230,10 +248,13 @@ class ChatPanel(ttk.Frame):
 
     def load_conversation(self) -> None:
         self._messages.clear()
+        self._requests.clear()
+        self._active_request_id = None
         conversation_id = self._get_conversation_id()
         if conversation_id:
             conversation = self._store.get(conversation_id)
             for message in self._store.messages(conversation_id):
+                image = None
                 body = (
                     markdown_html.to_html(message.content)
                     if message.role == "bot"
@@ -245,7 +266,13 @@ class ChatPanel(ttk.Frame):
                         image = conversation.folder / image
                     if image.exists():
                         body += f"<div class='shot'><img src='{screenshot.thumbnail_data_uri(image)}'></div>"
-                self._messages.append((message.role, message.header, body))
+                    else:
+                        image = None
+                action_id = None
+                if message.role == "user" and message.kind == "chat":
+                    action_id = f"chat-{message.id}"
+                    self._requests[action_id] = ChatRequest(message.content, image, conversation_id)
+                self._messages.append((message.role, message.header, body, action_id))
         self._render()
         self.refresh_state()
 
@@ -259,14 +286,19 @@ class ChatPanel(ttk.Frame):
         message = self.entry.get("1.0", "end").strip()
         if not message or self._busy:
             return
+        if self._send_message(message):
+            self.entry.delete("1.0", "end")
+
+    def _send_message(self, message: str, reused_image: Path | None = None, reuse_image: bool = False) -> bool:
+        """Send a new user turn, rebuilding transcript/history from the current settings."""
         conversation_id = self._get_conversation_id()
         if conversation_id is None:
             messagebox.showinfo("Chat", "Select or create a conversation first.")
-            return
+            return False
         version = prompt_versions.resolve(self.prompt_var.get(), prompt_versions.CHAT_DIR)
         if not version:
             messagebox.showerror("Chat", f"No chat prompt found in {prompt_versions.CHAT_DIR}.")
-            return
+            return False
         self.prompt_var.set(version)
         self.settings.chat_prompt = version
         template_path = prompt_versions.path_for(version, prompt_versions.CHAT_DIR)
@@ -274,7 +306,7 @@ class ChatPanel(ttk.Frame):
         if self.attach_var.get():
             if tfile is None or not tfile.has_text:
                 messagebox.showinfo("Chat", "This conversation has no saved captions yet.")
-                return
+                return False
             try:
                 transcript = tfile.snapshot(self._max_lines())
                 prompt = chatgpt.build_prompt(
@@ -282,29 +314,29 @@ class ChatPanel(ttk.Frame):
                 )
             except (OSError, chatgpt.ChatGPTError) as exc:
                 messagebox.showerror("Chat", str(exc))
-                return
+                return False
         else:
             transcript = None
             try:
                 prompt = chatgpt.build_prompt(None, "", None, template_path, message)
             except chatgpt.ChatGPTError as exc:
                 messagebox.showerror("Chat", str(exc))
-                return
-        history = self._store.chat_context_path(conversation_id) if self.history_var.get() else None
+                return False
+        history = self._store.chat_context_snapshot(conversation_id) if self.history_var.get() else None
 
-        shot = None
-        if self.screenshot_var.get():
+        shot = reused_image if reuse_image else None
+        if not reuse_image and self.screenshot_var.get():
             try:
                 shot = self._capture_screen()
             except Exception as exc:  # noqa: BLE001
                 log.exception("Screenshot failed")
                 messagebox.showerror("Chat", f"Could not take the screenshot:\n{exc}")
-                return
+                return False
 
         attachments = [p for p in (transcript, history, shot) if p]
         new_chat, power = self._new_conversation, self._power()
 
-        def job(status: Callable[[str], None]) -> str:
+        def job(status: Callable[[str], None], cancel_event) -> str:
             return chatgpt.ask(
                 prompt,
                 attachments,
@@ -312,25 +344,39 @@ class ChatPanel(ttk.Frame):
                 new_chat=new_chat,
                 tab_name=f"{chatgpt.APP_TAB}-{conversation_id}",
                 power=power,
+                cancel_event=cancel_event,
             )
 
         self._pending_conversation_id = conversation_id
+        self._active_job = job
         if not self._run_chatgpt(job, self._on_answer, self._on_error):
             self._pending_conversation_id = None
-            return
-        self.entry.delete("1.0", "end")
+            self._active_job = None
+            return False
         attached = f" · attached: {', '.join(p.name for p in attachments)}" if attachments else ""
-        self._add_message(
+        action_id = self._add_message(
             "user",
             f"You · {datetime.now():%H:%M:%S}{attached}",
             message,
             image=shot,
             conversation_id=conversation_id,
+            render=False,
         )
+        assert action_id is not None
+        self._requests[action_id] = ChatRequest(
+            message, shot, conversation_id, job=job, active=True
+        )
+        self._active_request_id = action_id
         self._set_pending("ChatGPT is thinking…")
+        return True
 
     def _on_answer(self, answer: str) -> None:
         self._new_conversation = False
+        request = self._requests.get(self._active_request_id or "")
+        if request:
+            request.active = False
+            request.failed = False
+        self._active_job = None
         self._set_pending(None)
         self._add_message(
             "bot",
@@ -339,9 +385,16 @@ class ChatPanel(ttk.Frame):
             markdown=True,
             conversation_id=self._pending_conversation_id,
         )
+        self._active_request_id = None
         self._pending_conversation_id = None
 
     def _on_error(self, error: str) -> None:
+        request = self._requests.get(self._active_request_id or "")
+        if request:
+            request.active = False
+            request.failed = True
+            request.job = self._active_job
+        self._active_job = None
         self._set_pending(None)
         self._add_message(
             "bot",
@@ -349,8 +402,43 @@ class ChatPanel(ttk.Frame):
             error,
             conversation_id=self._pending_conversation_id,
         )
+        self._active_request_id = None
         self._pending_conversation_id = None
-        messagebox.showerror("Chat with ChatGPT", error)
+        if error != chatgpt.CANCELLED_MESSAGE:
+            messagebox.showerror("Chat with ChatGPT", error)
+
+    def retry(self, request_id: str) -> None:
+        if self._busy:
+            return
+        request = self._requests.get(request_id)
+        if request is None:
+            return
+        if request.failed and request.job:
+            self._pending_conversation_id = request.conversation_id
+            self._active_job = request.job
+            request.active = True
+            self._active_request_id = request_id
+            if not self._run_chatgpt(request.job, self._on_answer, self._on_error):
+                request.active = False
+                self._active_request_id = None
+                self._active_job = None
+                return
+            self._set_pending("Retrying with ChatGPT…")
+            return
+
+        # A successful turn is sent as a new turn. The message and screenshot are
+        # reused, while transcript/history are rebuilt from the current settings.
+        self._send_message(request.message, request.image, reuse_image=True)
+
+    def _on_history_link(self, url: str) -> None:
+        if url.startswith("rtc-chat-retry:"):
+            self.retry(url.removeprefix("rtc-chat-retry:"))
+        elif url.startswith("rtc-chat-stop:"):
+            request_id = url.removeprefix("rtc-chat-stop:")
+            if request_id == self._active_request_id:
+                self._on_stop_chatgpt()
+        else:
+            webbrowser.open(url)
 
     def new_conversation(self) -> None:
         if not self._busy:
@@ -386,31 +474,53 @@ class ChatPanel(ttk.Frame):
         image: Path | None = None,
         conversation_id: str | None = None,
         kind: str = "chat",
-    ) -> None:
+        render: bool = True,
+    ) -> str | None:
         conversation_id = conversation_id or self._get_conversation_id()
+        stored_id = None
         if conversation_id:
-            self._store.add_message(conversation_id, role, header, body, kind=kind, attachment=image)
+            stored_id = self._store.add_message(
+                conversation_id, role, header, body, kind=kind, attachment=image
+            )
         if conversation_id != self._get_conversation_id():
-            return
+            return None
         body_html = markdown_html.to_html(body) if markdown else markdown_html.plain_to_html(body)
         if image is not None:
             body_html += f"<div class='shot'><img src='{screenshot.thumbnail_data_uri(image)}'></div>"
-        self._messages.append((role, header, body_html))
-        self._render()
+        action_id = f"chat-{stored_id}" if role == "user" and kind == "chat" and stored_id else None
+        self._messages.append((role, header, body_html, action_id))
+        if render:
+            self._render()
+        return action_id
 
     def _set_pending(self, value: str | None) -> None:
         self._messages = [message for message in self._messages if message[0] != "pending"]
         if value:
-            self._messages.append(("pending", "", markdown_html.plain_to_html(value)))
+            self._messages.append(("pending", "", markdown_html.plain_to_html(value), None))
         self._render()
 
     def _render(self) -> None:
         parts = []
-        for role, header, body in self._messages:
+        for role, header, body, action_id in self._messages:
             if role == "pending":
                 parts.append(f"<div class='pending'>{body}</div>")
             else:
                 meta = "meta meta-right" if role == "user" else "meta"
                 parts.append(f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div>")
-                parts.append(f"<div class='{role}'>{body}</div>")
+                actions = self._request_actions(action_id) if action_id else ""
+                parts.append(f"<div class='{role}'>{body}{actions}</div>")
         markdown_html.show(self.history, "".join(parts), scroll_to_end=True)
+
+    def _request_actions(self, request_id: str) -> str:
+        request = self._requests.get(request_id)
+        retry = (
+            f"<a href='rtc-chat-retry:{request_id}'>↻ Retry</a>"
+            if request and not self._busy
+            else "<span class='disabled'>↻ Retry</span>"
+        )
+        stop = (
+            f"<a href='rtc-chat-stop:{request_id}'>■ Stop</a>"
+            if request and request.active and self._busy
+            else "<span class='disabled'>■ Stop</span>"
+        )
+        return f"<div class='message-actions'>{retry}{stop}</div>"

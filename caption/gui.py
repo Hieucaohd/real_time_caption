@@ -47,6 +47,7 @@ class App:
         self.current_conversation: Conversation | None = None
         self.session_file: ConversationTranscript | None = None
         self._sending_to_chatgpt = False
+        self._chatgpt_cancel: threading.Event | None = None
         self._ui_calls: "queue.Queue[Callable[[], None]]" = queue.Queue()  # from worker threads
         self.devices: list[AudioDevice] = []
         self.capture: AudioCapture | None = None
@@ -232,6 +233,14 @@ class App:
             state="disabled",
         )
         self.summarize_btn.pack(side="left", padx=4)
+        self.summary_retry_btn = ttk.Button(
+            summary_actions, text="↻ Retry last summary", command=self.retry_summary, state="disabled"
+        )
+        self.summary_retry_btn.pack(side="left", padx=4)
+        self.summary_stop_btn = ttk.Button(
+            summary_actions, text="■ Stop waiting", command=self.cancel_chatgpt, state="disabled"
+        )
+        self.summary_stop_btn.pack(side="left", padx=4)
         ttk.Button(summary_actions, text="Copy selected", command=self.copy_latest_summary).pack(side="right", padx=4)
         ttk.Button(summary_actions, text="Hide content", command=self.clear_summaries).pack(side="right", padx=4)
 
@@ -342,6 +351,9 @@ class App:
         self._summary_tab = summary_tab
         self._latest_summary = ""
         self._summary_messages: dict[str, ChatMessage] = {}
+        self._summary_active: tuple[Callable, ConversationTranscript, bool] | None = None
+        self._summary_retry: tuple[Callable, ConversationTranscript, bool] | None = None
+        self._summary_retry_failed = False
 
         self.chat = ChatPanel(
             self.tabs,
@@ -354,6 +366,7 @@ class App:
             on_screenshot_toggled=lambda on: setattr(self.settings, "chat_screenshot", on),
             run_chatgpt=self._run_chatgpt,
             on_save_settings=self.save_settings,
+            on_stop_chatgpt=self.cancel_chatgpt,
         )
         self.tabs.add(self.chat, text="Chat")
 
@@ -363,6 +376,7 @@ class App:
             get_session_file=lambda: self.session_file,
             run_chatgpt=self._run_chatgpt,
             on_save_settings=self.save_settings,
+            on_stop_chatgpt=self.cancel_chatgpt,
         )
         self.tabs.add(self.vocab, text="New words")
 
@@ -606,6 +620,10 @@ class App:
     def _update_chatgpt_controls(self) -> None:
         enabled = self.session_file is not None and not self._sending_to_chatgpt
         self.summarize_btn.configure(state="normal" if enabled else "disabled")
+        self.summary_retry_btn.configure(
+            state="normal" if self._summary_retry and not self._sending_to_chatgpt else "disabled"
+        )
+        self.summary_stop_btn.configure(state="normal" if self._sending_to_chatgpt else "disabled")
         self.chat.set_busy(self._sending_to_chatgpt)
         self.vocab.set_busy(self._sending_to_chatgpt)
 
@@ -725,18 +743,20 @@ class App:
 
     def _run_chatgpt(
         self,
-        job: Callable[[Callable[[str], None]], str],
+        job: Callable[[Callable[[str], None], threading.Event], str],
         on_answer: Callable[[str], None],
         on_error: Callable[[str], None],
     ) -> bool:
         """Run one ChatGPT request on a worker thread; only one may run at a time (shared Chrome).
 
-        ``job(status)`` returns the answer; ``on_answer``/``on_error`` run on the UI thread.
+        ``job(status, cancel_event)`` returns the answer; ``on_answer``/``on_error`` run on the UI thread.
         Returns False if another request is still running.
         """
         if self._sending_to_chatgpt:
             return False
         self._sending_to_chatgpt = True
+        cancel_event = threading.Event()
+        self._chatgpt_cancel = cancel_event
         self._update_chatgpt_controls()
 
         def status(msg: str) -> None:
@@ -744,12 +764,14 @@ class App:
 
         def finish(callback: Callable[[], None]) -> None:
             self._sending_to_chatgpt = False
+            if self._chatgpt_cancel is cancel_event:
+                self._chatgpt_cancel = None
             self._update_chatgpt_controls()
             callback()
 
         def work() -> None:
             try:
-                answer = job(status)
+                answer = job(status, cancel_event)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Asking ChatGPT failed")
                 message = str(exc) if isinstance(exc, chatgpt.ChatGPTError) else f"Asking ChatGPT failed:\n{exc}"
@@ -759,6 +781,11 @@ class App:
 
         threading.Thread(target=work, name="chatgpt", daemon=True).start()
         return True
+
+    def cancel_chatgpt(self) -> None:
+        if self._sending_to_chatgpt and self._chatgpt_cancel:
+            self._chatgpt_cancel.set()
+            self.status_var.set("ChatGPT: cancelling…")
 
     def _capture_behind_app(self):
         """Screenshot of the monitor the app is on, with all of the app's windows left out."""
@@ -832,20 +859,30 @@ class App:
         # Same ChatGPT conversation as the Chat tab; "New conversation" there also applies here.
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
         power = self._summary_power()
-        self._run_chatgpt(
-            lambda status: chatgpt.ask(
+        def job(status, cancel_event):
+            return chatgpt.ask(
                 prompt,
                 upload,
                 status,
                 new_chat=new_chat,
                 tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
                 power=power,
-            ),
+                cancel_event=cancel_event,
+            )
+
+        self._summary_active = (job, tfile, new_chat)
+        self._summary_retry = self._summary_active
+        self._summary_retry_failed = False
+        if self._run_chatgpt(
+            job,
             lambda answer: self._summary_received(tfile, answer, new_chat),
-            lambda error: messagebox.showerror("Summarize with ChatGPT", error),
-        )
+            lambda error: self._summary_error(error),
+        ) is False:
+            self._summary_active = None
 
     def _summary_received(self, tfile: ConversationTranscript, answer: str, started_new_chat: bool) -> None:
+        self._summary_active = None
+        self._summary_retry_failed = False
         self.chat.add_summary_exchange(tfile.path.name, answer, started_new_chat)
         saved = self._save_summary(tfile, answer)
         latest = self.store.latest_summary(tfile.conversation_id)
@@ -853,6 +890,35 @@ class App:
             self._refresh_summary_history(select_id=latest.id)
             self.tabs.select(self._summary_tab)
         self.status_var.set("ChatGPT: summary received" + (f" — saved to {saved.name}" if saved else ""))
+
+    def _summary_error(self, error: str) -> None:
+        if self._summary_active:
+            self._summary_retry = self._summary_active
+        self._summary_retry_failed = True
+        self._summary_active = None
+        if error == chatgpt.CANCELLED_MESSAGE:
+            self.status_var.set("ChatGPT: cancelled")
+        else:
+            messagebox.showerror("Summarize with ChatGPT", error)
+
+    def retry_summary(self) -> None:
+        if self._sending_to_chatgpt or not self._summary_retry:
+            return
+        if not self._summary_retry_failed:
+            # A completed summary is a new request, using a fresh transcript snapshot
+            # and the summary settings currently selected in the UI.
+            self.summarize_with_chatgpt()
+            return
+        job, tfile, new_chat = self._summary_retry
+        self._summary_active = self._summary_retry
+        if not self._run_chatgpt(
+            job,
+            lambda answer: self._summary_received(tfile, answer, new_chat),
+            self._summary_error,
+        ):
+            self._summary_active = None
+            return
+        self.status_var.set("ChatGPT: retrying summary…")
 
     def _save_summary(self, tfile: ConversationTranscript, answer: str):
         path = tfile.folder / "summaries.md"

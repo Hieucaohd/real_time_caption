@@ -92,6 +92,7 @@ Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm b�
 - **New ChatGPT thread**: tin nhắn tiếp theo (kể cả Summarize) mở một thread mới ở ChatGPT, nhưng lịch sử cục bộ trong app không bị xoá.
 - **Attach a screenshot of the apps behind** (mặc định bật): mỗi tin nhắn chat gửi kèm một ảnh chụp màn hình nơi app đang nằm, **không có cửa sổ của app này** (cả cửa sổ chính lẫn thanh phụ đề). App dùng `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` của Windows 10 2004+ để ẩn cửa sổ của mình khỏi ảnh chụp chỉ trong khoảng 0,2 giây lúc chụp. Trên màn hình bạn không thấy gì thay đổi, và những lúc khác vẫn chụp hay chia sẻ màn hình app bình thường. Ảnh được thu về tối đa rộng 1920px, lưu trong `screenshots/` của conversation đang chọn, và hiện dạng thu nhỏ trong bong bóng tin nhắn.
 - Mỗi lúc chỉ chạy một yêu cầu ChatGPT (Chat hoặc Summarize). Trong lúc chờ, các nút gửi bị khoá.
+- Nếu gửi Chat, Summary hoặc New words tới ChatGPT bị lỗi, tab tương ứng hiện nút **↻ Retry**. Nút này gửi lại đúng yêu cầu vừa thất bại mà không tạo thêm tin nhắn người dùng hoặc bắt nhập lại nội dung.
 - Nội dung chat được lưu trong SQLite và đồng thời xuất thành `chat_history.md` trong folder conversation. Mỗi conversation dùng một tab ChatGPT nền riêng để không lẫn context với conversation khác.
 
 ### Lưu từ mới vào Voca
