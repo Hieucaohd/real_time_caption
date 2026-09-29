@@ -60,6 +60,7 @@ class ChatPanel(ttk.Frame):
         self._messages: list[tuple[str, str, str, str | None]] = []
         self._requests: dict[str, ChatRequest] = {}
         self._active_request_id: str | None = None
+        self._render_scheduled = False
         self._pending_conversation_id: str | None = None
         self._active_job: Callable | None = None
 
@@ -154,7 +155,7 @@ class ChatPanel(ttk.Frame):
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.refresh_state()
-        self._render()
+        self._schedule_render()
 
     def refresh_state(self) -> None:
         if self._get_conversation_id() is None:
@@ -432,11 +433,12 @@ class ChatPanel(ttk.Frame):
 
     def _on_history_link(self, url: str) -> None:
         if url.startswith("rtc-chat-retry:"):
-            self.retry(url.removeprefix("rtc-chat-retry:"))
+            request_id = url.removeprefix("rtc-chat-retry:")
+            self.after_idle(lambda request_id=request_id: self.retry(request_id))
         elif url.startswith("rtc-chat-stop:"):
             request_id = url.removeprefix("rtc-chat-stop:")
             if request_id == self._active_request_id:
-                self._on_stop_chatgpt()
+                self.after_idle(self._on_stop_chatgpt)
         else:
             webbrowser.open(url)
 
@@ -510,6 +512,19 @@ class ChatPanel(ttk.Frame):
                 actions = self._request_actions(action_id) if action_id else ""
                 parts.append(f"<div class='{role}'>{body}{actions}</div>")
         markdown_html.show(self.history, "".join(parts), scroll_to_end=True)
+
+    def _schedule_render(self) -> None:
+        """Coalesce state renders and never reload Tkhtml inside its own event callback."""
+        if self._render_scheduled:
+            return
+        self._render_scheduled = True
+
+        def render() -> None:
+            self._render_scheduled = False
+            if self.winfo_exists():
+                self._render()
+
+        self.after_idle(render)
 
     def _request_actions(self, request_id: str) -> str:
         request = self._requests.get(request_id)

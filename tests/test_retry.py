@@ -155,6 +155,45 @@ class RetryTests(unittest.TestCase):
         retry_html = panel._request_actions("request-1")
         self.assertIn("rtc-vocab-retry:request-1", retry_html)
 
+    def test_chat_html_action_is_deferred_until_tk_is_idle(self) -> None:
+        panel = object.__new__(ChatPanel)
+        panel.after_idle = Mock()
+        panel.retry = Mock()
+
+        panel._on_history_link("rtc-chat-retry:request-1")
+
+        panel.retry.assert_not_called()
+        callback = panel.after_idle.call_args.args[0]
+        callback()
+        panel.retry.assert_called_once_with("request-1")
+
+    def test_vocab_html_action_is_deferred_until_tk_is_idle(self) -> None:
+        panel = object.__new__(VocabPanel)
+        panel.after_idle = Mock()
+        panel.retry = Mock()
+
+        panel._on_history_link("rtc-vocab-retry:request-1")
+
+        panel.retry.assert_not_called()
+        callback = panel.after_idle.call_args.args[0]
+        callback()
+        panel.retry.assert_called_once_with("request-1")
+
+    def test_busy_renders_are_coalesced(self) -> None:
+        panel = object.__new__(ChatPanel)
+        panel._render_scheduled = False
+        panel.after_idle = Mock()
+        panel.winfo_exists = Mock(return_value=True)
+        panel._render = Mock()
+
+        panel._schedule_render()
+        panel._schedule_render()
+
+        panel.after_idle.assert_called_once()
+        panel.after_idle.call_args.args[0]()
+        panel._render.assert_called_once_with()
+        self.assertFalse(panel._render_scheduled)
+
 
 if __name__ == "__main__":
     unittest.main()
