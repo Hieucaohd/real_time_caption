@@ -25,7 +25,7 @@ class RetryTests(unittest.TestCase):
 
     def test_chatgpt_cancel_clicks_stop_and_aborts_wait(self) -> None:
         page, stop = Mock(), Mock()
-        page.locator.return_value.first = stop
+        page.locator.return_value.filter.return_value.first = stop
         stop.count.return_value = 1
         stop.is_visible.return_value = True
         cancel_event = threading.Event()
@@ -35,6 +35,7 @@ class RetryTests(unittest.TestCase):
             chatgpt._cancel_if_requested(page, cancel_event)
 
         page.locator.assert_called_once_with(chatgpt.STOP_BUTTON)
+        page.locator.return_value.filter.assert_called_once_with(visible=True)
         stop.click.assert_called_once_with(timeout=2000)
 
     def test_chat_retry_reuses_failed_job_and_conversation(self) -> None:
@@ -62,7 +63,7 @@ class RetryTests(unittest.TestCase):
         app = object.__new__(App)
         job, transcript = Mock(), Mock()
         app._sending_to_chatgpt = False
-        app._summary_retry = (job, transcript, True)
+        app._summary_retry = (job, transcript, True, True)
         app._summary_retry_failed = True
         app._summary_active = None
         app.summary_retry_btn = Mock()
@@ -71,7 +72,7 @@ class RetryTests(unittest.TestCase):
 
         app.retry_summary()
 
-        self.assertEqual(app._summary_active, (job, transcript, True))
+        self.assertEqual(app._summary_active, (job, transcript, True, True))
         self.assertIs(app._run_chatgpt.call_args.args[0], job)
         app.status_var.set.assert_called_once_with("ChatGPT: retrying summary…")
 
@@ -119,7 +120,7 @@ class RetryTests(unittest.TestCase):
     def test_successful_summary_retry_builds_a_fresh_request(self) -> None:
         app = object.__new__(App)
         app._sending_to_chatgpt = False
-        app._summary_retry = (Mock(), Mock(), True)
+        app._summary_retry = (Mock(), Mock(), True, True)
         app._summary_retry_failed = False
         app.summarize_with_chatgpt = Mock()
 

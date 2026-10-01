@@ -24,6 +24,7 @@ class Settings:
     overlay_transparent: bool = False  # text only, no background bar
     overlay_click_through: bool = False  # mouse passes through the overlay
     summary_new_chat: bool = True
+    summary_attach_transcript: bool = True
     summary_max_lines: int = 300  # newest caption lines; 0 = the whole transcript
     chat_max_lines: int = 300
     summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)

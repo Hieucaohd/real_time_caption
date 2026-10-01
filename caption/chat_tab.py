@@ -346,6 +346,7 @@ class ChatPanel(ttk.Frame):
                 tab_name=f"{chatgpt.APP_TAB}-{conversation_id}",
                 power=power,
                 cancel_event=cancel_event,
+                use_current_tab=True,
             )
 
         self._pending_conversation_id = conversation_id
@@ -451,12 +452,12 @@ class ChatPanel(ttk.Frame):
     def wants_new_conversation(self) -> bool:
         return self._new_conversation
 
-    def add_summary_exchange(self, file_name: str, answer: str, started_new_chat: bool) -> None:
+    def add_summary_exchange(self, file_name: str | None, answer: str, started_new_chat: bool) -> None:
         self._new_conversation = False
         self._add_message(
             "user",
-            f"You · {datetime.now():%H:%M:%S} · 📎 {file_name}",
-            "🧾 Summarize this conversation",
+            f"You · {datetime.now():%H:%M:%S}" + (f" · 📎 {file_name}" if file_name else ""),
+            "🧾 Summarize this conversation" if file_name else "🧾 Summarize the current ChatGPT conversation",
             kind="summary",
         )
         self._add_message(

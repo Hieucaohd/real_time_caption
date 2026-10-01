@@ -296,15 +296,23 @@ class App:
         )
         self.summary_power_box.pack(fill="x", pady=(0, 8))
         self.summary_power_box.bind("<<ComboboxSelected>>", lambda _e: self._save_summary_power())
+        self.summary_attach_transcript_var = tk.BooleanVar(value=self.settings.summary_attach_transcript)
+        ttk.Checkbutton(
+            summary_settings,
+            text="Attach transcript file to ChatGPT",
+            variable=self.summary_attach_transcript_var,
+            command=self._summary_attachment_toggled,
+        ).pack(anchor="w", pady=(0, 8))
         ttk.Label(summary_settings, text="Send the last caption lines (0 = all)").pack(anchor="w", pady=(2, 2))
         self.summary_max_lines_var = tk.StringVar(value=str(self.settings.summary_max_lines))
-        ttk.Spinbox(
+        self.summary_max_lines_box = ttk.Spinbox(
             summary_settings,
             from_=0,
             to=100_000,
             increment=50,
             textvariable=self.summary_max_lines_var,
-        ).pack(fill="x", pady=(0, 8))
+        )
+        self.summary_max_lines_box.pack(fill="x", pady=(0, 8))
         self.new_chat_var = tk.BooleanVar(value=self.settings.summary_new_chat)
         ttk.Checkbutton(
             summary_settings,
@@ -340,6 +348,7 @@ class App:
             fill="x", pady=(12, 4)
         )
         self._refresh_prompt_versions()
+        self._summary_attachment_toggled()
 
         self._summary_sidebar_pages = {"history": summary_history, "settings": summary_settings}
         self._summary_sidebar_name: str | None = None
@@ -351,8 +360,8 @@ class App:
         self._summary_tab = summary_tab
         self._latest_summary = ""
         self._summary_messages: dict[str, ChatMessage] = {}
-        self._summary_active: tuple[Callable, ConversationTranscript, bool] | None = None
-        self._summary_retry: tuple[Callable, ConversationTranscript, bool] | None = None
+        self._summary_active: tuple[Callable, ConversationTranscript, bool, bool] | None = None
+        self._summary_retry: tuple[Callable, ConversationTranscript, bool, bool] | None = None
         self._summary_retry_failed = False
 
         self.chat = ChatPanel(
@@ -808,6 +817,11 @@ class App:
         level = self.settings.summary_chatgpt_power
         return level if 0 <= level < len(chatgpt.POWER_LEVELS) else None
 
+    def _summary_attachment_toggled(self) -> None:
+        attach = self.summary_attach_transcript_var.get()
+        self.settings.summary_attach_transcript = attach
+        self.summary_max_lines_box.configure(state="normal" if attach else "disabled")
+
     def _refresh_prompt_versions(self) -> None:
         """Re-read prompts/summarize/ (files may have been added by hand) and keep a valid choice."""
         versions = prompt_versions.list_versions()
@@ -844,11 +858,12 @@ class App:
         tfile = self.session_file
         if tfile is None or self._sending_to_chatgpt:
             return
-        if not tfile.has_text:
+        attach_transcript = self.summary_attach_transcript_var.get()
+        if attach_transcript and not tfile.has_text:
             messagebox.showinfo("Summarize", "No captions have been saved for this session yet.")
             return
         try:
-            upload = tfile.snapshot(self._summary_max_lines())
+            upload = tfile.snapshot(self._summary_max_lines()) if attach_transcript else None
             version = prompt_versions.resolve(self.prompt_var.get())
             if version is None:
                 raise chatgpt.ChatGPTError(f"No summary prompt found in {prompt_versions.SUMMARY_DIR}.")
@@ -868,22 +883,25 @@ class App:
                 tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
                 power=power,
                 cancel_event=cancel_event,
+                use_current_tab=True,
             )
 
-        self._summary_active = (job, tfile, new_chat)
+        self._summary_active = (job, tfile, new_chat, attach_transcript)
         self._summary_retry = self._summary_active
         self._summary_retry_failed = False
         if self._run_chatgpt(
             job,
-            lambda answer: self._summary_received(tfile, answer, new_chat),
+            lambda answer: self._summary_received(tfile, answer, new_chat, attach_transcript),
             lambda error: self._summary_error(error),
         ) is False:
             self._summary_active = None
 
-    def _summary_received(self, tfile: ConversationTranscript, answer: str, started_new_chat: bool) -> None:
+    def _summary_received(
+        self, tfile: ConversationTranscript, answer: str, started_new_chat: bool, attached_transcript: bool
+    ) -> None:
         self._summary_active = None
         self._summary_retry_failed = False
-        self.chat.add_summary_exchange(tfile.path.name, answer, started_new_chat)
+        self.chat.add_summary_exchange(tfile.path.name if attached_transcript else None, answer, started_new_chat)
         saved = self._save_summary(tfile, answer)
         latest = self.store.latest_summary(tfile.conversation_id)
         if latest and tfile.conversation_id == self._conversation_id():
@@ -909,11 +927,11 @@ class App:
             # and the summary settings currently selected in the UI.
             self.summarize_with_chatgpt()
             return
-        job, tfile, new_chat = self._summary_retry
+        job, tfile, new_chat, attached_transcript = self._summary_retry
         self._summary_active = self._summary_retry
         if not self._run_chatgpt(
             job,
-            lambda answer: self._summary_received(tfile, answer, new_chat),
+            lambda answer: self._summary_received(tfile, answer, new_chat, attached_transcript),
             self._summary_error,
         ):
             self._summary_active = None
@@ -1063,6 +1081,7 @@ class App:
         self._summary_max_lines()
         self._save_summary_power()
         self.settings.summary_new_chat = self.new_chat_var.get()
+        self.settings.summary_attach_transcript = self.summary_attach_transcript_var.get()
         self.chat.persist_settings()
         self.vocab.persist_settings()
         self.settings.show_overlay = self.overlay_var.get()

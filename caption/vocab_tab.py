@@ -24,7 +24,7 @@ from .voca_client import VocaClient, VocaError
 
 log = logging.getLogger(__name__)
 
-VOCAB_TAB = "real-time-caption-vocab"  # the ChatGPT tab (window.name) used for translations
+VOCAB_TAB = chatgpt.VOCAB_TAB  # the dedicated ChatGPT tab (window.name) used for translations
 VOCA_URL = "https://voca-zeta-five.vercel.app/"
 DEFAULT_COLLECTION = "Default (chosen in Voca)"
 RunChatGPT = Callable[[Callable, Callable, Callable], bool]

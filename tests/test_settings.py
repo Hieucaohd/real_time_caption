@@ -61,6 +61,7 @@ class SettingsMigrationTests(unittest.TestCase):
         app._summary_max_lines = Mock(return_value=25)
         app._save_summary_power = Mock()
         app.new_chat_var = SimpleNamespace(get=lambda: False)
+        app.summary_attach_transcript_var = SimpleNamespace(get=lambda: False)
         app.chat = SimpleNamespace(persist_settings=Mock())
         app.vocab = SimpleNamespace(persist_settings=Mock())
         app.overlay_var = SimpleNamespace(get=lambda: False)
@@ -73,6 +74,7 @@ class SettingsMigrationTests(unittest.TestCase):
             app.save_settings()
 
         self.assertFalse(app.settings.summary_new_chat)
+        self.assertFalse(app.settings.summary_attach_transcript)
         self.assertFalse(app.settings.show_overlay)
         self.assertEqual(app.settings.model, "medium.en")
         self.assertEqual(app.settings.compute, "cpu")
