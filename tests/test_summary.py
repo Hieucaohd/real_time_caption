@@ -13,6 +13,42 @@ from caption.gui import App
 
 
 class SummaryAttachmentTests(unittest.TestCase):
+    def test_summary_tab_dropdown_restores_its_saved_chrome_tab(self) -> None:
+        app = object.__new__(App)
+        app._summary_scanning_tabs = True
+        app._sending_to_chatgpt = False
+        app.settings = SimpleNamespace(summary_chatgpt_selected_tab="tab-2")
+        app.summary_chrome_tab_box = Mock()
+        app.summary_refresh_tabs_btn = Mock()
+        app.summary_chrome_tab_status = Mock()
+        selected = {"value": ""}
+        app.summary_chrome_tab_var = Mock()
+        app.summary_chrome_tab_var.set.side_effect = lambda value: selected.update(value=value)
+        app.summary_chrome_tab_var.get.side_effect = lambda: selected["value"]
+        tabs = [
+            chatgpt.ChromeChatGPTTab("tab-1", "First — 11111111", "First", "url-1", True),
+            chatgpt.ChromeChatGPTTab("tab-2", "Second — 22222222", "Second", "url-2", False),
+        ]
+
+        app._show_summary_chrome_tabs(tabs)
+
+        self.assertEqual(selected["value"], "Second — 22222222")
+        self.assertEqual(app.settings.summary_chatgpt_selected_tab, "tab-2")
+        app.summary_chrome_tab_box.configure.assert_any_call(
+            values=["First — 11111111", "Second — 22222222"]
+        )
+
+    def test_summary_requires_a_selected_chrome_tab(self) -> None:
+        app = object.__new__(App)
+        app.session_file = Mock()
+        app._sending_to_chatgpt = False
+        app._selected_summary_chrome_tab_key = Mock(return_value=None)
+
+        with patch("caption.gui.messagebox.showinfo") as showinfo:
+            app.summarize_with_chatgpt()
+
+        showinfo.assert_called_once()
+
     def test_summary_sends_only_the_transcript_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             upload = Path(folder) / "transcript.txt"
@@ -33,6 +69,7 @@ class SummaryAttachmentTests(unittest.TestCase):
             app.new_chat_var = SimpleNamespace(get=lambda: True)
             app.chat = SimpleNamespace(wants_new_conversation=False)
             app._summary_power = Mock(return_value=None)
+            app._selected_summary_chrome_tab_key = Mock(return_value="summary-tab")
             app._summary_received = Mock()
 
             def run(job, _on_answer, _on_error):
@@ -53,7 +90,8 @@ class SummaryAttachmentTests(unittest.TestCase):
             self.assertEqual(ask.call_args.args[1], upload)
             self.assertIsNotNone(app._summary_retry)
             self.assertFalse(ask.call_args.kwargs["cancel_event"].is_set())
-            self.assertTrue(ask.call_args.kwargs["use_current_tab"])
+            self.assertEqual(ask.call_args.kwargs["selected_tab"], "summary-tab")
+            self.assertNotIn("use_current_tab", ask.call_args.kwargs)
 
     def test_summary_can_skip_the_transcript_attachment(self) -> None:
         transcript = SimpleNamespace(
@@ -72,6 +110,7 @@ class SummaryAttachmentTests(unittest.TestCase):
         app.new_chat_var = SimpleNamespace(get=lambda: False)
         app.chat = SimpleNamespace(wants_new_conversation=False)
         app._summary_power = Mock(return_value=None)
+        app._selected_summary_chrome_tab_key = Mock(return_value="summary-tab")
 
         def run(job, _on_answer, _on_error):
             job(lambda _status: None, threading.Event())

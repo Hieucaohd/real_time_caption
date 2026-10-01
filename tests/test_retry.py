@@ -195,6 +195,29 @@ class RetryTests(unittest.TestCase):
         panel._render.assert_called_once_with()
         self.assertFalse(panel._render_scheduled)
 
+    def test_chat_tab_dropdown_restores_the_saved_chrome_tab(self) -> None:
+        panel = object.__new__(ChatPanel)
+        panel._scanning_tabs = True
+        panel._busy = False
+        panel.settings = SimpleNamespace(chatgpt_selected_tab="tab-2")
+        panel.chrome_tab_box = Mock()
+        panel.refresh_tabs_btn = Mock()
+        panel.chrome_tab_status = Mock()
+        selected = {"value": ""}
+        panel.chrome_tab_var = Mock()
+        panel.chrome_tab_var.set.side_effect = lambda value: selected.update(value=value)
+        panel.chrome_tab_var.get.side_effect = lambda: selected["value"]
+        tabs = [
+            chatgpt.ChromeChatGPTTab("tab-1", "First — 11111111", "First", "url-1", True),
+            chatgpt.ChromeChatGPTTab("tab-2", "Second — 22222222", "Second", "url-2", False),
+        ]
+
+        panel._show_chrome_tabs(tabs)
+
+        self.assertEqual(selected["value"], "Second — 22222222")
+        self.assertEqual(panel.settings.chatgpt_selected_tab, "tab-2")
+        panel.chrome_tab_box.configure.assert_any_call(values=["First — 11111111", "Second — 22222222"])
+
 
 if __name__ == "__main__":
     unittest.main()

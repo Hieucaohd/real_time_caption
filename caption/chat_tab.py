@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
+import threading
 import tkinter as tk
 import webbrowser
 from dataclasses import dataclass
@@ -63,6 +65,23 @@ class ChatPanel(ttk.Frame):
         self._render_scheduled = False
         self._pending_conversation_id: str | None = None
         self._active_job: Callable | None = None
+        self._chrome_tabs: dict[str, chatgpt.ChromeChatGPTTab] = {}
+        self._tab_results: "queue.Queue[Callable[[], None]]" = queue.Queue()
+        self._scanning_tabs = False
+
+        tab_bar = ttk.Frame(self, padding=(0, 4))
+        tab_bar.pack(fill="x")
+        ttk.Label(tab_bar, text="ChatGPT Chrome tab").pack(side="left", padx=(4, 6))
+        self.chrome_tab_var = tk.StringVar()
+        self.chrome_tab_box = ttk.Combobox(
+            tab_bar, textvariable=self.chrome_tab_var, state="readonly", width=48
+        )
+        self.chrome_tab_box.pack(side="left", fill="x", expand=True)
+        self.chrome_tab_box.bind("<<ComboboxSelected>>", lambda _e: self._chrome_tab_selected())
+        self.refresh_tabs_btn = ttk.Button(tab_bar, text="↻ Refresh tabs", command=self.refresh_chrome_tabs)
+        self.refresh_tabs_btn.pack(side="left", padx=6)
+        self.chrome_tab_status = tk.StringVar(value="Scanning Chrome tabs…")
+        ttk.Label(tab_bar, textvariable=self.chrome_tab_status, foreground="#777777").pack(side="left", padx=4)
 
         bar = ttk.Frame(self, padding=(0, 4))
         bar.pack(fill="x")
@@ -151,11 +170,70 @@ class ChatPanel(ttk.Frame):
         self.history = markdown_html.make_view(self, self._on_history_link)
         self.history.pack(fill="both", expand=True)
         self.refresh_state()
+        self.after(100, self.refresh_chrome_tabs)
+        self.after(150, self._drain_tab_results)
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self.chrome_tab_box.configure(state="disabled" if busy or self._scanning_tabs else "readonly")
+        self.refresh_tabs_btn.configure(state="disabled" if busy or self._scanning_tabs else "normal")
         self.refresh_state()
         self._schedule_render()
+
+    def refresh_chrome_tabs(self) -> None:
+        if self._busy or self._scanning_tabs:
+            return
+        self._scanning_tabs = True
+        self.chrome_tab_box.configure(state="disabled")
+        self.refresh_tabs_btn.configure(state="disabled")
+        self.chrome_tab_status.set("Scanning…")
+
+        def scan() -> Callable[[], None]:
+            try:
+                tabs = chatgpt.list_chrome_chatgpt_tabs()
+            except chatgpt.ChatGPTError as exc:
+                return lambda: self._show_chrome_tab_error(str(exc))
+            return lambda: self._show_chrome_tabs(tabs)
+
+        threading.Thread(
+            target=lambda: self._tab_results.put(scan()), name="chatgpt-tab-scan", daemon=True
+        ).start()
+
+    def _drain_tab_results(self) -> None:
+        try:
+            while True:
+                self._tab_results.get_nowait()()
+        except queue.Empty:
+            pass
+        self.after(150, self._drain_tab_results)
+
+    def _show_chrome_tabs(self, tabs: list[chatgpt.ChromeChatGPTTab]) -> None:
+        self._scanning_tabs = False
+        self._chrome_tabs = {tab.label: tab for tab in tabs}
+        self.chrome_tab_box.configure(values=list(self._chrome_tabs))
+        wanted = next((tab.label for tab in tabs if tab.key == self.settings.chatgpt_selected_tab), None)
+        if wanted is None:
+            wanted = next((tab.label for tab in tabs if tab.focused), None)
+        if wanted is None and tabs:
+            wanted = tabs[0].label
+        self.chrome_tab_var.set(wanted or "")
+        self.settings.chatgpt_selected_tab = self._selected_chrome_tab_key() or ""
+        self.chrome_tab_status.set(f"{len(tabs)} tab(s)" if tabs else "No ChatGPT tabs found")
+        self.chrome_tab_box.configure(state="disabled" if self._busy or not tabs else "readonly")
+        self.refresh_tabs_btn.configure(state="disabled" if self._busy else "normal")
+
+    def _show_chrome_tab_error(self, error: str) -> None:
+        self._scanning_tabs = False
+        self.chrome_tab_status.set(error.splitlines()[0])
+        self.chrome_tab_box.configure(state="disabled" if self._busy else "readonly")
+        self.refresh_tabs_btn.configure(state="disabled" if self._busy else "normal")
+
+    def _chrome_tab_selected(self) -> None:
+        self.settings.chatgpt_selected_tab = self._selected_chrome_tab_key() or ""
+
+    def _selected_chrome_tab_key(self) -> str | None:
+        selected = self._chrome_tabs.get(self.chrome_tab_var.get())
+        return selected.key if selected else None
 
     def refresh_state(self) -> None:
         if self._get_conversation_id() is None:
@@ -238,6 +316,7 @@ class ChatPanel(ttk.Frame):
         self._max_lines()
         self._save_power()
         self.settings.chat_attach_history = self.history_var.get()
+        self.settings.chatgpt_selected_tab = self._selected_chrome_tab_key() or ""
         self._save_prompt()
 
     def _save_settings_here(self) -> None:
@@ -296,6 +375,10 @@ class ChatPanel(ttk.Frame):
         if conversation_id is None:
             messagebox.showinfo("Chat", "Select or create a conversation first.")
             return False
+        selected_tab = self._selected_chrome_tab_key()
+        if selected_tab is None:
+            messagebox.showinfo("Chat", "Choose a ChatGPT Chrome tab, or press Refresh tabs first.")
+            return False
         version = prompt_versions.resolve(self.prompt_var.get(), prompt_versions.CHAT_DIR)
         if not version:
             messagebox.showerror("Chat", f"No chat prompt found in {prompt_versions.CHAT_DIR}.")
@@ -346,7 +429,7 @@ class ChatPanel(ttk.Frame):
                 tab_name=f"{chatgpt.APP_TAB}-{conversation_id}",
                 power=power,
                 cancel_event=cancel_event,
-                use_current_tab=True,
+                selected_tab=selected_tab,
             )
 
         self._pending_conversation_id = conversation_id

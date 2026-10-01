@@ -16,7 +16,14 @@ class SettingsMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "settings.json"
             path.write_text(
-                json.dumps({"chatgpt_power": 2, "chatgpt_max_lines": 50, "chatgpt_new_chat": False}),
+                json.dumps(
+                    {
+                        "chatgpt_power": 2,
+                        "chatgpt_max_lines": 50,
+                        "chatgpt_new_chat": False,
+                        "chatgpt_selected_tab": "legacy-selected-tab",
+                    }
+                ),
                 encoding="utf-8",
             )
             with patch.object(settings, "SETTINGS_PATH", path):
@@ -29,6 +36,7 @@ class SettingsMigrationTests(unittest.TestCase):
         self.assertEqual(loaded.chat_max_lines, 50)
         self.assertFalse(loaded.summary_new_chat)
         self.assertFalse(loaded.chat_attach_history)
+        self.assertEqual(loaded.summary_chatgpt_selected_tab, "legacy-selected-tab")
 
     def test_explicit_tab_values_are_not_overwritten_by_legacy_values(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

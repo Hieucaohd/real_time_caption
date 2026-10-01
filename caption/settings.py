@@ -33,6 +33,8 @@ class Settings:
     chat_chatgpt_power: int = -1
     vocab_chatgpt_power: int = -1
     chat_attach_history: bool = False  # local history is large and normally unnecessary
+    chatgpt_selected_tab: str = ""  # invisible window.name key assigned to the chosen Chrome tab
+    summary_chatgpt_selected_tab: str = ""  # independently selected Chrome tab for summaries
     chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
     voca_api_key: str = ""  # personal key from Voca → Cài đặt → Ứng dụng kết nối (kept only in settings.json)
     voca_collection_id: str = ""  # "" = the app's default collection in Voca
@@ -59,6 +61,7 @@ class Settings:
         data.setdefault("summary_max_lines", old_lines)
         data.setdefault("chat_max_lines", old_lines)
         data.setdefault("summary_new_chat", data.get("chatgpt_new_chat", True))
+        data.setdefault("summary_chatgpt_selected_tab", data.get("chatgpt_selected_tab", ""))
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
 

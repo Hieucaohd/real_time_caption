@@ -24,6 +24,11 @@ def page(url: str, *, name: str = "", focused: bool = False, visible: bool = Fal
 
 
 class CurrentChatGPTTabTests(unittest.TestCase):
+    def test_composer_selector_is_scoped_away_from_editable_code_blocks(self) -> None:
+        self.assertIn("form[data-chatgpt-composer]", chatgpt.COMPOSER)
+        self.assertIn("data-composer-markdown", chatgpt.COMPOSER)
+        self.assertNotIn("div[contenteditable='true'][aria-label],", chatgpt.COMPOSER)
+
     def test_visible_locator_ignores_hidden_duplicates(self) -> None:
         browser_page = Mock()
         visible_match = Mock()
@@ -79,6 +84,24 @@ class CurrentChatGPTTabTests(unittest.TestCase):
 
         self.assertIs(chosen, ordinary)
         self.assertFalse(created)
+
+    def test_selected_tab_is_found_by_its_stable_window_name(self) -> None:
+        first = page("https://chatgpt.com/c/first", name=chatgpt.CHAT_TAB_PREFIX + "first")
+        selected = page("https://chatgpt.com/c/selected", name=chatgpt.CHAT_TAB_PREFIX + "selected")
+        browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[first, selected])])
+
+        chosen, created = chatgpt._selected_chatgpt_tab(
+            browser, chatgpt.CHAT_TAB_PREFIX + "selected"
+        )
+
+        self.assertIs(chosen, selected)
+        self.assertFalse(created)
+
+    def test_closed_selected_tab_requires_a_refresh(self) -> None:
+        browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[])])
+
+        with self.assertRaisesRegex(chatgpt.ChatGPTError, "Refresh"):
+            chatgpt._selected_chatgpt_tab(browser, chatgpt.CHAT_TAB_PREFIX + "closed")
 
     def test_creates_a_tab_when_only_voca_is_open(self) -> None:
         voca = page("https://chatgpt.com/c/voca", name=chatgpt.VOCAB_TAB, focused=True)

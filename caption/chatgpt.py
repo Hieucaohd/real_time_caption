@@ -20,6 +20,8 @@ import logging
 import re
 import threading
 import time
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -32,12 +34,19 @@ CHATGPT_URL = "https://chatgpt.com/"
 # ChatGPT tab; New words still uses its own named tab.
 APP_TAB = "real-time-caption-summary"
 VOCAB_TAB = "real-time-caption-vocab"
+CHAT_TAB_PREFIX = "real-time-caption-chat:"
+_TAB_SCAN_LOCK = threading.Lock()
 # Summary and Chat prompts are versioned in their own folders (see prompt_versions.py).
 
+# Keep this scoped to ChatGPT's real composer.  A conversation can contain other
+# visible contenteditable widgets (for example the CodeMirror "Edit code" pane).
+# The old broad ``div[contenteditable][aria-label]`` selector could pick one of
+# those before the message box and then fail while looking for its composer form.
 COMPOSER = (
-    "#prompt-textarea, "
-    "div[contenteditable='true'][aria-label], "
-    "div.ProseMirror[contenteditable='true']"
+    "form[data-chatgpt-composer] [data-composer-markdown][contenteditable='true'], "
+    "form[data-thread-find-composer] [contenteditable='true'][role='textbox'], "
+    "form #prompt-textarea, "
+    "form div.ProseMirror[contenteditable='true'][role='textbox']"
 )
 # ChatGPT has several hidden file inputs; the image-only ones reject .txt files.
 FILE_INPUT = "input[type='file']:not([accept*='image'])"
@@ -123,6 +132,15 @@ class ChatGPTCancelled(ChatGPTError):
     pass
 
 
+@dataclass(frozen=True)
+class ChromeChatGPTTab:
+    key: str
+    label: str
+    title: str
+    url: str
+    focused: bool
+
+
 def build_prompt(
     file_path: Path | None,
     source: str,
@@ -206,6 +224,71 @@ def _current_chatgpt_tab(browser):
     if not browser.contexts:
         raise ChatGPTError("Chrome has no open window to add a tab to.")
     return _open_background_tab(browser), True
+
+
+def _selected_chatgpt_tab(browser, tab_key: str):
+    """Return the ordinary ChatGPT tab carrying ``tab_key`` or fail without opening another."""
+    for context in browser.contexts:
+        for page in context.pages:
+            if "chatgpt.com" not in page.url:
+                continue
+            try:
+                if page.evaluate("window.name") == tab_key:
+                    return page, False
+            except Exception:  # noqa: BLE001 - tab closing or crashed
+                continue
+    raise ChatGPTError("The selected ChatGPT tab is no longer open. Press Refresh and choose another tab.")
+
+
+def list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
+    """Scan Chrome's ordinary ChatGPT tabs and give each a stable, invisible key."""
+    # Chat and Summary scan on separate worker threads during startup. Serializing
+    # them prevents both scans assigning different keys to the same unnamed tab.
+    with _TAB_SCAN_LOCK:
+        return _list_chrome_chatgpt_tabs()
+
+
+def _list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+        except Exception as exc:  # noqa: BLE001
+            raise ChatGPTError(
+                f"Could not connect to Chrome at {CDP_URL}. Start Chrome with remote debugging and try again."
+            ) from exc
+        found: list[tuple[str, str, str, bool, bool]] = []
+        for context in browser.contexts:
+            for page in context.pages:
+                if "chatgpt.com" not in page.url:
+                    continue
+                try:
+                    key = page.evaluate("window.name")
+                    if key == VOCAB_TAB:
+                        continue
+                    if not isinstance(key, str) or not key.startswith(CHAT_TAB_PREFIX):
+                        key = CHAT_TAB_PREFIX + uuid.uuid4().hex
+                        page.evaluate("key => window.name = key", key)
+                    title = page.title().strip() or "ChatGPT"
+                    focused = bool(page.evaluate("document.hasFocus()"))
+                    visible = page.evaluate("document.visibilityState") == "visible"
+                    found.append((key, title, page.url, focused, visible))
+                except Exception:  # noqa: BLE001 - tab closing during the scan
+                    continue
+        # Current/focused tabs appear first. The short stable key makes duplicate Chrome
+        # titles unambiguous while leaving the real displayed title intact at the front.
+        found.sort(key=lambda item: (item[3], item[4]), reverse=True)
+        return [
+            ChromeChatGPTTab(
+                key=key,
+                label=f"{title} — {key.removeprefix(CHAT_TAB_PREFIX)[:8]}",
+                title=title,
+                url=url,
+                focused=focused,
+            )
+            for key, title, url, focused, _visible_state in found
+        ]
 
 
 def _open_background_tab(browser):
@@ -479,6 +562,7 @@ def ask(
     dry_run: bool = False,
     cancel_event: threading.Event | None = None,
     use_current_tab: bool = False,
+    selected_tab: str | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
@@ -503,13 +587,18 @@ def ask(
             ) from exc
 
         # Everything runs in the background: Chrome is never brought to the front.
-        page, created = (
-            _current_chatgpt_tab(browser) if use_current_tab else _dedicated_tab(browser, tab_name)
-        )
+        if selected_tab:
+            page, created = _selected_chatgpt_tab(browser, selected_tab)
+        elif use_current_tab:
+            page, created = _current_chatgpt_tab(browser)
+        else:
+            page, created = _dedicated_tab(browser, tab_name)
         if new_chat or created:
             on_status("Opening a new ChatGPT chat…")
             page.goto(CHATGPT_URL, wait_until="domcontentloaded")
-            if not use_current_tab:
+            if selected_tab:
+                page.evaluate("key => window.name = key", selected_tab)
+            elif not use_current_tab:
                 page.evaluate(f"window.name = {tab_name!r}")
         else:
             on_status("Continuing the current ChatGPT chat…")
@@ -563,7 +652,9 @@ def ask(
             raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
         log.info(
             "Sent message to ChatGPT (%s, attachments %s)",
-            "current Chrome tab" if use_current_tab else f"tab {tab_name}",
+            "selected Chrome tab" if selected_tab else (
+                "current Chrome tab" if use_current_tab else f"tab {tab_name}"
+            ),
             [p.name for p in attachments],
         )
 

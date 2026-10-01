@@ -224,6 +224,31 @@ class App:
         self.tabs.add(transcript_tab, text="Transcript")
 
         summary_tab = ttk.Frame(self.tabs)
+        self._summary_chrome_tabs: dict[str, chatgpt.ChromeChatGPTTab] = {}
+        self._summary_scanning_tabs = False
+        summary_tab_bar = ttk.Frame(summary_tab, padding=(4, 4))
+        summary_tab_bar.pack(fill="x")
+        ttk.Label(summary_tab_bar, text="ChatGPT Chrome tab").pack(side="left", padx=(4, 6))
+        self.summary_chrome_tab_var = tk.StringVar()
+        self.summary_chrome_tab_box = ttk.Combobox(
+            summary_tab_bar,
+            textvariable=self.summary_chrome_tab_var,
+            state="readonly",
+            width=48,
+        )
+        self.summary_chrome_tab_box.pack(side="left", fill="x", expand=True)
+        self.summary_chrome_tab_box.bind(
+            "<<ComboboxSelected>>", lambda _e: self._summary_chrome_tab_selected()
+        )
+        self.summary_refresh_tabs_btn = ttk.Button(
+            summary_tab_bar, text="↻ Refresh tabs", command=self.refresh_summary_chrome_tabs
+        )
+        self.summary_refresh_tabs_btn.pack(side="left", padx=6)
+        self.summary_chrome_tab_status = tk.StringVar(value="Scanning Chrome tabs…")
+        ttk.Label(
+            summary_tab_bar, textvariable=self.summary_chrome_tab_status, foreground="#777777"
+        ).pack(side="left", padx=4)
+
         summary_actions = ttk.Frame(summary_tab, padding=(4, 4))
         summary_actions.pack(fill="x")
         self.summarize_btn = ttk.Button(
@@ -363,6 +388,7 @@ class App:
         self._summary_active: tuple[Callable, ConversationTranscript, bool, bool] | None = None
         self._summary_retry: tuple[Callable, ConversationTranscript, bool, bool] | None = None
         self._summary_retry_failed = False
+        self.root.after(250, self.refresh_summary_chrome_tabs)
 
         self.chat = ChatPanel(
             self.tabs,
@@ -429,6 +455,67 @@ class App:
 
     def _hide_summary_sidebar(self) -> None:
         self.summary_sidebar.pack_forget()
+
+    def refresh_summary_chrome_tabs(self) -> None:
+        """Refresh the Summary tab's independently selected ChatGPT Chrome tab."""
+        if self._sending_to_chatgpt or self._summary_scanning_tabs:
+            return
+        self._summary_scanning_tabs = True
+        self.summary_chrome_tab_box.configure(state="disabled")
+        self.summary_refresh_tabs_btn.configure(state="disabled")
+        self.summary_chrome_tab_status.set("Scanning…")
+
+        def scan() -> None:
+            try:
+                tabs = chatgpt.list_chrome_chatgpt_tabs()
+            except Exception as exc:  # noqa: BLE001 - always restore the controls after a failed scan
+                if not isinstance(exc, chatgpt.ChatGPTError):
+                    log.exception("Scanning ChatGPT tabs for Summary failed")
+                error = str(exc)
+                self._ui_calls.put(lambda: self._show_summary_chrome_tab_error(error))
+            else:
+                self._ui_calls.put(lambda: self._show_summary_chrome_tabs(tabs))
+
+        threading.Thread(target=scan, name="summary-chatgpt-tab-scan", daemon=True).start()
+
+    def _show_summary_chrome_tabs(self, tabs: list[chatgpt.ChromeChatGPTTab]) -> None:
+        self._summary_scanning_tabs = False
+        self._summary_chrome_tabs = {tab.label: tab for tab in tabs}
+        self.summary_chrome_tab_box.configure(values=list(self._summary_chrome_tabs))
+        wanted = next(
+            (tab.label for tab in tabs if tab.key == self.settings.summary_chatgpt_selected_tab),
+            None,
+        )
+        if wanted is None:
+            wanted = next((tab.label for tab in tabs if tab.focused), None)
+        if wanted is None and tabs:
+            wanted = tabs[0].label
+        self.summary_chrome_tab_var.set(wanted or "")
+        self.settings.summary_chatgpt_selected_tab = self._selected_summary_chrome_tab_key() or ""
+        self.summary_chrome_tab_status.set(f"{len(tabs)} tab(s)" if tabs else "No ChatGPT tabs found")
+        self.summary_chrome_tab_box.configure(
+            state="disabled" if self._sending_to_chatgpt or not tabs else "readonly"
+        )
+        self.summary_refresh_tabs_btn.configure(
+            state="disabled" if self._sending_to_chatgpt else "normal"
+        )
+
+    def _show_summary_chrome_tab_error(self, error: str) -> None:
+        self._summary_scanning_tabs = False
+        self.summary_chrome_tab_status.set(error.splitlines()[0])
+        self.summary_chrome_tab_box.configure(
+            state="disabled" if self._sending_to_chatgpt else "readonly"
+        )
+        self.summary_refresh_tabs_btn.configure(
+            state="disabled" if self._sending_to_chatgpt else "normal"
+        )
+
+    def _summary_chrome_tab_selected(self) -> None:
+        self.settings.summary_chatgpt_selected_tab = self._selected_summary_chrome_tab_key() or ""
+
+    def _selected_summary_chrome_tab_key(self) -> str | None:
+        selected = self._summary_chrome_tabs.get(self.summary_chrome_tab_var.get())
+        return selected.key if selected else None
 
     # ---------------------------------------------------------- conversations
 
@@ -633,6 +720,16 @@ class App:
             state="normal" if self._summary_retry and not self._sending_to_chatgpt else "disabled"
         )
         self.summary_stop_btn.configure(state="normal" if self._sending_to_chatgpt else "disabled")
+        self.summary_chrome_tab_box.configure(
+            state=(
+                "disabled"
+                if self._sending_to_chatgpt or self._summary_scanning_tabs or not self._summary_chrome_tabs
+                else "readonly"
+            )
+        )
+        self.summary_refresh_tabs_btn.configure(
+            state="disabled" if self._sending_to_chatgpt or self._summary_scanning_tabs else "normal"
+        )
         self.chat.set_busy(self._sending_to_chatgpt)
         self.vocab.set_busy(self._sending_to_chatgpt)
 
@@ -858,6 +955,12 @@ class App:
         tfile = self.session_file
         if tfile is None or self._sending_to_chatgpt:
             return
+        selected_tab = self._selected_summary_chrome_tab_key()
+        if selected_tab is None:
+            messagebox.showinfo(
+                "Summarize", "Choose a ChatGPT Chrome tab, or press Refresh tabs first."
+            )
+            return
         attach_transcript = self.summary_attach_transcript_var.get()
         if attach_transcript and not tfile.has_text:
             messagebox.showinfo("Summarize", "No captions have been saved for this session yet.")
@@ -871,7 +974,8 @@ class App:
         except (OSError, chatgpt.ChatGPTError) as exc:
             messagebox.showerror("Summarize", str(exc))
             return
-        # Same ChatGPT conversation as the Chat tab; "New conversation" there also applies here.
+        # Summary has its own selected Chrome tab. "New conversation" in Chat still
+        # applies so the two panels keep their existing shared new-thread behavior.
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
         power = self._summary_power()
         def job(status, cancel_event):
@@ -883,7 +987,7 @@ class App:
                 tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
                 power=power,
                 cancel_event=cancel_event,
-                use_current_tab=True,
+                selected_tab=selected_tab,
             )
 
         self._summary_active = (job, tfile, new_chat, attach_transcript)
