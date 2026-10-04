@@ -2,6 +2,7 @@ File đính kèm ({file_name}) là bản ghi phụ đề tiếng Anh tự độn
 Mỗi dòng có dạng [HH:MM:SS] <nội dung>, sắp xếp từ cũ đến mới. Phiên bắt đầu lúc {started}, hiện tại là {now}.
 
 Dựa trên toàn bộ script của buổi học và sách Simmons, George F. Calculus with Analytic Geometry. 2nd ed. New York, NY: McGraw-Hill, October 1, 1996, ISBN: 9780070576421
-Hãy tạo cho tôi file bài tập bằng tiếng anh (kèm theo một file bản dịch bằng tiếng việt) chứa toàn bộ nội dung đó bao gồm 3 mức độ từ dễ đến khó, nếu tôi chỉ có 1 tiếng luyện tập thì bạn recommend tôi làm những bài nào trong file đó, sử dụng định dạng file PDF LaTeX để có thể hiển thị rõ công thức
+Hãy tạo cho tôi file bài tập bằng tiếng anh (kèm theo một file bản dịch bằng tiếng việt) chứa toàn bộ nội dung đó bao gồm 3 mức độ từ dễ đến khó, bạn không cần phải tạo y nguyên các bài được đề cập trong script mà hãy sáng tạo, tôi muốn các dạng bài mới, có thể xuất hiện trong các đề thi của trường đại học MIT cho sinh viên toán.
+nếu tôi chỉ có 1 tiếng luyện tập thì bạn recommend tôi làm những bài nào trong file đó, sử dụng định dạng file PDF LaTeX để có thể hiển thị rõ công thức
 
 Lưu ý: văn bản do máy nhận dạng giọng nói nên có thể sai chính tả hoặc sai từ; hãy suy luận theo ngữ cảnh, không bịa thêm thông tin không có trong file.

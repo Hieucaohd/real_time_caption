@@ -64,11 +64,14 @@ STOP_BUTTON = (
 # One element per question/answer pair; the attribute value identifies the turn.
 TURN = "[data-turn-key], section[data-testid^='conversation-turn-']"
 TURN_ID_ATTRS = ["data-turn-key", "data-testid"]
-# "Copy" on an answer (the user's own message has "Copy message" instead).
+# Only the Copy control in the response action bar. Code blocks also expose a
+# button whose aria-label is exactly "Copy", so an unscoped selector can copy
+# one code block instead of the complete response (and can signal completion
+# before ChatGPT has finished generating the answer).
 REPLY_COPY_BUTTON = (
-    "button[aria-label='Copy'], "
-    "button[aria-label='Copy response'], "
-    "button[data-testid='copy-turn-action-button']"
+    "button[data-testid='copy-turn-action-button'], "
+    ".turn-action-controls button[aria-label='Copy'], "
+    ".turn-action-controls button[aria-label='Copy response']"
 )
 # "Power" (reasoning effort) lives in the model picker as a keyboard-driven slider.
 MODEL_PICKER = "button[aria-label='Select ChatGPT model'], button[data-testid='model-switcher-dropdown-button']"
@@ -520,7 +523,7 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
 def _read_answer(page, turn_id: str) -> str:
     """Markdown via the answer's Copy button; falls back to the rendered text."""
     turn = _turn_locator(page, turn_id)
-    copy_button = turn.locator(REPLY_COPY_BUTTON).last
+    copy_button = turn.locator(REPLY_COPY_BUTTON).first
     try:
         turn.scroll_into_view_if_needed(timeout=5000)
         turn.hover(timeout=5000)

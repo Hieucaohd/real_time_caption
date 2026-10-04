@@ -24,6 +24,11 @@ def page(url: str, *, name: str = "", focused: bool = False, visible: bool = Fal
 
 
 class CurrentChatGPTTabTests(unittest.TestCase):
+    def test_reply_copy_selector_excludes_code_block_copy_buttons(self) -> None:
+        selectors = [selector.strip() for selector in chatgpt.REPLY_COPY_BUTTON.split(",")]
+        self.assertIn(".turn-action-controls button[aria-label='Copy']", selectors)
+        self.assertNotIn("button[aria-label='Copy']", selectors)
+
     def test_composer_selector_is_scoped_away_from_editable_code_blocks(self) -> None:
         self.assertIn("form[data-chatgpt-composer]", chatgpt.COMPOSER)
         self.assertIn("data-composer-markdown", chatgpt.COMPOSER)
