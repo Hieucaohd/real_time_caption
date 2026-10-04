@@ -6,10 +6,9 @@ Playwright, attach files, type the selected prompt, send, wait for the answer an
 return it as markdown. Chat and Summary can use the user's current ChatGPT tab;
 New words keeps a dedicated tab marked via ``window.name``.
 
-Waiting/reading follows ai-orchestrator's ChatGPT adapter: remember which turns
-already have a finished answer, then wait for a *new* turn whose "Copy" button has
-appeared (it only shows once the answer is complete), and read the markdown by
-clicking that button while the page's clipboard calls are intercepted.
+While ChatGPT answers, preview the new turn's rendered assistant text. Once the
+response action bar appears and generation stops, read the final markdown using
+its Copy button while intercepting the page's clipboard calls.
 
 Selectors are the part most likely to break when ChatGPT changes its UI.
 """
@@ -84,6 +83,27 @@ UPLOAD_TIMEOUT_S = 120
 ANSWER_TIMEOUT_S = 600
 SENT_TIMEOUT_S = 20
 QUIET_S = 2.5  # answer text must stop changing this long before we read it
+STREAM_POLL_S = 0.35
+
+# Current builds group user/assistant content in one turn. Read only assistant
+# message containers, never the whole turn (which also contains the question).
+_RESPONSE_TEXT_JS = """
+  const responseText = (turn) => {
+    let nodes = [...turn.querySelectorAll(
+      '[data-content-search-unit-key$=":assistant"], ' +
+      '[data-chatgpt-search-unit-key$=":assistant"], ' +
+      '[data-message-author-role="assistant"]'
+    )];
+    nodes = nodes.filter(n => !nodes.some(parent => parent !== n && parent.contains(n)));
+    if (!nodes.length) {
+      nodes = [...turn.querySelectorAll('.markdown, .prose')].filter(n =>
+        !n.closest('[data-message-author-role="user"], [data-user-message-bubble], [class~="group/user-message"]')
+      );
+      nodes = nodes.filter(n => !nodes.some(parent => parent !== n && parent.contains(n)));
+    }
+    return nodes.map(n => n.innerText || '').join('\\n\\n').trim();
+  };
+"""
 
 # Intercept the page's clipboard writes so the Copy button hands us the markdown
 # without touching the user's real clipboard (same trick as ai-orchestrator).
@@ -468,32 +488,44 @@ def _cancel_if_requested(page, cancel_event: threading.Event | None) -> None:
 
 
 def _wait_new_answer(
-    page, known: list[str], timeout_s: float, cancel_event: threading.Event | None = None
+    page, known: list[str], timeout_s: float, cancel_event: threading.Event | None = None,
+    on_partial: Callable[[str], None] | None = None,
+    turns_before: list[str] | None = None,
 ) -> str:
-    """Wait until a turn that wasn't answered before gets its Copy button; return its id."""
-    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
+    """Preview the new answer as it grows; finish only at its response Copy button."""
     deadline = time.monotonic() + timeout_s
+    last_text = ""
+    target = None
     while time.monotonic() < deadline:
         _cancel_if_requested(page, cancel_event)
-        try:
-            handle = page.wait_for_function(
-                "(a) => {" + _TURN_ID_JS + """
-                   const known = new Set(a.known);
-                   const buttons = [...document.querySelectorAll(a.copy)];
-                   for (let i = buttons.length - 1; i >= 0; i--) {
-                     const id = turnId(buttons[i], a);
-                     if (id && !known.has(id)) return id;
-                   }
-                   return false;
-                 }""",
-                arg={**_js_args(), "known": known},
-                timeout=750,
-                polling=150,
-            )
-            return handle.json_value()
-        except PlaywrightTimeoutError:
-            continue
+        snapshot = page.evaluate(
+            "(a) => {" + _TURN_ID_JS + _RESPONSE_TEXT_JS + """
+              const known = new Set(a.known);
+              const before = new Set(a.before || []);
+              const turns = [...document.querySelectorAll(a.turn)];
+              for (let i = turns.length - 1; i >= 0; i--) {
+                const turn = turns[i], id = turnId(turn, a);
+                if (!id || (a.target && id !== a.target) || known.has(id) || before.has(id)) continue;
+                const streaming = [...document.querySelectorAll(a.stop)].some(b =>
+                  b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden'
+                );
+                return {id, text: responseText(turn), complete: !!turn.querySelector(a.copy) && !streaming};
+              }
+              return null;
+            }""",
+            {**_js_args(), "stop": STOP_BUTTON, "known": known, "before": turns_before, "target": target},
+        )
+        if snapshot:
+            text = snapshot["text"]
+            if text or snapshot["complete"]:
+                target = snapshot["id"]
+            if text and text != last_text:
+                last_text = text
+                if on_partial:
+                    on_partial(clean_answer(text))
+            if snapshot["complete"]:
+                return target
+        time.sleep(STREAM_POLL_S)
     raise ChatGPTError(f"ChatGPT did not finish answering within {timeout_s // 60} minutes.")
 
 
@@ -544,7 +576,7 @@ def _read_answer(page, turn_id: str) -> str:
 
     # Fallback: rendered text of the answer part of the turn (loses markdown formatting).
     try:
-        text = copy_button.evaluate("(b) => (b.closest('.group') || b.parentElement).innerText", timeout=5000)
+        text = turn.evaluate("turn => {" + _RESPONSE_TEXT_JS + "return responseText(turn);}", timeout=5000)
     except Exception:  # noqa: BLE001
         text = ""
     if text and text.strip():
@@ -566,10 +598,13 @@ def ask(
     cancel_event: threading.Event | None = None,
     use_current_tab: bool = False,
     selected_tab: str | None = None,
+    on_partial: Callable[[str], None] | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
     ``power`` sets ChatGPT's Power slider first (index into POWER_LEVELS); None leaves it.
+    ``on_partial`` receives growing rendered answer text on this worker thread.
+    The returned final answer still comes from the response's Copy button.
 
     ``new_chat`` starts a fresh conversation. With ``use_current_tab``, the current ordinary
     ChatGPT tab in Chrome is used; otherwise the dedicated tab ``tab_name`` is used. A tab is
@@ -663,7 +698,9 @@ def ask(
 
         on_status("Waiting for ChatGPT's answer…")
         try:
-            turn_id = _wait_new_answer(page, answered_before, ANSWER_TIMEOUT_S, cancel_event)
+            turn_id = _wait_new_answer(
+                page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
+            )
         except ChatGPTCancelled:
             raise
         except Exception as exc:  # noqa: BLE001

@@ -22,6 +22,7 @@ from .livecaptions import LiveCaptionsReader
 from .overlay import CaptionOverlay
 from .prompt_editor import PromptEditor
 from .settings import Settings
+from .stream_preview import StreamPreview
 from .transcript_file import TRANSCRIPTS_DIR
 from .transcriber import Event, StreamingTranscriber, TranscriberConfig
 
@@ -384,6 +385,7 @@ class App:
         self.tabs.add(summary_tab, text="ChatGPT summary")
         self._summary_tab = summary_tab
         self._latest_summary = ""
+        self._summary_stream_text = ""
         self._summary_messages: dict[str, ChatMessage] = {}
         self._summary_active: tuple[Callable, ConversationTranscript, bool, bool] | None = None
         self._summary_retry: tuple[Callable, ConversationTranscript, bool, bool] | None = None
@@ -979,17 +981,25 @@ class App:
         new_chat = self.new_chat_var.get() or self.chat.wants_new_conversation
         power = self._summary_power()
         def job(status, cancel_event):
-            return chatgpt.ask(
-                prompt,
-                upload,
-                status,
-                new_chat=new_chat,
-                tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
-                power=power,
-                cancel_event=cancel_event,
-                selected_tab=selected_tab,
+            preview = StreamPreview(
+                self._ui_calls, lambda text: self._on_summary_partial(tfile, text)
             )
+            try:
+                return chatgpt.ask(
+                    prompt,
+                    upload,
+                    status,
+                    new_chat=new_chat,
+                    tab_name=f"{chatgpt.APP_TAB}-{tfile.conversation_id}",
+                    power=power,
+                    cancel_event=cancel_event,
+                    selected_tab=selected_tab,
+                    on_partial=preview.push,
+                )
+            finally:
+                preview.close()
 
+        self._summary_stream_text = ""
         self._summary_active = (job, tfile, new_chat, attach_transcript)
         self._summary_retry = self._summary_active
         self._summary_retry_failed = False
@@ -1000,10 +1010,22 @@ class App:
         ) is False:
             self._summary_active = None
 
+    def _on_summary_partial(self, tfile: ConversationTranscript, text: str) -> None:
+        if tfile.conversation_id != self._conversation_id():
+            return
+        self._summary_stream_text = text
+        markdown_html.show(
+            self.summary,
+            "<div class='meta'>ChatGPT · answering…</div><div class='bot'>"
+            + markdown_html.plain_to_html(text) + "</div>",
+            scroll_to_end=True,
+        )
+
     def _summary_received(
         self, tfile: ConversationTranscript, answer: str, started_new_chat: bool, attached_transcript: bool
     ) -> None:
         self._summary_active = None
+        self._summary_stream_text = ""
         self._summary_retry_failed = False
         self.chat.add_summary_exchange(tfile.path.name if attached_transcript else None, answer, started_new_chat)
         saved = self._save_summary(tfile, answer)
@@ -1018,6 +1040,13 @@ class App:
             self._summary_retry = self._summary_active
         self._summary_retry_failed = True
         self._summary_active = None
+        if self._summary_stream_text:
+            markdown_html.show(
+                self.summary,
+                "<div class='meta'>" + markdown_html.plain_to_html(error)
+                + "</div><div class='bot'>" + markdown_html.plain_to_html(self._summary_stream_text) + "</div>",
+                scroll_to_end=True,
+            )
         if error == chatgpt.CANCELLED_MESSAGE:
             self.status_var.set("ChatGPT: cancelled")
         else:
@@ -1032,6 +1061,7 @@ class App:
             self.summarize_with_chatgpt()
             return
         job, tfile, new_chat, attached_transcript = self._summary_retry
+        self._summary_stream_text = ""
         self._summary_active = self._summary_retry
         if not self._run_chatgpt(
             job,

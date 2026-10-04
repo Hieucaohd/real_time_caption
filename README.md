@@ -62,6 +62,8 @@ Câu nào được chốt là ghi ngay xuống đĩa, nên app bị tắt đột
 
 Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, kể cả khi đã pause. App chỉ gửi transcript cùng prompt tóm tắt; `chat_history.md` không được đính kèm. Nội dung chat và các summary cũ vẫn được lưu cục bộ để xem lại.
 
+Ở cả **Chat**, **ChatGPT summary** và **New words**, câu trả lời hiện dần trong khi ChatGPT đang viết, cập nhật khoảng mỗi 350 ms. Đây là bản xem tạm bằng chữ; khi ChatGPT hoàn tất, app bấm **Copy toàn bộ response** rồi thay bằng nội dung đầy đủ có định dạng Markdown/công thức (hoặc thẻ từ mới). Chỉ bản hoàn chỉnh được lưu vào lịch sử. New words hiển thị thẻ từ trước khi gửi sang Voca ở luồng nền.
+
 - Cần có Chrome mở sẵn với remote debugging ở cổng 9222 và đã đăng nhập ChatGPT. Ví dụ, mở bằng `C:\Users\ADMIN\ai-orchestrator\launch_chrome.bat`.
 - App làm mọi thứ **ở nền**: Chrome không bị kéo lên trước màn hình, và tab mới (nếu cần tạo) cũng được mở ở nền. Chrome chỉ cần đang chạy, có thể nằm khuất sau các cửa sổ khác.
 - App dùng một **tab riêng** để không đụng vào tab ChatGPT mà công cụ khác đang dùng. Tab này được đánh dấu qua `window.name`. Mỗi lần bấm, app đính kèm file `.txt`, điền prompt rồi gửi. Sau đó app chờ ChatGPT trả lời xong (tối đa 10 phút) và lấy câu trả lời dạng markdown về:

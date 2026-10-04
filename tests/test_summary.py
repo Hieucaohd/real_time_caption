@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import queue
 import threading
 import unittest
 from datetime import datetime
@@ -61,6 +62,7 @@ class SummaryAttachmentTests(unittest.TestCase):
                 conversation_id="conversation-1",
             )
             app = object.__new__(App)
+            app._ui_calls = queue.Queue()
             app.session_file = transcript
             app._sending_to_chatgpt = False
             app._summary_max_lines = Mock(return_value=300)
@@ -103,6 +105,7 @@ class SummaryAttachmentTests(unittest.TestCase):
         )
         app = object.__new__(App)
         app.session_file = transcript
+        app._ui_calls = queue.Queue()
         app._sending_to_chatgpt = False
         app._summary_max_lines = Mock(return_value=300)
         app.summary_attach_transcript_var = SimpleNamespace(get=lambda: False)

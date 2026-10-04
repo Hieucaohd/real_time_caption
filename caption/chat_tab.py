@@ -18,6 +18,7 @@ from . import chatgpt, markdown_html, prompt_versions, screenshot
 from .conversations import ConversationStore, ConversationTranscript
 from .prompt_editor import PromptEditor
 from .settings import Settings
+from .stream_preview import StreamPreview
 
 log = logging.getLogger(__name__)
 RunChatGPT = Callable[[Callable, Callable[[str], None], Callable[[str], None]], bool]
@@ -421,16 +422,21 @@ class ChatPanel(ttk.Frame):
         new_chat, power = self._new_conversation, self._power()
 
         def job(status: Callable[[str], None], cancel_event) -> str:
-            return chatgpt.ask(
-                prompt,
-                attachments,
-                status,
-                new_chat=new_chat,
-                tab_name=f"{chatgpt.APP_TAB}-{conversation_id}",
-                power=power,
-                cancel_event=cancel_event,
-                selected_tab=selected_tab,
-            )
+            preview = StreamPreview(self._tab_results, self._on_partial)
+            try:
+                return chatgpt.ask(
+                    prompt,
+                    attachments,
+                    status,
+                    new_chat=new_chat,
+                    tab_name=f"{chatgpt.APP_TAB}-{conversation_id}",
+                    power=power,
+                    cancel_event=cancel_event,
+                    selected_tab=selected_tab,
+                    on_partial=preview.push,
+                )
+            finally:
+                preview.close()
 
         self._pending_conversation_id = conversation_id
         self._active_job = job
@@ -454,6 +460,13 @@ class ChatPanel(ttk.Frame):
         self._active_request_id = action_id
         self._set_pending("ChatGPT is thinking…")
         return True
+
+    def _on_partial(self, text: str) -> None:
+        if self._pending_conversation_id != self._get_conversation_id():
+            return
+        self._messages = [m for m in self._messages if m[0] not in ("pending", "stream")]
+        self._messages.append(("stream", "ChatGPT · answering…", markdown_html.plain_to_html(text), None))
+        self._schedule_render()
 
     def _on_answer(self, answer: str) -> None:
         self._new_conversation = False
@@ -580,7 +593,7 @@ class ChatPanel(ttk.Frame):
         return action_id
 
     def _set_pending(self, value: str | None) -> None:
-        self._messages = [message for message in self._messages if message[0] != "pending"]
+        self._messages = [message for message in self._messages if message[0] not in ("pending", "stream")]
         if value:
             self._messages.append(("pending", "", markdown_html.plain_to_html(value), None))
         self._render()
@@ -591,6 +604,8 @@ class ChatPanel(ttk.Frame):
             if role == "pending":
                 parts.append(f"<div class='pending'>{body}</div>")
             else:
+                if role == "stream":
+                    role = "bot"
                 meta = "meta meta-right" if role == "user" else "meta"
                 parts.append(f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div>")
                 actions = self._request_actions(action_id) if action_id else ""

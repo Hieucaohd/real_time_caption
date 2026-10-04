@@ -21,6 +21,7 @@ from . import chatgpt, markdown_html, vocab
 from .settings import Settings
 from .conversations import ConversationTranscript
 from .voca_client import VocaClient, VocaError
+from .stream_preview import StreamPreview
 
 log = logging.getLogger(__name__)
 
@@ -250,10 +251,14 @@ class VocabPanel(ttk.Frame):
         new_chat, power = self._new_conversation, self._power()
 
         def job(status: Callable[[str], None], cancel_event) -> VocabTranslation:
-            answer = chatgpt.ask(
-                prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power,
-                cancel_event=cancel_event,
-            )
+            preview = StreamPreview(self._results, self._on_partial)
+            try:
+                answer = chatgpt.ask(
+                    prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power,
+                    cancel_event=cancel_event, on_partial=preview.push,
+                )
+            finally:
+                preview.close()
             try:
                 vocab.parse_answer(answer, words)
             except vocab.VocabError as exc:
@@ -272,6 +277,11 @@ class VocabPanel(ttk.Frame):
         self._active_request_id = action_id
         self._set_pending("ChatGPT is translating…")
         return True
+
+    def _on_partial(self, text: str) -> None:
+        self._messages = [m for m in self._messages if m[0] not in ("pending", "stream")]
+        self._messages.append(("stream", "ChatGPT · translating…", markdown_html.plain_to_html(text), None))
+        self._schedule_render()
 
     def _on_done(self, translation: VocabTranslation) -> None:
         self._new_conversation = False
@@ -393,7 +403,7 @@ class VocabPanel(ttk.Frame):
         return action_id or ""
 
     def _set_pending(self, text: str | None) -> None:
-        self._messages = [m for m in self._messages if m[0] != "pending"]
+        self._messages = [m for m in self._messages if m[0] not in ("pending", "stream")]
         if text:
             self._messages.append(("pending", "", markdown_html.plain_to_html(text), None))
         self._render()
@@ -404,6 +414,8 @@ class VocabPanel(ttk.Frame):
             if role == "pending":
                 parts.append(f"<div class='pending'>{body}</div>")
                 continue
+            if role == "stream":
+                role = "bot"
             meta = "meta meta-right" if role == "user" else "meta"
             actions = self._request_actions(action_id) if action_id else ""
             parts.append(
