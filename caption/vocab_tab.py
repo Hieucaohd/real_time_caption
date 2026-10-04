@@ -12,7 +12,7 @@ import queue
 import threading
 import tkinter as tk
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Callable
@@ -38,6 +38,14 @@ class VocabRequest:
     active: bool = False
 
 
+@dataclass
+class VocabTranslation:
+    words: list[vocab.NewWord]
+    api_key: str
+    collection_id: str
+    source_title: str
+
+
 class VocabPanel(ttk.Frame):
     def __init__(
         self,
@@ -55,6 +63,8 @@ class VocabPanel(ttk.Frame):
         self._on_save_settings = on_save_settings or self._save_settings_here
         self._on_stop_chatgpt = on_stop_chatgpt or (lambda: None)
         self._busy = False
+        self._chatgpt_busy = False
+        self._saving_to_voca = False
         self._new_conversation = False
         self._messages: list[tuple[str, str, str, str | None]] = []
         self._requests: dict[str, VocabRequest] = {}
@@ -121,7 +131,8 @@ class VocabPanel(ttk.Frame):
     # ------------------------------------------------------------------ state
 
     def set_busy(self, busy: bool) -> None:
-        self._busy = busy
+        self._chatgpt_busy = busy
+        self._busy = busy or self._saving_to_voca
         self.refresh_state()
         self._schedule_render()
 
@@ -238,7 +249,7 @@ class VocabPanel(ttk.Frame):
         source_title = f"Real-time caption · {started:%Y-%m-%d %H:%M}"
         new_chat, power = self._new_conversation, self._power()
 
-        def job(status: Callable[[str], None], cancel_event) -> list[vocab.NewWord]:
+        def job(status: Callable[[str], None], cancel_event) -> VocabTranslation:
             answer = chatgpt.ask(
                 prompt, None, status, new_chat=new_chat, tab_name=VOCAB_TAB, power=power,
                 cancel_event=cancel_event,
@@ -247,10 +258,7 @@ class VocabPanel(ttk.Frame):
                 vocab.parse_answer(answer, words)
             except vocab.VocabError as exc:
                 raise chatgpt.ChatGPTError(f"{exc}\n\nChatGPT answered:\n{answer[:1500]}") from exc
-            if api_key:
-                status("Saving to Voca…")
-                _save_to_voca(api_key, collection_id, words, source_title)
-            return words
+            return VocabTranslation(words, api_key, collection_id, source_title)
 
         self._active_job = job
         if not self._run_chatgpt(job, self._on_done, self._on_error):
@@ -265,7 +273,7 @@ class VocabPanel(ttk.Frame):
         self._set_pending("ChatGPT is translating…")
         return True
 
-    def _on_done(self, words: list[vocab.NewWord]) -> None:
+    def _on_done(self, translation: VocabTranslation) -> None:
         self._new_conversation = False
         request = self._requests.get(self._active_request_id or "")
         if request:
@@ -273,10 +281,52 @@ class VocabPanel(ttk.Frame):
             request.failed = False
         self._active_job = None
         self._set_pending(None)
-        saved = sum(w.voca_status in ("created", "updated") for w in words)
-        header = f"ChatGPT · {datetime.now():%H:%M:%S}" + (f" · {saved} saved to Voca" if saved else "")
-        self._add("bot", header, "".join(vocab.card_html(w) for w in words))
+        header = f"ChatGPT · {datetime.now():%H:%M:%S}"
+        self._add(
+            "bot", header,
+            "".join(
+                vocab.card_html(replace(w, voca_error="Saving to Voca…") if translation.api_key else w)
+                for w in translation.words
+            ),
+        )
         self._active_request_id = None
+        if translation.api_key:
+            message = self._messages[-1]
+            self._saving_to_voca = True
+            self.set_busy(self._chatgpt_busy)
+            self._set_pending("Saving to Voca…")
+            # Render the translation on Tk's UI thread before starting the upload.
+            self.after_idle(lambda: self._start_voca_save(translation, message))
+
+    def _start_voca_save(self, translation: VocabTranslation, message: tuple) -> None:
+        def save() -> None:
+            # The worker updates copies so rendering never sees partially updated cards.
+            words = [replace(word, voca_status="", voca_error="") for word in translation.words]
+            try:
+                _save_to_voca(
+                    translation.api_key, translation.collection_id, words, translation.source_title
+                )
+            except Exception:  # noqa: BLE001 - preserve the translation even if saving fails
+                log.exception("Saving translated words to Voca failed")
+                for word in words:
+                    word.voca_status = "failed"
+                    word.voca_error = "Could not save to Voca. Please try again."
+            self._results.put(lambda: self._on_voca_saved(words, message))
+
+        threading.Thread(target=save, name="voca-save", daemon=True).start()
+
+    def _on_voca_saved(self, words: list[vocab.NewWord], message: tuple) -> None:
+        saved = sum(word.voca_status in ("created", "updated") for word in words)
+        header = message[1] + (f" · {saved} saved to Voca" if saved else "")
+        for index, item in enumerate(self._messages):
+            if item is message:
+                self._messages[index] = (
+                    "bot", header, "".join(vocab.card_html(word) for word in words), None
+                )
+                break
+        self._saving_to_voca = False
+        self.set_busy(self._chatgpt_busy)
+        self._set_pending(None)
 
     def _on_error(self, error: str) -> None:
         request = self._requests.get(self._active_request_id or "")
