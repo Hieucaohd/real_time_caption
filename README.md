@@ -87,6 +87,7 @@ Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, 
 Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm bên phải (xanh), câu trả lời của ChatGPT nằm bên trái (xám, có định dạng markdown).
 
 - Gõ câu hỏi vào ô dưới cùng rồi bấm **Send ➤** hoặc Enter. Shift+Enter để xuống dòng.
+- **Upload image…** chọn ảnh từ máy; **Paste image** hoặc Ctrl+V dán ảnh đã Copy từ ứng dụng khác. Ảnh hiện bản xem trước, có thể bỏ bằng **Remove image**. Ảnh thủ công thay cho screenshot tự động của tin nhắn đó, được lưu trong folder conversation và dùng lại khi Retry. Ctrl+V vẫn dán chữ bình thường nếu clipboard không chứa ảnh.
 - Hai nút **↑ Top** và **↓ Bottom** cuộn nhanh lịch sử chat lên đầu hoặc xuống cuối.
 - **Chat prompt** cho chọn prompt mặc định trong [prompts/chat/](prompts/chat/). Bạn chỉ cần nhập câu hỏi; app chèn nó vào biến `{message}` của prompt đang chọn. Trong cửa sổ sửa, **Update current version** cập nhật đúng phiên bản hiện tại, còn **Save as new version** tạo phiên bản mới. Nút 📁 mở thư mục prompt. Có thể dùng thêm `{file_name}`, `{source}`, `{started}`, `{now}`.
 - **Attach transcript** gửi transcript đã tự ghép các part. Prompt vẫn được áp dụng khi không đính kèm transcript. **Attach saved chat history** là lựa chọn riêng và mặc định tắt để phản hồi nhanh hơn; chỉ bật khi thực sự cần gửi lại lịch sử cục bộ cho ChatGPT.

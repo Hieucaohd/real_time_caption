@@ -7,12 +7,15 @@ import os
 import queue
 import threading
 import tkinter as tk
+import uuid
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable
+
+from PIL import Image, ImageGrab, ImageOps, ImageTk
 
 from . import chatgpt, markdown_html, prompt_versions, screenshot
 from .conversations import ConversationStore, ConversationTranscript
@@ -69,6 +72,8 @@ class ChatPanel(ttk.Frame):
         self._chrome_tabs: dict[str, chatgpt.ChromeChatGPTTab] = {}
         self._tab_results: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._scanning_tabs = False
+        self._selected_image: Image.Image | None = None
+        self._image_preview: ImageTk.PhotoImage | None = None
 
         tab_bar = ttk.Frame(self, padding=(0, 4))
         tab_bar.pack(fill="x")
@@ -168,6 +173,18 @@ class ChatPanel(ttk.Frame):
         self.entry.bind("<Return>", self._on_return)
         self.send_btn = ttk.Button(entry_row, text="Send ➤", command=self.send)
         self.send_btn.pack(side="left", padx=(6, 0), fill="y")
+        image_row = ttk.Frame(self, padding=(4, 2))
+        image_row.pack(side="bottom", fill="x")
+        self.upload_image_btn = ttk.Button(image_row, text="Upload image…", command=self._choose_image)
+        self.upload_image_btn.pack(side="left", padx=2)
+        self.paste_image_btn = ttk.Button(image_row, text="Paste image", command=self._paste_image)
+        self.paste_image_btn.pack(side="left", padx=2)
+        self.remove_image_btn = ttk.Button(image_row, text="Remove image", command=self._clear_image, state="disabled")
+        self.remove_image_btn.pack(side="left", padx=2)
+        self.image_label = ttk.Label(image_row, wraplength=170)
+        self.image_label.pack(side="left", padx=4)
+        self.entry.bind("<Control-v>", self._on_paste)
+        self.entry.bind("<Control-V>", self._on_paste)
         self.history = markdown_html.make_view(self, self._on_history_link)
         self.history.pack(fill="both", expand=True)
         self.refresh_state()
@@ -178,6 +195,9 @@ class ChatPanel(ttk.Frame):
         self._busy = busy
         self.chrome_tab_box.configure(state="disabled" if busy or self._scanning_tabs else "readonly")
         self.refresh_tabs_btn.configure(state="disabled" if busy or self._scanning_tabs else "normal")
+        self.upload_image_btn.configure(state="disabled" if busy else "normal")
+        self.paste_image_btn.configure(state="disabled" if busy else "normal")
+        self.remove_image_btn.configure(state="normal" if self._selected_image and not busy else "disabled")
         self.refresh_state()
         self._schedule_render()
 
@@ -328,6 +348,7 @@ class ChatPanel(ttk.Frame):
         markdown_html.scroll_to(self.history, fraction)
 
     def load_conversation(self) -> None:
+        self._clear_image()
         self._messages.clear()
         self._requests.clear()
         self._active_request_id = None
@@ -363,12 +384,89 @@ class ChatPanel(ttk.Frame):
         self.send()
         return "break"
 
+    def _select_image(self, image: Image.Image, name: str) -> None:
+        # Load an independent snapshot so deleting/changing the source cannot
+        # change this draft's attachment. Normalize orientation for phone photos.
+        selected = ImageOps.exif_transpose(image).convert("RGBA")
+        thumbnail = selected.copy()
+        thumbnail.thumbnail((80, 60))
+        preview = ImageTk.PhotoImage(thumbnail, master=self)
+        self._selected_image = selected
+        self._image_preview = preview
+        self.image_label.configure(image=preview, text=f"{name} · replaces auto screenshot", compound="left")
+        self.remove_image_btn.configure(state="normal")
+
+    def _choose_image(self) -> None:
+        if self._busy:
+            return
+        filename = filedialog.askopenfilename(
+            parent=self,
+            title="Choose an image to send to ChatGPT",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff"), ("All files", "*.*")],
+        )
+        if not filename:
+            return
+        try:
+            with Image.open(filename) as image:
+                self._select_image(image, Path(filename).name)
+        except (OSError, ValueError, Image.DecompressionBombError) as exc:
+            messagebox.showerror("Upload image", f"Could not open the image:\n{exc}")
+
+    def _paste_image(self, quiet: bool = False) -> bool:
+        if self._busy:
+            return False
+        try:
+            image = ImageGrab.grabclipboard()
+            if isinstance(image, list):
+                for filename in image:
+                    try:
+                        with Image.open(filename) as source:
+                            self._select_image(source, Path(filename).name)
+                        return True
+                    except (OSError, ValueError):
+                        continue
+            elif isinstance(image, Image.Image):
+                self._select_image(image, "Clipboard image")
+                return True
+        except (OSError, ValueError, Image.DecompressionBombError) as exc:
+            if not quiet:
+                messagebox.showerror("Paste image", f"Could not paste the image:\n{exc}")
+            return False
+        if not quiet:
+            messagebox.showinfo("Paste image", "Copy an image first, then press Paste image.")
+        return False
+
+    def _on_paste(self, _event=None):
+        # Preserve Tk's normal text paste when the clipboard contains no image.
+        return "break" if self._paste_image(quiet=True) else None
+
+    def _clear_image(self) -> None:
+        self._selected_image = None
+        self._image_preview = None
+        self.image_label.configure(image="", text="")
+        self.remove_image_btn.configure(state="disabled")
+
+    def _save_selected_image(self, conversation_id: str) -> Path:
+        conversation = self._store.get(conversation_id)
+        if conversation is None or self._selected_image is None:
+            raise ValueError("Select a conversation and an image before sending.")
+        folder = conversation.screenshots_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"upload_{uuid.uuid4().hex}.png"
+        self._selected_image.save(path, "PNG")
+        return path
+
     def send(self) -> None:
         message = self.entry.get("1.0", "end").strip()
-        if not message or self._busy:
+        if self._busy:
             return
+        if not message:
+            if self._selected_image is None:
+                return
+            message = "Hãy giải thích nội dung ảnh này."
         if self._send_message(message):
             self.entry.delete("1.0", "end")
+            self._clear_image()
 
     def _send_message(self, message: str, reused_image: Path | None = None, reuse_image: bool = False) -> bool:
         """Send a new user turn, rebuilding transcript/history from the current settings."""
@@ -410,7 +508,13 @@ class ChatPanel(ttk.Frame):
         history = self._store.chat_context_snapshot(conversation_id) if self.history_var.get() else None
 
         shot = reused_image if reuse_image else None
-        if not reuse_image and self.screenshot_var.get():
+        if not reuse_image and self._selected_image is not None:
+            try:
+                shot = self._save_selected_image(conversation_id)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Upload image", f"Could not save the image:\n{exc}")
+                return False
+        elif not reuse_image and self.screenshot_var.get():
             try:
                 shot = self._capture_screen()
             except Exception as exc:  # noqa: BLE001
