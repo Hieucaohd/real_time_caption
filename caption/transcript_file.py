@@ -8,9 +8,10 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from .paths import TRANSCRIPTS_DIR
+
 log = logging.getLogger(__name__)
 
-TRANSCRIPTS_DIR = Path(__file__).resolve().parent.parent / "transcripts"
 # Trimmed copies uploaded to ChatGPT (see TranscriptFile.snapshot); safe to delete any time.
 SNAPSHOT_DIR = Path(tempfile.gettempdir()) / "real_time_caption"
 

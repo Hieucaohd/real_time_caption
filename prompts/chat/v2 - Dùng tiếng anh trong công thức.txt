@@ -1,0 +1,5 @@
+{message}
+
+Lưu ý:
+- không được dùng tiếng việt trong phần công thức, phải dùng tiếng anh
+- Không được chêm thuật ngữ tiếng anh vào lời tiếng việt

@@ -1,0 +1,5 @@
+{message}
+
+Lưu ý: 
+- chỉ giải thích câu hỏi mà không được giải
+- không được dùng tiếng việt trong phần công thức, phải dùng tiếng anh

@@ -1,0 +1,4 @@
+Use any attached conversation context when it is relevant. Answer the user's message clearly and directly.
+
+User message:
+{message}
