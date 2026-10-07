@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from pathlib import Path
 
-LOG_PATH = Path(__file__).resolve().parent / "caption.log"
+from caption import paths
 
 
 def main() -> None:
-    handlers: list[logging.Handler] = [logging.FileHandler(LOG_PATH, encoding="utf-8")]
+    paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [logging.FileHandler(paths.LOG_PATH, encoding="utf-8")]
     if sys.stderr is not None:  # pythonw.exe has no console
         handlers.append(logging.StreamHandler())
     logging.basicConfig(
@@ -22,10 +22,20 @@ def main() -> None:
     for noisy in ("faster_whisper", "httpx", "comtypes"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    if paths.FROZEN:
+        # PyInstaller points matplotlib at a fresh temp dir each run, rebuilding its font cache.
+        os.environ["MPLCONFIGDIR"] = str(paths.CACHE_DIR / "matplotlib")
+    logging.getLogger(__name__).info("Data folder: %s (packaged: %s)", paths.DATA_DIR, paths.FROZEN)
+    paths.install_default_prompts()
 
     from caption.cuda_setup import register_nvidia_dlls
 
     register_nvidia_dlls()
+
+    if "--self-test" in sys.argv:  # used to verify packaged builds, see caption/selftest.py
+        from caption import selftest
+
+        sys.exit(selftest.run(sys.argv))
 
     try:
         import ctypes
@@ -39,6 +49,8 @@ def main() -> None:
     from caption.gui import App
 
     root = tk.Tk()
+    if paths.ICON_PATH.exists():
+        root.iconbitmap(default=str(paths.ICON_PATH))  # also used by dialogs and the overlay
     App(root)
     root.mainloop()
 

@@ -2,15 +2,13 @@
 
 Chrome must be running with ``--remote-debugging-port=9222`` (see
 ``C:\\Users\\ADMIN\\ai-orchestrator\\launch_chrome.bat``). We attach over CDP with
-Playwright and work in a dedicated tab (marked via ``window.name`` so tools driving
-the regular ChatGPT tab are not disturbed): attach the file, type the prompt from
-``prompts/summarize_chatgpt.txt``, send, wait for the answer and return it as
-markdown.
+Playwright, attach files, type the selected prompt, send, wait for the answer and
+return it as markdown. Chat and Summary can use the user's current ChatGPT tab;
+New words keeps a dedicated tab marked via ``window.name``.
 
-Waiting/reading follows ai-orchestrator's ChatGPT adapter: remember which turns
-already have a finished answer, then wait for a *new* turn whose "Copy" button has
-appeared (it only shows once the answer is complete), and read the markdown by
-clicking that button while the page's clipboard calls are intercepted.
+While ChatGPT answers, preview the new turn's rendered assistant text. Once the
+response action bar appears and generation stops, read the final markdown using
+its Copy button while intercepting the page's clipboard calls.
 
 Selectors are the part most likely to break when ChatGPT changes its UI.
 """
@@ -19,7 +17,10 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -28,17 +29,23 @@ log = logging.getLogger(__name__)
 
 CDP_URL = "http://localhost:9222"
 CHATGPT_URL = "https://chatgpt.com/"
-# The app's own Chrome tab (marked via window.name), shared by Summarize and the Chat tab so
-# both continue the same ChatGPT conversation.
+# Legacy/default dedicated tab name. Chat and Summary now request the current ordinary
+# ChatGPT tab; New words still uses its own named tab.
 APP_TAB = "real-time-caption-summary"
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-PROMPT_PATH = PROMPTS_DIR / "summarize_chatgpt.txt"
-CHAT_PROMPT_PATH = PROMPTS_DIR / "chat_with_caption.txt"
+VOCAB_TAB = "real-time-caption-vocab"
+CHAT_TAB_PREFIX = "real-time-caption-chat:"
+_TAB_SCAN_LOCK = threading.Lock()
+# Summary and Chat prompts are versioned in their own folders (see prompt_versions.py).
 
+# Keep this scoped to ChatGPT's real composer.  A conversation can contain other
+# visible contenteditable widgets (for example the CodeMirror "Edit code" pane).
+# The old broad ``div[contenteditable][aria-label]`` selector could pick one of
+# those before the message box and then fail while looking for its composer form.
 COMPOSER = (
-    "#prompt-textarea, "
-    "div[contenteditable='true'][aria-label], "
-    "div.ProseMirror[contenteditable='true']"
+    "form[data-chatgpt-composer] [data-composer-markdown][contenteditable='true'], "
+    "form[data-thread-find-composer] [contenteditable='true'][role='textbox'], "
+    "form #prompt-textarea, "
+    "form div.ProseMirror[contenteditable='true'][role='textbox']"
 )
 # ChatGPT has several hidden file inputs; the image-only ones reject .txt files.
 FILE_INPUT = "input[type='file']:not([accept*='image'])"
@@ -56,16 +63,47 @@ STOP_BUTTON = (
 # One element per question/answer pair; the attribute value identifies the turn.
 TURN = "[data-turn-key], section[data-testid^='conversation-turn-']"
 TURN_ID_ATTRS = ["data-turn-key", "data-testid"]
-# "Copy" on an answer (the user's own message has "Copy message" instead).
+# Only the Copy control in the response action bar. Code blocks also expose a
+# button whose aria-label is exactly "Copy", so an unscoped selector can copy
+# one code block instead of the complete response (and can signal completion
+# before ChatGPT has finished generating the answer).
 REPLY_COPY_BUTTON = (
-    "button[aria-label='Copy'], "
-    "button[aria-label='Copy response'], "
-    "button[data-testid='copy-turn-action-button']"
+    "button[data-testid='copy-turn-action-button'], "
+    ".turn-action-controls button[aria-label='Copy'], "
+    ".turn-action-controls button[aria-label='Copy response']"
 )
+# "Power" (reasoning effort) lives in the model picker as a keyboard-driven slider.
+MODEL_PICKER = "button[aria-label='Select ChatGPT model'], button[data-testid='model-switcher-dropdown-button']"
+POWER_ITEM = "[role=menu] [role=menuitem][data-reasoning-slider='true']"
+POWER_SLIDER = "[role=menu] [role=slider]"
+POWER_STATUS = "[role=menu] [role=status]"
+# Names ChatGPT shows for the slider steps (reasoning effort none / medium / high).
+POWER_LEVELS = ["Instant", "Medium", "High"]
 UPLOAD_TIMEOUT_S = 120
 ANSWER_TIMEOUT_S = 600
 SENT_TIMEOUT_S = 20
 QUIET_S = 2.5  # answer text must stop changing this long before we read it
+STREAM_POLL_S = 0.35
+
+# Current builds group user/assistant content in one turn. Read only assistant
+# message containers, never the whole turn (which also contains the question).
+_RESPONSE_TEXT_JS = """
+  const responseText = (turn) => {
+    let nodes = [...turn.querySelectorAll(
+      '[data-content-search-unit-key$=":assistant"], ' +
+      '[data-chatgpt-search-unit-key$=":assistant"], ' +
+      '[data-message-author-role="assistant"]'
+    )];
+    nodes = nodes.filter(n => !nodes.some(parent => parent !== n && parent.contains(n)));
+    if (!nodes.length) {
+      nodes = [...turn.querySelectorAll('.markdown, .prose')].filter(n =>
+        !n.closest('[data-message-author-role="user"], [data-user-message-bubble], [class~="group/user-message"]')
+      );
+      nodes = nodes.filter(n => !nodes.some(parent => parent !== n && parent.contains(n)));
+    }
+    return nodes.map(n => n.innerText || '').join('\\n\\n').trim();
+  };
+"""
 
 # Intercept the page's clipboard writes so the Copy button hands us the markdown
 # without touching the user's real clipboard (same trick as ai-orchestrator).
@@ -110,8 +148,28 @@ class ChatGPTError(RuntimeError):
     pass
 
 
+CANCELLED_MESSAGE = "Cancelled by user. You can press Retry to send the same request again."
+
+
+class ChatGPTCancelled(ChatGPTError):
+    pass
+
+
+@dataclass(frozen=True)
+class ChromeChatGPTTab:
+    key: str
+    label: str
+    title: str
+    url: str
+    focused: bool
+
+
 def build_prompt(
-    file_path: Path, source: str, started: datetime, template_path: Path = PROMPT_PATH, message: str = ""
+    file_path: Path | None,
+    source: str,
+    started: datetime | None,
+    template_path: Path,
+    message: str = "",
 ) -> str:
     """Fill ``{file_name}``, ``{source}``, ``{started}``, ``{now}`` and ``{message}`` in an
     editable prompt file."""
@@ -120,9 +178,9 @@ def build_prompt(
     except OSError as exc:
         raise ChatGPTError(f"Could not read the prompt file {template_path}:\n{exc}") from exc
     values = {
-        "file_name": file_path.name,
+        "file_name": file_path.name if file_path else "",
         "source": source,
-        "started": f"{started:%Y-%m-%d %H:%M:%S}",
+        "started": f"{started:%Y-%m-%d %H:%M:%S}" if started else "",
         "now": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
         "message": message.strip(),
     }
@@ -164,6 +222,98 @@ def _dedicated_tab(browser, tab_name: str):
     return _open_background_tab(browser), True
 
 
+def _current_chatgpt_tab(browser):
+    """Use the user's current ordinary ChatGPT tab, without taking over Voca's tab.
+
+    ``document.hasFocus()`` identifies the active tab in the focused Chrome window;
+    visibility is the fallback for another Chrome window. If no ordinary ChatGPT tab
+    exists, create one rather than mixing Chat/Summary into Voca's dedicated thread.
+    """
+    candidates = []
+    for context in browser.contexts:
+        for page in context.pages:
+            if "chatgpt.com" not in page.url:
+                continue
+            try:
+                if page.evaluate("window.name") == VOCAB_TAB:
+                    continue
+                focused = bool(page.evaluate("document.hasFocus()"))
+                visible = page.evaluate("document.visibilityState") == "visible"
+                candidates.append((focused, visible, len(candidates), page))
+            except Exception:  # noqa: BLE001 - tab closing or crashed
+                continue
+    if candidates:
+        return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3], False
+    if not browser.contexts:
+        raise ChatGPTError("Chrome has no open window to add a tab to.")
+    return _open_background_tab(browser), True
+
+
+def _selected_chatgpt_tab(browser, tab_key: str):
+    """Return the ordinary ChatGPT tab carrying ``tab_key`` or fail without opening another."""
+    for context in browser.contexts:
+        for page in context.pages:
+            if "chatgpt.com" not in page.url:
+                continue
+            try:
+                if page.evaluate("window.name") == tab_key:
+                    return page, False
+            except Exception:  # noqa: BLE001 - tab closing or crashed
+                continue
+    raise ChatGPTError("The selected ChatGPT tab is no longer open. Press Refresh and choose another tab.")
+
+
+def list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
+    """Scan Chrome's ordinary ChatGPT tabs and give each a stable, invisible key."""
+    # Chat and Summary scan on separate worker threads during startup. Serializing
+    # them prevents both scans assigning different keys to the same unnamed tab.
+    with _TAB_SCAN_LOCK:
+        return _list_chrome_chatgpt_tabs()
+
+
+def _list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+        except Exception as exc:  # noqa: BLE001
+            raise ChatGPTError(
+                f"Could not connect to Chrome at {CDP_URL}. Start Chrome with remote debugging and try again."
+            ) from exc
+        found: list[tuple[str, str, str, bool, bool]] = []
+        for context in browser.contexts:
+            for page in context.pages:
+                if "chatgpt.com" not in page.url:
+                    continue
+                try:
+                    key = page.evaluate("window.name")
+                    if key == VOCAB_TAB:
+                        continue
+                    if not isinstance(key, str) or not key.startswith(CHAT_TAB_PREFIX):
+                        key = CHAT_TAB_PREFIX + uuid.uuid4().hex
+                        page.evaluate("key => window.name = key", key)
+                    title = page.title().strip() or "ChatGPT"
+                    focused = bool(page.evaluate("document.hasFocus()"))
+                    visible = page.evaluate("document.visibilityState") == "visible"
+                    found.append((key, title, page.url, focused, visible))
+                except Exception:  # noqa: BLE001 - tab closing during the scan
+                    continue
+        # Current/focused tabs appear first. The short stable key makes duplicate Chrome
+        # titles unambiguous while leaving the real displayed title intact at the front.
+        found.sort(key=lambda item: (item[3], item[4]), reverse=True)
+        return [
+            ChromeChatGPTTab(
+                key=key,
+                label=f"{title} — {key.removeprefix(CHAT_TAB_PREFIX)[:8]}",
+                title=title,
+                url=url,
+                focused=focused,
+            )
+            for key, title, url, focused, _visible_state in found
+        ]
+
+
 def _open_background_tab(browser):
     """Open a tab without switching Chrome to it (Playwright's new_page() activates the tab)."""
     context = browser.contexts[0]
@@ -180,6 +330,11 @@ def _open_background_tab(browser):
 
 def _js_args() -> dict:
     return {"turn": TURN, "attrs": TURN_ID_ATTRS, "copy": REPLY_COPY_BUTTON}
+
+
+def _visible(page, selector: str):
+    """Return the first currently rendered match, ignoring hidden duplicate UI trees."""
+    return page.locator(selector).filter(visible=True).first
 
 
 def _turn_ids(page) -> list[str]:
@@ -215,7 +370,7 @@ def _css_string(value: str) -> str:
 
 def _wait_not_answering(page, on_status: Callable[[str], None]) -> None:
     """When continuing a conversation, let ChatGPT finish its previous answer first."""
-    stop = page.locator(STOP_BUTTON).first
+    stop = _visible(page, STOP_BUTTON)
     try:
         if stop.count() == 0 or not stop.is_visible():
             return
@@ -225,10 +380,85 @@ def _wait_not_answering(page, on_status: Callable[[str], None]) -> None:
         raise ChatGPTError("ChatGPT is still answering the previous message. Try again when it finishes.") from exc
 
 
-def _wait_send_enabled(page, timeout_s: float):
+def _set_power(page, level: int) -> str:
+    """Move the model picker's Power slider to ``level`` (0 = lowest); returns ChatGPT's label for it."""
+    picker = _visible(page, MODEL_PICKER)
+    if picker.count() == 0:
+        raise ChatGPTError("Could not find ChatGPT's model picker to set the power level.")
+    picker.click()
+    try:
+        power = _visible(page, POWER_ITEM)
+        try:
+            power.wait_for(state="visible", timeout=5000)
+        except Exception as exc:  # noqa: BLE001
+            raise ChatGPTError("ChatGPT's model picker has no Power slider (the layout may have changed).") from exc
+        slider = _visible(page, POWER_SLIDER)
+        power.focus()
+        target = max(0, min(level, int(slider.get_attribute("aria-valuemax") or len(POWER_LEVELS) - 1)))
+        for _ in range(len(POWER_LEVELS) + 2):
+            current = int(slider.get_attribute("aria-valuenow") or 0)
+            if current == target:
+                break
+            page.keyboard.press("ArrowRight" if current < target else "ArrowLeft")
+            page.wait_for_timeout(250)
+        if int(slider.get_attribute("aria-valuenow") or -1) != target:
+            raise ChatGPTError("Could not move ChatGPT's Power slider to the chosen level.")
+        # Status reads e.g. "Medium, 2 of 3."
+        return _visible(page, POWER_STATUS).inner_text().split(",")[0].strip()
+    finally:
+        page.keyboard.press("Escape")
+
+
+def _composer_form(composer):
+    """The visible composer's form; ChatGPT may keep another hidden conversation in the DOM."""
+    return composer.locator("xpath=ancestor::form[1]")
+
+
+def _clear_attachments(form) -> int:
+    """Drop attachments left in this composer by an earlier attempt that never got sent.
+
+    The remove buttons only take pointer events on hover, so they are clicked from JS.
+    """
+    removed = 0
+    while removed < 20 and form.evaluate(
+        """form => {
+             const b = form.querySelector('button[aria-label^="Remove "]');
+             if (!b) return false;
+             b.click();
+             return true;
+           }"""
+    ):
+        removed += 1
+        time.sleep(0.3)
+    return removed
+
+
+def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float) -> None:
+    """Do not send until every selected file appears in the visible composer's chips."""
+    expected = {path.name for path in attachments}
+    deadline = time.monotonic() + timeout_s
+    remove_buttons = form.locator("button[aria-label^='Remove ']")
+    while time.monotonic() < deadline:
+        try:
+            labels = remove_buttons.evaluate_all(
+                "buttons => buttons.map(button => button.getAttribute('aria-label') || '')"
+            )
+            found = {name for name in expected if any(name in label for label in labels)}
+            if found == expected:
+                return
+        except Exception:  # noqa: BLE001 - attachment UI can re-render while uploading
+            pass
+        time.sleep(0.25)
+    missing = ", ".join(sorted(expected))
+    raise ChatGPTError(
+        f"ChatGPT did not attach {missing}. The file input may have changed; nothing was sent."
+    )
+
+
+def _wait_send_enabled(scope, timeout_s: float):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
-    button = page.locator(SEND_BUTTON).first
+    button = _visible(scope, SEND_BUTTON)
     while time.monotonic() < deadline:
         try:
             if button.is_visible() and button.is_enabled():
@@ -245,23 +475,58 @@ def _wait_send_enabled(page, timeout_s: float):
 # ---------------------------------------------------------------- reading answers
 
 
-def _wait_new_answer(page, known: list[str], timeout_s: float) -> str:
-    """Wait until a turn that wasn't answered before gets its Copy button; return its id."""
-    handle = page.wait_for_function(
-        "(a) => {" + _TURN_ID_JS + """
-           const known = new Set(a.known);
-           const buttons = [...document.querySelectorAll(a.copy)];
-           for (let i = buttons.length - 1; i >= 0; i--) {
-             const id = turnId(buttons[i], a);
-             if (id && !known.has(id)) return id;
-           }
-           return false;
-         }""",
-        arg={**_js_args(), "known": known},
-        timeout=timeout_s * 1000,
-        polling=500,
-    )
-    return handle.json_value()
+def _cancel_if_requested(page, cancel_event: threading.Event | None) -> None:
+    if not cancel_event or not cancel_event.is_set():
+        return
+    try:
+        stop = _visible(page, STOP_BUTTON)
+        if stop.count() and stop.is_visible():
+            stop.click(timeout=2000)
+    except Exception:  # noqa: BLE001 - cancellation must still complete if the button changed
+        pass
+    raise ChatGPTCancelled(CANCELLED_MESSAGE)
+
+
+def _wait_new_answer(
+    page, known: list[str], timeout_s: float, cancel_event: threading.Event | None = None,
+    on_partial: Callable[[str], None] | None = None,
+    turns_before: list[str] | None = None,
+) -> str:
+    """Preview the new answer as it grows; finish only at its response Copy button."""
+    deadline = time.monotonic() + timeout_s
+    last_text = ""
+    target = None
+    while time.monotonic() < deadline:
+        _cancel_if_requested(page, cancel_event)
+        snapshot = page.evaluate(
+            "(a) => {" + _TURN_ID_JS + _RESPONSE_TEXT_JS + """
+              const known = new Set(a.known);
+              const before = new Set(a.before || []);
+              const turns = [...document.querySelectorAll(a.turn)];
+              for (let i = turns.length - 1; i >= 0; i--) {
+                const turn = turns[i], id = turnId(turn, a);
+                if (!id || (a.target && id !== a.target) || known.has(id) || before.has(id)) continue;
+                const streaming = [...document.querySelectorAll(a.stop)].some(b =>
+                  b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden'
+                );
+                return {id, text: responseText(turn), complete: !!turn.querySelector(a.copy) && !streaming};
+              }
+              return null;
+            }""",
+            {**_js_args(), "stop": STOP_BUTTON, "known": known, "before": turns_before, "target": target},
+        )
+        if snapshot:
+            text = snapshot["text"]
+            if text or snapshot["complete"]:
+                target = snapshot["id"]
+            if text and text != last_text:
+                last_text = text
+                if on_partial:
+                    on_partial(clean_answer(text))
+            if snapshot["complete"]:
+                return target
+        time.sleep(STREAM_POLL_S)
+    raise ChatGPTError(f"ChatGPT did not finish answering within {timeout_s // 60} minutes.")
 
 
 def _answer_text_length(page, turn_id: str) -> int:
@@ -272,11 +537,12 @@ def _answer_text_length(page, turn_id: str) -> int:
         return -1
 
 
-def _wait_stable(page, turn_id: str, timeout_s: float) -> None:
+def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.Event | None = None) -> None:
     """The Copy button can flash up mid-answer on some builds; also require the text to settle."""
     deadline = time.monotonic() + timeout_s
     last, since = -2, time.monotonic()
     while time.monotonic() < deadline:
+        _cancel_if_requested(page, cancel_event)
         n = _answer_text_length(page, turn_id)
         now = time.monotonic()
         if n != last:
@@ -289,7 +555,7 @@ def _wait_stable(page, turn_id: str, timeout_s: float) -> None:
 def _read_answer(page, turn_id: str) -> str:
     """Markdown via the answer's Copy button; falls back to the rendered text."""
     turn = _turn_locator(page, turn_id)
-    copy_button = turn.locator(REPLY_COPY_BUTTON).last
+    copy_button = turn.locator(REPLY_COPY_BUTTON).first
     try:
         turn.scroll_into_view_if_needed(timeout=5000)
         turn.hover(timeout=5000)
@@ -310,7 +576,7 @@ def _read_answer(page, turn_id: str) -> str:
 
     # Fallback: rendered text of the answer part of the turn (loses markdown formatting).
     try:
-        text = copy_button.evaluate("(b) => (b.closest('.group') || b.parentElement).innerText", timeout=5000)
+        text = turn.evaluate("turn => {" + _RESPONSE_TEXT_JS + "return responseText(turn);}", timeout=5000)
     except Exception:  # noqa: BLE001
         text = ""
     if text and text.strip():
@@ -323,21 +589,32 @@ def _read_answer(page, turn_id: str) -> str:
 
 def ask(
     prompt: str,
-    file_path: Path | None = None,
+    file_path: Path | list[Path] | None = None,
     on_status: Callable[[str], None] = lambda _msg: None,
     new_chat: bool = True,
     tab_name: str = APP_TAB,
+    power: int | None = None,
     dry_run: bool = False,
+    cancel_event: threading.Event | None = None,
+    use_current_tab: bool = False,
+    selected_tab: str | None = None,
+    on_partial: Callable[[str], None] | None = None,
 ) -> str:
-    """Send ``prompt`` (optionally with ``file_path`` attached) and return the answer (markdown).
+    """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
-    ``new_chat`` starts a fresh conversation; otherwise the conversation already open in
-    the dedicated tab ``tab_name`` is continued (a new chat is still opened if there is
-    none). With ``dry_run`` everything is prepared but nothing is sent and ``""`` is returned.
+    ``power`` sets ChatGPT's Power slider first (index into POWER_LEVELS); None leaves it.
+    ``on_partial`` receives growing rendered answer text on this worker thread.
+    The returned final answer still comes from the response's Copy button.
+
+    ``new_chat`` starts a fresh conversation. With ``use_current_tab``, the current ordinary
+    ChatGPT tab in Chrome is used; otherwise the dedicated tab ``tab_name`` is used. A tab is
+    created if none exists. With ``dry_run`` everything is prepared but nothing is sent.
     """
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
+        if cancel_event and cancel_event.is_set():
+            raise ChatGPTCancelled(CANCELLED_MESSAGE)
         on_status("Connecting to Chrome…")
         try:
             browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
@@ -348,34 +625,50 @@ def ask(
             ) from exc
 
         # Everything runs in the background: Chrome is never brought to the front.
-        page, created = _dedicated_tab(browser, tab_name)
+        if selected_tab:
+            page, created = _selected_chatgpt_tab(browser, selected_tab)
+        elif use_current_tab:
+            page, created = _current_chatgpt_tab(browser)
+        else:
+            page, created = _dedicated_tab(browser, tab_name)
         if new_chat or created:
             on_status("Opening a new ChatGPT chat…")
             page.goto(CHATGPT_URL, wait_until="domcontentloaded")
-            page.evaluate(f"window.name = {tab_name!r}")
+            if selected_tab:
+                page.evaluate("key => window.name = key", selected_tab)
+            elif not use_current_tab:
+                page.evaluate(f"window.name = {tab_name!r}")
         else:
             on_status("Continuing the current ChatGPT chat…")
 
-        composer = page.locator(COMPOSER).first
+        composer = _visible(page, COMPOSER)
         try:
             composer.wait_for(state="visible", timeout=30_000)
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError(
                 "ChatGPT's message box did not appear. Is this Chrome profile logged in to ChatGPT?"
             ) from exc
+        composer_form = _composer_form(composer)
         if not (new_chat or created):
             _wait_not_answering(page, on_status)
+        if power is not None:
+            on_status("Setting ChatGPT power…")
+            on_status(f"Power set to {_set_power(page, power)}")
 
-        if file_path is not None:
-            on_status(f"Uploading {file_path.name}…")
-            file_input = page.locator(FILE_INPUT).first
+        attachments = [file_path] if isinstance(file_path, Path) else list(file_path or [])
+        if _clear_attachments(composer_form):
+            log.info("Removed leftover attachments from the ChatGPT composer")
+        if attachments:
+            on_status(f"Uploading {', '.join(p.name for p in attachments)}…")
+            file_input = composer_form.locator(FILE_INPUT).first
             if file_input.count() == 0:
                 raise ChatGPTError("Could not find ChatGPT's file upload input (the page layout may have changed).")
-            file_input.set_input_files(str(file_path))
+            file_input.set_input_files([str(p) for p in attachments])
+            _wait_attachments_visible(composer_form, attachments, UPLOAD_TIMEOUT_S)
 
         composer.click()
         composer.fill(prompt)
-        send = _wait_send_enabled(page, UPLOAD_TIMEOUT_S)
+        send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S)
         if dry_run:
             on_status("Dry run: message prepared, not sent")
             return ""
@@ -395,15 +688,25 @@ def ask(
             )
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
-        log.info("Sent message to ChatGPT (tab %s, attachment %s)", tab_name, file_path)
+        log.info(
+            "Sent message to ChatGPT (%s, attachments %s)",
+            "selected Chrome tab" if selected_tab else (
+                "current Chrome tab" if use_current_tab else f"tab {tab_name}"
+            ),
+            [p.name for p in attachments],
+        )
 
         on_status("Waiting for ChatGPT's answer…")
         try:
-            turn_id = _wait_new_answer(page, answered_before, ANSWER_TIMEOUT_S)
+            turn_id = _wait_new_answer(
+                page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
+            )
+        except ChatGPTCancelled:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError(
                 f"ChatGPT did not finish answering within {ANSWER_TIMEOUT_S // 60} minutes. See the Chrome tab."
             ) from exc
-        _wait_stable(page, turn_id, 60)
+        _wait_stable(page, turn_id, 60, cancel_event)
         on_status("Reading the answer…")
         return _read_answer(page, turn_id)

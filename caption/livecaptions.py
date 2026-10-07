@@ -34,6 +34,12 @@ POLL_S = 0.2
 FLUSH_AFTER_S = 1.5
 IN_PROGRESS_UNITS = 2
 LAUNCH_TIMEOUT_S = 15.0
+EMPTY_REATTACH_S = 2.0
+STALE_REATTACH_S = 10.0
+
+# uiautomation/COM teardown is asynchronous. Serializing reader lifetimes keeps a
+# quick Pause -> Continue from attaching while the old reader is still unwinding.
+_READER_LOCK = threading.Lock()
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -134,12 +140,25 @@ class LiveCaptionsReader:
     def _run(self) -> None:
         import uiautomation as auto
 
+        acquired = False
+        while not self._stop.is_set():
+            acquired = _READER_LOCK.acquire(timeout=0.2)
+            if acquired:
+                break
+        if not acquired:
+            self._emit(Event("stopped"))
+            return
         try:
-            with auto.UIAutomationInitializerInThread():
-                self._loop(auto)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("Live Captions reader crashed")
-            self._emit(Event("error", f"Live Captions reader failed:\n{exc}"))
+            try:
+                log.info("Windows Live Captions reader starting")
+                with auto.UIAutomationInitializerInThread():
+                    self._loop(auto)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Live Captions reader crashed")
+                self._emit(Event("error", f"Live Captions reader failed:\n{exc}"))
+        finally:
+            _READER_LOCK.release()
+            log.info("Windows Live Captions reader stopped")
         self._emit(Event("stopped"))
 
     def _find_text(self, auto, launch: bool):
@@ -170,23 +189,59 @@ class LiveCaptionsReader:
                 )
             return
 
+        log.info("Connected to Windows Live Captions text control")
         self._emit(Event("ready", "Reading Windows Live Captions — keep its window open (it can sit behind others)"))
         differ = CaptionDiffer()
         last_text: str | None = None
         last_change = time.monotonic()
+        last_attach = last_change
+        empty_since: float | None = None
+        disconnected = False
         flushed = False
 
         while not self._stop.wait(POLL_S):
             try:
                 text = text_ctrl.Name or ""
             except Exception:  # noqa: BLE001 - window closed or recreated
-                text_ctrl = self._find_text(auto, launch=False)
-                if text_ctrl is None:
-                    self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
-                    self._stop.wait(1.0)
-                continue
+                text_ctrl = None
 
             now = time.monotonic()
+            if text_ctrl is None:
+                text_ctrl = self._find_text(auto, launch=False)
+                last_attach = now
+                if text_ctrl is None:
+                    if not disconnected:
+                        log.warning("Windows Live Captions text control disappeared; waiting to reconnect")
+                        disconnected = True
+                    self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
+                    self._stop.wait(1.0)
+                else:
+                    log.info("Reconnected to Windows Live Captions text control")
+                    self._emit(Event("status", "Reconnected to Windows Live Captions…"))
+                    disconnected = False
+                    empty_since = None
+                continue
+
+            if text:
+                empty_since = None
+            else:
+                empty_since = empty_since or now
+
+            empty_stale = empty_since is not None and now - empty_since >= EMPTY_REATTACH_S
+            unchanged_stale = last_text is not None and now - last_change >= STALE_REATTACH_S
+            refresh_after = EMPTY_REATTACH_S if empty_stale else STALE_REATTACH_S
+            if (empty_stale or unchanged_stale) and now - last_attach >= refresh_after:
+                replacement = self._find_text(auto, launch=False)
+                last_attach = time.monotonic()
+                if replacement is None:
+                    text_ctrl = None
+                    self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
+                    log.warning("Windows Live Captions text control became stale")
+                else:
+                    text_ctrl = replacement
+                    log.info("Refreshed Windows Live Captions text control after it became %s", "empty" if empty_stale else "unchanged")
+                continue
+
             if text != last_text:
                 last_text, last_change, flushed = text, now, False
             elif flushed or now - last_change < FLUSH_AFTER_S:

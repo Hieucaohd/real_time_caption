@@ -1,0 +1,13 @@
+Tôi đang học tiếng Anh và gặp các từ/cụm từ sau khi xem video (kèm câu phụ đề nơi tôi gặp từ, nếu có):
+
+{words}
+
+Với MỖI từ, hãy trả về đúng một mảng JSON (không kèm lời giải thích nào khác) trong một khối ```json, mỗi phần tử có các trường:
+- "word": từ/cụm từ ở dạng từ điển (sửa lỗi chính tả nếu có; giữ nguyên cụm từ nếu là phrasal verb hay idiom)
+- "translation": nghĩa tiếng Việt ngắn gọn, đúng với nghĩa trong câu phụ đề
+- "meaning": định nghĩa ngắn bằng tiếng Anh
+- "part_of_speech": một trong noun, verb, adjective, adverb, phrase, phrasal verb, idiom, ...
+- "phonetic": phiên âm IPA, ví dụ "/ˈlev.ər.ɪdʒ/"
+- "context_translation": bản dịch tiếng Việt của câu phụ đề (để chuỗi rỗng nếu không có câu)
+
+Giữ nguyên thứ tự các từ như trong danh sách.

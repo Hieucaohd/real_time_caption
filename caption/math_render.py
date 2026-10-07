@@ -5,8 +5,8 @@ the app (Tkhtml via tkinterweb) cannot run KaTeX or lay out its CSS, so formulas
 drawn with matplotlib's mathtext (a pure-Python TeX renderer with Computer Modern
 symbols) and embedded as PNG images. mathtext covers a subset of LaTeX, so common
 constructs it lacks are rewritten first (``\\boxed``, ``\\dfrac``, ``\\underbrace``,
-multi-line ``\\\\`` / ``aligned``); anything still unsupported is shown as its TeX
-source instead of breaking the answer.
+multi-line ``\\\\`` / ``aligned``), while ``array`` is rendered as an HTML table;
+anything still unsupported is shown as its TeX source instead of breaking the answer.
 """
 
 from __future__ import annotations
@@ -64,6 +64,7 @@ _SIMPLE = {
     "right.": "",
 }
 _ENV = re.compile(r"\\(begin|end)\{(aligned|align\*?|gathered|gather\*?|split|cases|eqnarray\*?|multline\*?)\}")
+_ARRAY = re.compile(r"^\s*\\begin\{array\}\{([^{}]*)\}(.*?)\\end\{array\}\s*$", re.S)
 
 
 def set_dpi(value: float) -> None:
@@ -129,16 +130,20 @@ _TOKEN = re.compile(r"\s*(\{|\\[A-Za-z]+|[^\s{}\\])")
 def _brace_args(s: str, name: str, count: int) -> str:
     r"""TeX lets single-token arguments skip braces (``\frac12``, ``\sqrt5``); mathtext doesn't."""
     pattern = re.compile(r"\\" + name + r"(?![A-Za-z])")
-    out, pos = [], 0
-    for m in pattern.finditer(s):
-        if m.start() < pos:
+    # Work right-to-left so a shorthand nested inside an outer braced argument is
+    # normalised before the outer command is parsed. A left-to-right pass consumes
+    # the whole outer argument and used to skip e.g. ``\frac{\frac13n^3}{n^3}``.
+    for start in reversed([match.start() for match in pattern.finditer(s)]):
+        m = pattern.match(s, start)
+        if m is None:
             continue
-        out.append(s[pos : m.end()])
         i = m.end()
         optional = re.match(r"\s*\[[^\]]*\]", s[i:])  # \sqrt[n]{x}
+        optional_text = ""
         if optional:
-            out.append(optional.group(0))
+            optional_text = optional.group(0)
             i += optional.end()
+        args: list[str] = []
         for _ in range(count):
             t = _TOKEN.match(s, i)
             if not t:
@@ -147,14 +152,14 @@ def _brace_args(s: str, name: str, count: int) -> str:
                 g = _group(s, t.start(1))
                 if not g:
                     break
-                out.append(s[i : g[1]])
+                args.append("{" + g[0] + "}")
                 i = g[1]
             else:
-                out.append("{" + t.group(1) + "}")
+                args.append("{" + t.group(1) + "}")
                 i = t.end()
-        pos = i
-    out.append(s[pos:])
-    return "".join(out)
+        if len(args) == count:
+            s = s[:start] + "\\" + name + optional_text + "".join(args) + s[i:]
+    return s
 
 
 def _normalise(tex: str) -> tuple[list[str], bool]:
@@ -180,6 +185,115 @@ def _normalise(tex: str) -> tuple[list[str], bool]:
     tex = _ENV.sub("", tex)
     rows = [r.replace("&", " ").replace("\n", " ").strip() for r in re.split(r"\\\\(?:\[[^\]]*\])?", tex)]
     return [r for r in rows if r], boxed
+
+
+def _split_array_rows(body: str) -> list[tuple[str, bool, bool]]:
+    r"""Split an array body at top-level ``\\`` and retain ``\hline`` rules."""
+    raw_rows: list[str] = []
+    start = depth = i = 0
+    while i < len(body):
+        if body[i] == "{" and (i == 0 or body[i - 1] != "\\"):
+            depth += 1
+        elif body[i] == "}" and (i == 0 or body[i - 1] != "\\"):
+            depth = max(0, depth - 1)
+        elif depth == 0 and body.startswith(r"\\", i):
+            raw_rows.append(body[start:i])
+            i += 2
+            spacing = re.match(r"\s*\[[^\]]*\]", body[i:])
+            if spacing:
+                i += spacing.end()
+            start = i
+            continue
+        i += 1
+    raw_rows.append(body[start:])
+
+    rows = []
+    for raw in raw_rows:
+        top_rule = bool(re.match(r"\s*\\hline(?![A-Za-z])", raw))
+        raw = re.sub(r"^\s*\\hline(?![A-Za-z])\s*", "", raw)
+        bottom_rule = bool(re.search(r"\\hline(?![A-Za-z])\s*$", raw))
+        raw = re.sub(r"\s*\\hline(?![A-Za-z])\s*$", "", raw)
+        if raw.strip() or top_rule or bottom_rule:
+            rows.append((raw.strip(), top_rule, bottom_rule))
+    return rows
+
+
+def _split_array_cells(row: str) -> list[str]:
+    cells: list[str] = []
+    start = depth = 0
+    for i, char in enumerate(row):
+        if char == "{" and (i == 0 or row[i - 1] != "\\"):
+            depth += 1
+        elif char == "}" and (i == 0 or row[i - 1] != "\\"):
+            depth = max(0, depth - 1)
+        elif char == "&" and depth == 0 and (i == 0 or row[i - 1] != "\\"):
+            cells.append(row[start:i].strip())
+            start = i + 1
+    cells.append(row[start:].strip())
+    return cells
+
+
+def _array_columns(spec: str) -> tuple[list[str], set[int], bool]:
+    """Return alignments, columns with a left rule, and whether a right rule exists."""
+    alignments: list[str] = []
+    bars_before: set[int] = set()
+    pending_bar = False
+    i = 0
+    while i < len(spec):
+        char = spec[i]
+        if char == "|":
+            pending_bar = True
+        elif char in "lcr":
+            if pending_bar:
+                bars_before.add(len(alignments))
+            alignments.append({"l": "left", "c": "center", "r": "right"}[char])
+            pending_bar = False
+        elif char in "pmb" and i + 1 < len(spec) and spec[i + 1] == "{":
+            group = _group(spec, i + 1)
+            if group:
+                if pending_bar:
+                    bars_before.add(len(alignments))
+                alignments.append("left")
+                pending_bar = False
+                i = group[1] - 1
+        i += 1
+    return alignments, bars_before, pending_bar
+
+
+def _array_html(tex: str, size: float, display: bool) -> str | None:
+    """Render a LaTeX ``array`` as an HTML table whose cells are math images."""
+    match = _ARRAY.fullmatch(tex.strip())
+    if not match:
+        return None
+    alignments, bars_before, right_rule = _array_columns(match.group(1))
+    parsed_rows = _split_array_rows(match.group(2))
+    if not parsed_rows:
+        return None
+
+    rendered_rows = []
+    for row, top_rule, bottom_rule in parsed_rows:
+        cell_values = _split_array_cells(row)
+        cells = []
+        for index, cell in enumerate(cell_values):
+            rows, _boxed = _normalise(cell)
+            images = [_img(value, size, "math-block") for value in rows]
+            content = " ".join(image for image in images if image)
+            if not rows or len(content) == 0 or None in images:
+                content = f"<code class='tex'>{html.escape(cell)}</code>"
+            classes = ["math-array-cell"]
+            if index in bars_before:
+                classes.append("math-array-vbar")
+            if right_rule and index == max(len(alignments), len(cell_values)) - 1:
+                classes.append("math-array-right")
+            alignment = alignments[index] if index < len(alignments) else "center"
+            cells.append(f'<td class="{" ".join(classes)}" style="text-align:{alignment}">{content}</td>')
+        row_classes = "math-array-rule" if top_rule else ""
+        if bottom_rule:
+            row_classes += " math-array-bottom-rule"
+        rendered_rows.append(f'<tr class="{row_classes.strip()}">{"".join(cells)}</tr>')
+
+    table = f'<table class="math-array">{"".join(rendered_rows)}</table>'
+    return f'<div class="math-display math-array-wrap">{table}</div>' if display else table
 
 
 # -------------------------------------------------------------------- rendering
@@ -220,6 +334,9 @@ def _source(tex: str, display: bool) -> str:
 
 
 def inline_html(tex: str) -> str:
+    array = _array_html(tex, INLINE_PT, display=False)
+    if array is not None:
+        return array
     rows, boxed = _normalise(tex)
     imgs = [_img(r, INLINE_PT, "math-inline" + (" math-boxed" if boxed else "")) for r in rows]
     if not rows or None in imgs:
@@ -228,6 +345,9 @@ def inline_html(tex: str) -> str:
 
 
 def display_html(tex: str) -> str:
+    array = _array_html(tex, DISPLAY_PT, display=True)
+    if array is not None:
+        return array
     rows, boxed = _normalise(tex)
     imgs = [_img(r, DISPLAY_PT, "math-block") for r in rows]
     if not rows or None in imgs:
