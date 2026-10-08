@@ -174,12 +174,18 @@ class LiveCaptionsReader:
                 if self._stop.is_set() or time.monotonic() > deadline:
                     return None
         text = window.TextControl(AutomationId=TEXT_ID)
-        return text if text.Exists(3) else None
+        return text if text.Exists(0.2) else None
+
+    def _window_exists(self, auto) -> bool:
+        return auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS).Exists(0.5)
 
     def _loop(self, auto) -> None:
         text_ctrl = self._find_text(auto, launch=True)
-        if text_ctrl is None:
+        if self._stop.is_set():
+            return
+        if text_ctrl is None and not self._window_exists(auto):
             if not self._stop.is_set():
+                log.warning("Could not find the Windows Live Captions window")
                 self._emit(
                     Event(
                         "error",
@@ -189,8 +195,12 @@ class LiveCaptionsReader:
                 )
             return
 
-        log.info("Connected to Windows Live Captions text control")
-        self._emit(Event("ready", "Reading Windows Live Captions — keep its window open (it can sit behind others)"))
+        # Windows may expose only ReadyToCaptionTextBlock until the first speech.
+        # A missing CaptionsTextBlock does not mean the window is unavailable.
+        waiting_text = "Waiting for Live Captions text — play speech audio or finish setup in its window"
+        reading_text = "Reading Windows Live Captions — keep its window open (it can sit behind others)"
+        log.info("Connected to Windows Live Captions; text control %s", "found" if text_ctrl is not None else "not yet created")
+        self._emit(Event("ready", reading_text if text_ctrl is not None else waiting_text))
         differ = CaptionDiffer()
         last_text: str | None = None
         last_change = time.monotonic()
@@ -210,10 +220,14 @@ class LiveCaptionsReader:
                 text_ctrl = self._find_text(auto, launch=False)
                 last_attach = now
                 if text_ctrl is None:
-                    if not disconnected:
-                        log.warning("Windows Live Captions text control disappeared; waiting to reconnect")
-                        disconnected = True
-                    self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
+                    if self._window_exists(auto):
+                        disconnected = False
+                        self._emit(Event("status", waiting_text))
+                    else:
+                        if not disconnected:
+                            log.warning("Windows Live Captions window disappeared; waiting to reconnect")
+                            disconnected = True
+                        self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
                     self._stop.wait(1.0)
                 else:
                     log.info("Reconnected to Windows Live Captions text control")
@@ -235,7 +249,6 @@ class LiveCaptionsReader:
                 last_attach = time.monotonic()
                 if replacement is None:
                     text_ctrl = None
-                    self._emit(Event("status", "Live Captions window closed — waiting for it to reopen…"))
                     log.warning("Windows Live Captions text control became stale")
                 else:
                     text_ctrl = replacement
