@@ -72,6 +72,7 @@ class SettingsMigrationTests(unittest.TestCase):
         app.summary_attach_transcript_var = SimpleNamespace(get=lambda: False)
         app.chat = SimpleNamespace(persist_settings=Mock())
         app.vocab = SimpleNamespace(persist_settings=Mock())
+        app.translation = SimpleNamespace(persist_settings=Mock())
         app.overlay_var = SimpleNamespace(get=lambda: False)
         app.model_var = SimpleNamespace(get=lambda: "medium.en")
         app.compute_var = SimpleNamespace(get=lambda: "cpu")
@@ -89,6 +90,7 @@ class SettingsMigrationTests(unittest.TestCase):
         self.assertEqual(app.settings.device_label, "Microphone")
         app.chat.persist_settings.assert_called_once_with()
         app.vocab.persist_settings.assert_called_once_with()
+        app.translation.persist_settings.assert_called_once_with()
         save.assert_called_once_with()
         app.status_var.set.assert_called_once_with("Settings saved")
 

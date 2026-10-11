@@ -49,7 +49,7 @@ def site_packages() -> Path:
     raise SystemExit("Run this with the project's virtual environment (.venv) so all libraries are found.")
 
 
-def pyinstaller_args(gpu: bool) -> list[str]:
+def pyinstaller_args(gpu: bool, offline_translation: bool = False) -> list[str]:
     sep = ";"  # PyInstaller's src;dest separator on Windows
     args = [
         str(ROOT / "main.py"),
@@ -71,6 +71,11 @@ def pyinstaller_args(gpu: bool) -> list[str]:
         args += ["--collect-data", pkg]
     for pkg in COLLECT_SUBMODULES:
         args += ["--collect-submodules", pkg]
+    if offline_translation:
+        for pkg in ("torch", "transformers", "sentencepiece", "sacremoses"):
+            args += ["--collect-all", pkg]
+    else:
+        args += ["--exclude-module", "torch", "--exclude-module", "transformers"]
     if gpu:
         nvidia = site_packages() / "nvidia"
         for lib in NVIDIA_LIBS:
@@ -84,6 +89,7 @@ def main() -> None:
     parser.add_argument("--gpu", action="store_true", help="bundle NVIDIA cuBLAS/cuDNN for GPU transcription")
     parser.add_argument("--with-models", action="store_true", help="bundle the Whisper models in models/")
     parser.add_argument("--zip", action="store_true", help="also create a .zip of the build")
+    parser.add_argument("--with-translation", action="store_true", help="bundle optional VinAI offline dependencies (install requirements-translation.txt first)")
     opts = parser.parse_args()
 
     import PyInstaller.__main__
@@ -95,7 +101,7 @@ def main() -> None:
         ICON.parent.mkdir(parents=True, exist_ok=True)
         make_icon.draw().save(ICON, sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
 
-    PyInstaller.__main__.run(pyinstaller_args(opts.gpu))
+    PyInstaller.__main__.run(pyinstaller_args(opts.gpu, opts.with_translation))
 
     app_dir = DIST / NAME
     shutil.copy2(PACKAGING / "Open Chrome for ChatGPT.bat", app_dir)

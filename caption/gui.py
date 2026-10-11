@@ -24,6 +24,7 @@ from .overlay import CaptionOverlay
 from .prompt_editor import PromptEditor
 from .settings import Settings
 from .stream_preview import StreamPreview
+from .translation_tab import TranslationPanel
 from .transcript_file import TRANSCRIPTS_DIR
 from .transcriber import Event, StreamingTranscriber, TranscriberConfig
 
@@ -418,6 +419,13 @@ class App:
         )
         self.tabs.add(self.vocab, text="New words")
 
+        self.translation = TranslationPanel(
+            self.tabs, self.settings, self.store,
+            get_session_file=lambda: self.session_file,
+            get_conversation_id=self._conversation_id,
+        )
+        self.tabs.add(self.translation, text="Dịch realtime")
+
         def focus_entry(_event) -> None:
             selected = self.tabs.select()
             if selected == str(self._summary_tab) and self.sidebar.winfo_manager():
@@ -567,6 +575,7 @@ class App:
             self.device_var.set(conversation.source)
         self._show_saved_transcript()
         self.chat.load_conversation()
+        self.translation.load_conversation()
         self._refresh_summary_history(select_latest=True)
         self._set_running(self.transcriber is not None)
         self.status_var.set(f"Selected: {conversation.title}")
@@ -781,7 +790,8 @@ class App:
         return tfile, lambda event: self.events.put((tfile, event))
 
     def _close_session_file(self, tfile: ConversationTranscript) -> None:
-        tfile.close()
+        captured = tfile.close()
+        self.translation.on_lines(tfile.conversation_id, captured)
         self._open_files.discard(tfile)
 
     def start(self) -> None:
@@ -1145,11 +1155,13 @@ class App:
         elif event.kind == "ready":
             self.status_var.set(f"{event.text} — saving to {tfile.path.name}")
         elif event.kind == "partial":
+            self.translation.on_partial(tfile, event.text)
             if tfile.conversation_id == self._conversation_id():
                 self._set_transcript_partial(event.text)
             self.overlay.set_partial(event.text)
         elif event.kind == "final":
-            tfile.write(event.text, event.end_of_utterance)
+            captured = tfile.write(event.text, event.end_of_utterance)
+            self.translation.on_lines(tfile.conversation_id, captured)
             if tfile.conversation_id == self._conversation_id():
                 self._append_transcript(event.text, event.end_of_utterance)
             self.overlay.add_final(event.text)
@@ -1235,6 +1247,7 @@ class App:
         self.settings.summary_attach_transcript = self.summary_attach_transcript_var.get()
         self.chat.persist_settings()
         self.vocab.persist_settings()
+        self.translation.persist_settings()
         self.settings.show_overlay = self.overlay_var.get()
         self.settings.model = self.model_var.get().strip() or self.settings.model
         self.settings.compute = self.compute_var.get()
@@ -1248,6 +1261,7 @@ class App:
         self.save_settings(notify=False)
         self.stop()
         self._closing = True
+        self.translation.close()
         for tfile in list(self._open_files):
             self._close_session_file(tfile)
         self.root.destroy()

@@ -1,0 +1,7 @@
+# Optional: only needed for VinAI offline (cloud engines need no extra packages).
+torch>=2.2
+transformers>=4.40,<5
+sentencepiece>=0.2
+huggingface-hub>=0.23,<1
+sacremoses>=0.1
+protobuf>=4

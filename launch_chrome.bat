@@ -15,4 +15,4 @@ echo Dang mo Chrome (port %PORT%, profile: %PROFILE_DIR%)...
   --user-data-dir="%PROFILE_DIR%" ^
   --no-first-run ^
   --no-default-browser-check ^
-  https://chatgpt.com https://gemini.google.com https://notebooklm.google.com https://claude.ai
+  https://chatgpt.com https://gemini.google.com https://notebooklm.google.com https://claude.ai https://translate.google.com.vn

@@ -41,6 +41,21 @@ class Settings:
     overlay_width: int = 0  # 0 = pick from screen size
     overlay_x: int = -1  # -1 = centre near the bottom of the screen
     overlay_y: int = -1
+    translation_engine: str = "azure"
+    translation_enabled: bool = False
+    translation_partial: bool = False
+    translation_source: str = "en"
+    translation_target: str = "vi"
+    translation_azure_key: str = ""
+    translation_azure_region: str = ""
+    translation_google_key: str = ""
+    translation_gemini_key: str = ""
+    translation_gemini_model: str = "gemini-3.5-flash-lite"
+    translation_gemini_prompt: str = (
+        "Translate the following transcript from {source} to {target}. "
+        "Keep names, numbers and technical terms accurate. Return only the translation.\n\n{text}"
+    )
+    translation_device: str = "cpu"
 
     @classmethod
     def load(cls) -> "Settings":

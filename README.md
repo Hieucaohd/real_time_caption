@@ -144,6 +144,76 @@ Việc xuất chạy offline, không gửi thêm request ChatGPT, không cần M
 và không chặn việc thu âm khi ghi file. Nếu chạy từ source, chạy lại `setup.bat` để
 cài thêm thư viện `python-docx` và `reportlab`; bản exe cần build lại để có tính năng này.
 
+### Dịch realtime từng dòng transcript
+
+Tab **Dịch realtime** hoạt động độc lập với ChatGPT trên Chrome. Chọn **Engine**,
+mở **Settings**, cấu hình rồi bấm **Test connection / model**, **Save settings**
+và bật **Auto translate**. Mặc định dịch tắt, chiều dịch là Anh → Việt.
+
+Các engine có cấu hình riêng, chuyển qua lại không làm mất key/prompt đã điền:
+
+- **Azure Translator**: key của resource Translator và region nếu resource yêu cầu.
+  API tham khảo: [Azure Translate v3](https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/v3/translate).
+- **Google Cloud Translation**: API key của project đã bật Cloud Translation
+  **Basic v2**, dùng NMT. Billing/quota gắn với project chứa key; không dùng key Gemini
+  ở engine này. [API Basic v2](https://docs.cloud.google.com/translate/docs/reference/rest/v2/translate).
+- **Google Translate (Chrome)**: không cần API key; mở `translate.google.com` trong
+  Chrome chạy bằng `launch_chrome.bat` (CDP port 9222). App dùng lại một tab Translate
+  đang mở, điền câu cần dịch, chờ kết quả ổn định rồi đọc nút **Copy translation**.
+  Nếu có nhiều tab, ưu tiên tab app đã dùng; lần đầu ưu tiên tab Translate đang focus.
+  Không mở/đóng tab hoặc thao tác trên tab ChatGPT. Không thay đổi clipboard Windows;
+  nếu không đọc được nút Copy, lấy phần bản dịch đang hiển thị làm dự phòng.
+  Engine thay nội dung cũ trong ô nhập và đặt ngôn ngữ theo From/To của app; giao diện
+  Translate dùng tiếng Anh để xác định nút nhất quán. Câu cần dịch được gửi tới Google,
+  không phải chạy offline; trang có thể lưu vào history như khi bạn nhập thủ công.
+  Khi lỗi kết nối, CAPTCHA/consent hoặc trang thay đổi, app dừng để bạn xử lý rồi Retry,
+  không tự giải CAPTCHA/chuyển sang API trả phí. Stop hủy hàng đợi và bỏ kết quả đang chờ;
+  thao tác Chrome đang thực hiện có thể cần tối đa khoảng 10 giây để kết thúc timeout.
+- **Gemini API**: API key, model ID và prompt riêng. Prompt bắt buộc có `{text}`,
+  có thể dùng `{source}` và `{target}`. Chỉ gửi phần cần dịch, không gửi history chat.
+  Model mặc định là `gemini-3.5-flash-lite`; có thể sửa theo quyền truy cập/quota
+  của key. Xem [model Gemini hiện có](https://ai.google.dev/gemini-api/docs/models).
+- **VinAI offline**: hiện hỗ trợ Anh → Việt, chọn CPU/CUDA/auto. Cài phần phụ thuộc
+  tùy chọn trước (không cần cài khi chỉ dùng cloud):
+
+  ```bat
+  .venv\Scripts\python -m pip install -r requirements-translation.txt
+  ```
+
+  Sau đó bấm **Download model…** và xác nhận tải. Model được lưu trong
+  `models/translation/vinai-en2vi-v2`; Test/dịch chỉ nạp file local, không tự tải.
+  CUDA yêu cầu bản PyTorch phù hợp GPU; CPU là mặc định để tránh tranh GPU với Whisper.
+  Nguồn và giấy phép: [VinAI Translate](https://github.com/VinAIResearch/VinAI_Translate),
+  Nguyen et al., *A Vietnamese-English Neural Machine Translation System*, INTERSPEECH 2022,
+  model AGPL-3.0. Xem giấy phép trước khi phân phối app kèm model.
+
+Chọn dòng trong danh sách để xem câu gốc, thời gian và **tất cả các lần dịch** bên dưới.
+**Translate selected / Retry** tạo một lần dịch mới theo engine/cấu hình đang chọn;
+không ghi đè câu trả lời trước. **Translate missing…** có xác nhận trước khi gửi hàng loạt
+và bỏ qua các dòng đã dịch thành công bằng cùng engine/model/ngôn ngữ/prompt.
+Hàng đợi tối đa 256 dòng; các dòng chưa xếp được vẫn giữ nguyên, có thể bấm lại sau.
+
+Mặc định chỉ dịch dòng đã chốt. **Translate provisional speech** dịch tạm tối đa theo
+nhịp 1,2 giây, có gom yêu cầu mới nhất; không lưu bản tạm vào lịch sử. Chế độ này tốn
+thêm quota và bản dịch có thể thay đổi. Nội dung chốt thành nhiều mảnh được gom lại
+theo dòng vật lý trong transcript, gồm cả các file transcript bị split.
+
+**Stop** tắt dịch tự động và hủy hàng đợi; request đã gửi lên cloud có thể vẫn được
+nhà cung cấp xử lý/tính quota. Khi có lỗi, dịch tự tạm dừng để tránh gọi liên tiếp;
+kiểm tra settings rồi Retry hoặc bật Auto translate lại. Không tự đổi provider,
+không tự nâng gói trả phí, không gửi ảnh/audio hay lịch sử Chat/Summary.
+
+Lịch sử và nguồn của từng dòng nằm trong bảng `translation_lines`/`line_translations`
+của SQLite conversation; transcript gốc không bị thay thế. Mở lại conversation sẽ
+khôi phục bản dịch, không tự dịch lại toàn bộ nội dung cũ.
+API keys nằm dạng văn bản trong `settings.json` (đã được gitignore); khi dùng cloud,
+key và nội dung cần dịch được gửi qua HTTPS tới provider đã chọn. Quota/phí do tài
+khoản provider quyết định, app không thể bảo đảm tài khoản đang ở gói miễn phí.
+
+Bản exe mặc định hỗ trợ các engine cloud. Để đóng gói kèm thư viện VinAI, cài
+`requirements-translation.txt` rồi dùng `build_exe.bat --with-translation` (gói lớn hơn).
+Model vẫn được tải riêng khi người dùng xác nhận Download.
+
 ## Cách hoạt động
 
 - `caption/audio.py`: thu âm qua WASAPI (loopback hoặc micro), trộn về mono, resample về 16 kHz.

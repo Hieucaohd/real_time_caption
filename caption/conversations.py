@@ -358,6 +358,9 @@ class ConversationTranscript:
         self.store = store
         self._line_open = False
         self._last_write_path: Path | None = None
+        self._capture_text = ""
+        self._capture_origin = ""
+        self._capture_stamp = ""
 
     @property
     def path(self) -> Path:
@@ -391,19 +394,38 @@ class ConversationTranscript:
             path = self.folder / f"transcript-{len(parts) + 1:04d}.txt"
         return path
 
-    def write(self, text: str, end_of_utterance: bool) -> None:
+    def _flush_capture(self) -> list[tuple[str, str, str]]:
+        if not self._capture_text.strip():
+            return []
+        result = [(self._capture_origin, self._capture_stamp, self._capture_text.strip())]
+        self._capture_text = ""
+        return result
+
+    @property
+    def pending_text(self) -> str:
+        return self._capture_text.strip()
+
+    def write(self, text: str, end_of_utterance: bool) -> list[tuple[str, str, str]]:
         extra = len(text.encode("utf-8")) + 32
         path = self._write_path(extra)
         new_part = not path.exists()
+        completed = []
         with open(path, "a", encoding="utf-8") as f:
             if new_part:
                 f.write(f"# Source: {self.source}\n# Continued transcript part\n\n")
             if new_part or not self._line_open:
-                f.write(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "))
+                completed.extend(self._flush_capture())
+                self._capture_origin = f"{path.name}:{f.tell()}"
+                self._capture_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"[{self._capture_stamp}] ")
             f.write(text + ("\n" if end_of_utterance else " "))
             f.flush()
+        self._capture_text += text + " "
         self._last_write_path = path
         self._line_open = not end_of_utterance
+        if end_of_utterance:
+            completed.extend(self._flush_capture())
+        return completed
 
     def read_text(self) -> str:
         return "\n".join(p.read_text(encoding="utf-8", errors="replace").rstrip() for p in self.parts()).strip()
@@ -421,8 +443,9 @@ class ConversationTranscript:
         path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
         return path
 
-    def close(self) -> None:
+    def close(self) -> list[tuple[str, str, str]]:
         if self._line_open:
             with open(self._last_write_path or self._write_path(), "a", encoding="utf-8") as f:
                 f.write("\n")
             self._line_open = False
+        return self._flush_capture()
