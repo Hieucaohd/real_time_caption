@@ -188,6 +188,7 @@ class AnswerExportUITests(unittest.TestCase):
         panel._messages, panel._requests = [], {}
         panel._active_request_id = None
         panel._render = panel.set_busy = Mock()
+        panel._schedule_render = Mock()
         panel.after_idle = Mock()
         panel._chatgpt_busy = False
         translation = VocabTranslation([NewWord("example", translation="Ví dụ")], "key", "", "")

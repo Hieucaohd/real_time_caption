@@ -1258,9 +1258,12 @@ class App:
             self.status_var.set("Settings saved")
 
     def on_close(self) -> None:
+        if not self.vocab.confirm_close():
+            return
         self.save_settings(notify=False)
         self.stop()
         self._closing = True
+        self.vocab.close()
         self.translation.close()
         for tfile in list(self._open_files):
             self._close_session_file(tfile)

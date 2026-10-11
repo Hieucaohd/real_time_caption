@@ -22,6 +22,7 @@ from . import chatgpt, export_ui, markdown_html, vocab
 from .settings import Settings
 from .conversations import ConversationTranscript
 from .voca_client import VocaClient, VocaError
+from .voca_queue import VocaSaveQueue
 from .stream_preview import StreamPreview
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,9 @@ class VocabPanel(ttk.Frame):
         self._busy = False
         self._chatgpt_busy = False
         self._saving_to_voca = False
+        self._voca_queue: VocaSaveQueue | None = None
+        self._voca_deferred = 0
+        self._closed = False
         self._new_conversation = False
         self._messages: list[tuple[str, str, str, str | None]] = []
         self._export_answers: dict[str, str] = {}
@@ -110,6 +114,8 @@ class VocabPanel(ttk.Frame):
         self.hint_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.hint_var, foreground="#777777").pack(side="left", padx=8)
         ttk.Button(bar, text="Save settings", command=self._on_save_settings).pack(side="right", padx=4)
+        self._voca_status_var = tk.StringVar(value="Voca: idle")
+        ttk.Label(self, textvariable=self._voca_status_var, foreground="#777777", padding=(4, 0)).pack(fill="x")
 
         # Input first (bottom) so the expanding history can't push it out of view.
         ttk.Label(
@@ -135,7 +141,8 @@ class VocabPanel(ttk.Frame):
 
     def set_busy(self, busy: bool) -> None:
         self._chatgpt_busy = busy
-        self._busy = busy or self._saving_to_voca
+        # Only ChatGPT owns the send/retry/stop controls. Voca runs independently.
+        self._busy = busy
         self.refresh_state()
         self._schedule_render()
 
@@ -210,12 +217,59 @@ class VocabPanel(ttk.Frame):
         self.refresh_state()
 
     def _drain_results(self) -> None:
+        if self._closed:
+            return
         try:
-            while True:
+            for _ in range(50):
                 self._results.get_nowait()()
         except queue.Empty:
             pass
+        self._drain_voca_results()
         self.after(150, self._drain_results)
+
+    def _voca_pending_count(self) -> int:
+        worker = self.__dict__.get("_voca_queue")
+        return (worker.pending if worker else 0) + self.__dict__.get("_voca_deferred", 0)
+
+    def _refresh_voca_status(self) -> None:
+        count = self._voca_pending_count()
+        self._saving_to_voca = count > 0
+        variable = self.__dict__.get("_voca_status_var")
+        if variable is not None:
+            variable.set(f"Voca: {count} batch(es) pending / saving in background" if count else "Voca: idle")
+
+    def _drain_voca_results(self) -> None:
+        worker = self.__dict__.get("_voca_queue")
+        if worker is None:
+            return
+        for _ in range(50):
+            try:
+                status, task, words = worker.results.get_nowait()
+            except queue.Empty:
+                break
+            if status == "saving":
+                self._update_voca_message(
+                    [replace(word, voca_error="Saving to Voca…") for word in words], task.message
+                )
+            else:
+                self._on_voca_saved(words, task.message)
+        self._refresh_voca_status()
+
+    def confirm_close(self) -> bool:
+        count = self._voca_pending_count()
+        return not count or messagebox.askyesno(
+            "Voca uploads pending",
+            f"{count} batch(es) are still waiting / saving to Voca.\n"
+            "Keep the app open to finish saving.\n\n"
+            "Exit anyway? Queued uploads will be discarded. An upload already sent may have reached Voca.",
+            parent=self, default="no",
+        )
+
+    def close(self) -> None:
+        self._closed = True
+        worker = self.__dict__.get("_voca_queue")
+        if worker is not None:
+            worker.close()
 
     # ------------------------------------------------------------------- send
 
@@ -301,7 +355,7 @@ class VocabPanel(ttk.Frame):
         self._add(
             "bot", header,
             "".join(
-                vocab.card_html(replace(w, voca_error="Saving to Voca…") if translation.api_key else w)
+                vocab.card_html(replace(w, voca_error="Queued for Voca…") if translation.api_key else w)
                 for w in translation.words
             ),
             export_key=export_key,
@@ -309,41 +363,43 @@ class VocabPanel(ttk.Frame):
         self._active_request_id = None
         if translation.api_key:
             message = self._messages[-1]
-            self._saving_to_voca = True
-            self.set_busy(self._chatgpt_busy)
-            self._set_pending("Saving to Voca…")
+            self._voca_deferred = self.__dict__.get("_voca_deferred", 0) + 1
+            self._refresh_voca_status()
             # Render the translation on Tk's UI thread before starting the upload.
             self.after_idle(lambda: self._start_voca_save(translation, message))
 
     def _start_voca_save(self, translation: VocabTranslation, message: tuple) -> None:
-        def save() -> None:
-            # The worker updates copies so rendering never sees partially updated cards.
-            words = [replace(word, voca_status="", voca_error="") for word in translation.words]
-            try:
-                _save_to_voca(
-                    translation.api_key, translation.collection_id, words, translation.source_title
-                )
-            except Exception:  # noqa: BLE001 - preserve the translation even if saving fails
-                log.exception("Saving translated words to Voca failed")
-                for word in words:
-                    word.voca_status = "failed"
-                    word.voca_error = "Could not save to Voca. Please try again."
-            self._results.put(lambda: self._on_voca_saved(words, message))
+        self._voca_deferred = max(0, self._voca_deferred - 1)
+        if self._closed:
+            return
+        if self._voca_queue is None:
+            self._voca_queue = VocaSaveQueue(lambda *args: _save_to_voca(*args))
+        accepted = self._voca_queue.submit(
+            translation.words, translation.api_key, translation.collection_id, translation.source_title, message
+        )
+        if not accepted:
+            self._on_voca_saved(
+                [replace(word, voca_status="failed", voca_error="Voca queue is full. Please retry later.") for word in translation.words], message
+            )
+        self._refresh_voca_status()
 
-        threading.Thread(target=save, name="voca-save", daemon=True).start()
+    def _update_voca_message(self, words: list[vocab.NewWord], message: tuple, suffix: str = "") -> None:
+        for index, item in enumerate(self._messages):
+            # A progress update replaces the tuple. Match its stable answer key,
+            # not its position or the latest active ChatGPT request.
+            if item is message or (message[3] is not None and item[0] == "bot" and item[3] == message[3]):
+                self._messages[index] = (
+                    "bot", message[1] + suffix, "".join(vocab.card_html(word) for word in words), message[3]
+                )
+                self._schedule_render()
+                break
 
     def _on_voca_saved(self, words: list[vocab.NewWord], message: tuple) -> None:
         saved = sum(word.voca_status in ("created", "updated") for word in words)
-        header = message[1] + (f" · {saved} saved to Voca" if saved else "")
-        for index, item in enumerate(self._messages):
-            if item is message:
-                self._messages[index] = (
-                    "bot", header, "".join(vocab.card_html(word) for word in words), message[3]
-                )
-                break
-        self._saving_to_voca = False
-        self.set_busy(self._chatgpt_busy)
-        self._set_pending(None)
+        self._update_voca_message(words, message, f" · {saved} saved to Voca" if saved else "")
+        self._refresh_voca_status()
+        # Never clear pending/stream content or touch the shared ChatGPT busy flag:
+        # the user may already be translating their next batch.
 
     def _on_error(self, error: str) -> None:
         request = self._requests.get(self._active_request_id or "")

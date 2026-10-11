@@ -112,7 +112,19 @@ App sẽ:
 - Gửi cả danh sách lên Voca bằng API batch, với `source = realtime_caption`. Ngữ cảnh gồm câu, bản dịch, mốc giờ, và nguồn `Real-time caption · <ngày giờ bắt đầu phiên>`, nên trong Voca bạn lọc được các từ theo từng buổi xem. Voca tự chống trùng: gửi lại một từ đã có chỉ bổ sung nghĩa hoặc ngữ cảnh mới.
 - Hiện mỗi từ thành một thẻ kèm trạng thái: **Saved to Voca** (mới hoặc đã bổ sung), **Already in Voca**, hoặc **Not saved** kèm lý do. Chưa có API key thì app vẫn dịch, chỉ không lưu.
 
-Code: `caption/vocab_tab.py` (giao diện), `caption/vocab.py` (tìm ngữ cảnh, prompt, đọc JSON), `caption/voca_client.py` (client chép nguyên từ `voca/docs/external-api/`).
+Ngay khi ChatGPT trả lời xong và thẻ từ đã hiển thị, bạn có thể gửi lượt từ mới tiếp
+theo. Việc lưu Voca đi qua một **hàng đợi nền FIFO riêng**, mỗi lần gửi một batch;
+không khóa ChatGPT/Send/Retry và không xóa stream của lượt mới khi lượt cũ lưu xong.
+Mỗi batch giữ nguyên API key, bộ từ đích và nguồn đã chọn lúc gửi yêu cầu ChatGPT.
+Thẻ từ lần lượt hiện **Queued for Voca… → Saving to Voca… → Saved/Not saved**,
+kèm số batch còn chờ ở dòng trạng thái Voca. Lỗi một batch không chặn các batch sau.
+
+Hàng đợi hiện nằm trong bộ nhớ, tối đa 100 batch đang chờ (chưa tính batch đang gửi).
+Giữ app mở cho đến khi Voca báo idle; nếu đóng khi còn lượt lưu, app sẽ hỏi xác nhận.
+Chọn thoát sẽ bỏ các lượt chưa gửi; request đã gửi có thể đã được Voca xử lý.
+Nút Stop trên tin nhắn vẫn chỉ hủy yêu cầu ChatGPT, không hủy lượt lưu Voca đã xếp hàng.
+
+Code: `caption/vocab_tab.py` (giao diện), `caption/voca_queue.py` (hàng đợi lưu nền), `caption/vocab.py` (tìm ngữ cảnh, prompt, đọc JSON), `caption/voca_client.py` (client chép nguyên từ `voca/docs/external-api/`).
 
 Thao tác với thanh phụ đề nổi:
 - Kéo chuột trái để di chuyển.
