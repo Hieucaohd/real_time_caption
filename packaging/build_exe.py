@@ -38,8 +38,8 @@ COLLECT_ALL = [
     "resvg_py",  # native SVG-to-PNG renderer for MathJax output
     "playwright",  # driver (node.exe) used to talk to Chrome over CDP
 ]
-COLLECT_DATA = ["faster_whisper"]  # bundled Silero VAD model
-COLLECT_SUBMODULES = ["mdit_py_plugins", "comtypes"]
+COLLECT_DATA = ["faster_whisper", "docx", "reportlab"]  # VAD model, Word template, PDF data
+COLLECT_SUBMODULES = ["mdit_py_plugins", "comtypes", "reportlab"]
 
 
 def site_packages() -> Path:

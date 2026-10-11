@@ -101,11 +101,16 @@ def _render_png(tex: str, display: bool, size_pt: float, dpi_value: float) -> tu
         return None
 
 
-def _image(tex: str, display: bool, size_pt: float) -> str | None:
-    rendered = _render_png(tex.strip(), display, size_pt, math_render.dpi)
+def _image(tex: str, display: bool, size_pt: float, dpi_value: float | None = None) -> str | None:
+    dpi = math_render.dpi if dpi_value is None else dpi_value
+    rendered = _render_png(tex.strip(), display, size_pt, dpi)
     if rendered is None:
         return None
     data, width, height, align_px = rendered
+    # Export images at print resolution, retaining their intended physical size
+    # in HTML's 96-DPI coordinate system. Do not change the UI's screen DPI.
+    if dpi_value is not None:
+        width, height, align_px = width * 96 / dpi, height * 96 / dpi, align_px * 96 / dpi
     css_class = "math-block" if display else "math-inline"
     alt = html.escape(tex.strip(), quote=True)
     return (
@@ -114,13 +119,13 @@ def _image(tex: str, display: bool, size_pt: float) -> str | None:
     )
 
 
-def inline_html(tex: str) -> str:
-    image = _image(tex, display=False, size_pt=INLINE_PT)
+def inline_html(tex: str, dpi_value: float | None = None) -> str:
+    image = _image(tex, display=False, size_pt=INLINE_PT, dpi_value=dpi_value)
     return image if image is not None else math_render.inline_html(tex)
 
 
-def display_html(tex: str) -> str:
-    image = _image(tex, display=True, size_pt=DISPLAY_PT)
+def display_html(tex: str, dpi_value: float | None = None) -> str:
+    image = _image(tex, display=True, size_pt=DISPLAY_PT, dpi_value=dpi_value)
     if image is None:
         return math_render.display_html(tex)
     return f"<div class='math-display'><div class='math-row'>{image}</div></div>"

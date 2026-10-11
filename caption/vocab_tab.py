@@ -11,13 +11,14 @@ import logging
 import queue
 import threading
 import tkinter as tk
+import uuid
 import webbrowser
 from dataclasses import dataclass, replace
 from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Callable
 
-from . import chatgpt, markdown_html, vocab
+from . import chatgpt, export_ui, markdown_html, vocab
 from .settings import Settings
 from .conversations import ConversationTranscript
 from .voca_client import VocaClient, VocaError
@@ -68,6 +69,7 @@ class VocabPanel(ttk.Frame):
         self._saving_to_voca = False
         self._new_conversation = False
         self._messages: list[tuple[str, str, str, str | None]] = []
+        self._export_answers: dict[str, str] = {}
         self._requests: dict[str, VocabRequest] = {}
         self._request_sequence = 0
         self._active_request_id: str | None = None
@@ -292,12 +294,17 @@ class VocabPanel(ttk.Frame):
         self._active_job = None
         self._set_pending(None)
         header = f"ChatGPT · {datetime.now():%H:%M:%S}"
+        export_key = f"words-{uuid.uuid4().hex}"
+        if not hasattr(self, "_export_answers"):
+            self._export_answers = {}
+        self._export_answers[export_key] = "".join(vocab.card_html(w) for w in translation.words)
         self._add(
             "bot", header,
             "".join(
                 vocab.card_html(replace(w, voca_error="Saving to Voca…") if translation.api_key else w)
                 for w in translation.words
             ),
+            export_key=export_key,
         )
         self._active_request_id = None
         if translation.api_key:
@@ -331,7 +338,7 @@ class VocabPanel(ttk.Frame):
         for index, item in enumerate(self._messages):
             if item is message:
                 self._messages[index] = (
-                    "bot", header, "".join(vocab.card_html(word) for word in words), None
+                    "bot", header, "".join(vocab.card_html(word) for word in words), message[3]
                 )
                 break
         self._saving_to_voca = False
@@ -371,7 +378,10 @@ class VocabPanel(ttk.Frame):
         self._send_text(request.text)
 
     def _on_history_link(self, url: str) -> None:
-        if url.startswith("rtc-vocab-retry:"):
+        if url.startswith("rtc-answer-export:"):
+            key = url.removeprefix("rtc-answer-export:")
+            self.after_idle(lambda key=key: self._export_response(key))
+        elif url.startswith("rtc-vocab-retry:"):
             request_id = url.removeprefix("rtc-vocab-retry:")
             self.after_idle(lambda request_id=request_id: self.retry(request_id))
         elif url.startswith("rtc-vocab-stop:"):
@@ -381,19 +391,25 @@ class VocabPanel(ttk.Frame):
         else:
             webbrowser.open(url)
 
+    def _export_response(self, key: str) -> None:
+        content = self._export_answers.get(key)
+        if content is not None:
+            export_ui.choose_export(self, content, f"chatgpt-{key[:20]}", rendered=True)
+
     def new_conversation(self) -> None:
         if self._busy:
             return
         self._new_conversation = True
         self._messages.clear()
+        self._export_answers = {}
         self._requests.clear()
         self._active_request_id = None
         self._render()
 
     # ---------------------------------------------------------------- display
 
-    def _add(self, role: str, header: str, body_html: str, render: bool = True) -> str:
-        action_id = None
+    def _add(self, role: str, header: str, body_html: str, render: bool = True, export_key: str | None = None) -> str:
+        action_id = export_key
         if role == "user":
             self._request_sequence += 1
             action_id = f"vocab-{self._request_sequence}"
@@ -417,7 +433,9 @@ class VocabPanel(ttk.Frame):
             if role == "stream":
                 role = "bot"
             meta = "meta meta-right" if role == "user" else "meta"
-            actions = self._request_actions(action_id) if action_id else ""
+            actions = ""
+            if action_id:
+                actions = self._request_actions(action_id) if role == "user" else export_ui.actions(action_id)
             parts.append(
                 f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div>"
                 f"<div class='{role}'>{body}{actions}</div>"

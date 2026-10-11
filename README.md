@@ -131,6 +131,19 @@ Vị trí, cỡ chữ và nguồn âm thanh được lưu vào `settings.json`.
 
 Chọn nguồn **Windows Live Captions (read its text)** rồi bấm Start. App sẽ tự mở Live Captions nếu nó chưa chạy (có thể tự mở bằng `Win + Ctrl + L`), sau đó liên tục đọc chữ qua UI Automation và ghi thành lịch sử. Cửa sổ Live Captions phải luôn mở, nhưng có thể nằm khuất sau các cửa sổ khác. Ngôn ngữ và nguồn âm (loa/micro) của cách này do phần cài đặt của Live Captions quyết định.
 
+### Xuất câu trả lời ChatGPT ra Word hoặc PDF
+
+Mỗi câu trả lời hoàn tất trong **Chat**, **ChatGPT summary** và **New words** có nút
+**Export…** bên dưới. Bấm nút, chọn **Word (.docx)** hoặc **PDF (.pdf)** rồi chọn nơi lưu.
+Các câu trả lời Chat/Summary đã lưu trước đây cũng xuất được khi mở lại conversation.
+File chỉ chứa câu trả lời được chọn, giữ tiêu đề, định dạng chữ, danh sách, bảng, code
+và công thức. Công thức được nhúng dưới dạng ảnh MathJax 300 DPI, không phải phương
+trình Word có thể chỉnh sửa. Ảnh từ URL bên ngoài chỉ giữ phần mô tả, không tự tải về.
+
+Việc xuất chạy offline, không gửi thêm request ChatGPT, không cần Microsoft Word,
+và không chặn việc thu âm khi ghi file. Nếu chạy từ source, chạy lại `setup.bat` để
+cài thêm thư viện `python-docx` và `reportlab`; bản exe cần build lại để có tính năng này.
+
 ## Cách hoạt động
 
 - `caption/audio.py`: thu âm qua WASAPI (loopback hoặc micro), trộn về mono, resample về 16 kHz.

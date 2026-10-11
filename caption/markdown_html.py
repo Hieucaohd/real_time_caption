@@ -32,9 +32,15 @@ _md = (
     .use(texmath_plugin, delimiters="brackets")
     .use(dollarmath_plugin, allow_digits=False, double_inline=True)
 )
-_md.add_render_rule("math_inline", lambda self, tokens, idx, options, env: mathjax_render.inline_html(tokens[idx].content))
+def _render_formula(tokens, idx, env, display=False):
+    render = mathjax_render.display_html if display else mathjax_render.inline_html
+    dpi = env.get("math_dpi")
+    return render(tokens[idx].content) if dpi is None else render(tokens[idx].content, dpi_value=dpi)
+
+
+_md.add_render_rule("math_inline", lambda self, tokens, idx, options, env: _render_formula(tokens, idx, env))
 for _rule in ("math_inline_double", "math_block", "math_block_eqno", "math_block_label"):
-    _md.add_render_rule(_rule, lambda self, tokens, idx, options, env: mathjax_render.display_html(tokens[idx].content))
+    _md.add_render_rule(_rule, lambda self, tokens, idx, options, env: _render_formula(tokens, idx, env, display=True))
 
 CSS = """
 body { font-family: 'Segoe UI'; font-size: 11pt; color: #202020; background: #ffffff; margin: 6px 10px; }
@@ -91,18 +97,67 @@ code.tex { color: #7a3e00; background: #fff6e5; }
 
 
 _FENCE = re.compile(r"(^|\n)(```|~~~).*?(\n\2[^\n]*(?=\n|$)|$)", re.S)
-_DISPLAY_BRACKETS = re.compile(r"\\\[(.+?)\\\]", re.S)
+_INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+_BRACKET_MATH = re.compile(
+    r"(?<!\\)(?P<display_slashes>\\{1,2})\[(?P<display>.+?)(?P=display_slashes)\]"
+    r"|(?<!\\)(?P<inline_slashes>\\{1,2})\((?P<inline>.+?)(?P=inline_slashes)\)",
+    re.S,
+)
+_COPIED_TEX_TOKEN = re.compile(
+    r"\\(?:text[a-z]*|mbox|operatorname\*?)\s*\{|\\[{}]|[{}]|\\_"
+)
+
+
+def _unescape_copied_tex(tex: str) -> str:
+    r"""Undo copied Markdown's ``\_`` inside math, not literal text groups.
+
+    Only called for the double-escaped delimiters produced by ChatGPT's Copy
+    action. TeX commands, escaped symbols and ``\\`` array rows stay intact.
+    """
+    text_groups: list[bool] = []
+
+    def replace(match: re.Match) -> str:
+        token = match.group(0)
+        if token.startswith("\\") and token.endswith("{") and token != r"\{":
+            text_groups.append(True)
+        elif token == "{":
+            text_groups.append(bool(text_groups and text_groups[-1]))
+        elif token == "}":
+            if text_groups:
+                text_groups.pop()
+        elif token == r"\_" and not (text_groups and text_groups[-1]):
+            return "_"
+        return token
+
+    return _COPIED_TEX_TOKEN.sub(replace, tex)
 
 
 def _prepare_math(markdown: str) -> str:
-    r"""Turn every ``\[ ... \]`` into single-line ``$$ ... $$``.
+    r"""Normalise bracket math, including double-escaped ChatGPT Copy output.
 
     ChatGPT often puts a display formula right under a list item or sentence without a
     blank line; markdown then treats it as paragraph text and ``\[`` as an escaped ``[``.
-    ``$$...$$`` is recognised anywhere (block or inline). Fenced code is left untouched.
+    ``$$...$$`` is recognised anywhere (block or inline). Fenced and inline code
+    are left untouched. Never globally unescape backslashes: array rows use them.
     """
+    def formula(match: re.Match) -> str:
+        display = match.group("display") is not None
+        tex = match.group("display" if display else "inline")
+        slashes = match.group("display_slashes" if display else "inline_slashes")
+        if len(slashes) == 2:
+            tex = _unescape_copied_tex(tex)
+        if display:
+            return "$$" + " ".join(tex.split()) + "$$"
+        return r"\(" + tex + r"\)"
+
     def convert(text: str) -> str:
-        return _DISPLAY_BRACKETS.sub(lambda m: "$$" + " ".join(m.group(1).split()) + "$$", text)
+        out, pos = [], 0
+        for code in _INLINE_CODE.finditer(text):
+            out.append(_BRACKET_MATH.sub(formula, text[pos : code.start()]))
+            out.append(code.group(0))
+            pos = code.end()
+        out.append(_BRACKET_MATH.sub(formula, text[pos:]))
+        return "".join(out)
 
     out, pos = [], 0
     for fence in _FENCE.finditer(markdown):
@@ -113,8 +168,8 @@ def _prepare_math(markdown: str) -> str:
     return "".join(out)
 
 
-def to_html(markdown: str) -> str:
-    return _md.render(_prepare_math(markdown))
+def to_html(markdown: str, *, math_dpi: float | None = None) -> str:
+    return _md.render(_prepare_math(markdown), env={"math_dpi": math_dpi})
 
 
 def plain_to_html(text: str) -> str:

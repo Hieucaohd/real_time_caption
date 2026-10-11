@@ -8,12 +8,13 @@ import os
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable
 
-from . import chatgpt, livecaptions, markdown_html, prompt_versions, screenshot
+from . import chatgpt, export_ui, livecaptions, markdown_html, prompt_versions, screenshot
 from .audio import AudioCapture, AudioDevice, list_devices
 from .chat_tab import ChatPanel
 from .conversations import ChatMessage, Conversation, ConversationStore, ConversationTranscript
@@ -378,7 +379,7 @@ class App:
 
         self._summary_sidebar_pages = {"history": summary_history, "settings": summary_settings}
         self._summary_sidebar_name: str | None = None
-        self.summary = markdown_html.make_view(summary_body)
+        self.summary = markdown_html.make_view(summary_body, self._on_summary_link)
         self.summary.pack(side="left", fill="both", expand=True)
         self._summary_main = self.summary
         self._show_summary_sidebar("history")
@@ -616,7 +617,23 @@ class App:
         except ValueError:
             created = message.created_at
         meta = markdown_html.plain_to_html(f"Saved {created}")
-        markdown_html.show(self.summary, f"<div class='meta'>{meta}</div>" + markdown_html.to_html(message.content))
+        markdown_html.show(
+            self.summary,
+            f"<div class='meta'>{meta}</div>" + markdown_html.to_html(message.content)
+            + export_ui.actions(str(message.id)),
+        )
+
+    def _on_summary_link(self, url: str) -> None:
+        if url.startswith("rtc-answer-export:"):
+            key = url.removeprefix("rtc-answer-export:")
+            self.root.after_idle(lambda key=key: self._export_summary(key))
+        else:
+            webbrowser.open(url)
+
+    def _export_summary(self, key: str) -> None:
+        message = self._summary_messages.get(key)
+        if message is not None:
+            export_ui.choose_export(self.root, message.content, f"chatgpt-summary-{message.id}")
 
     def _show_saved_transcript(self) -> None:
         content = self.session_file.read_text() if self.session_file else ""

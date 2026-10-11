@@ -17,7 +17,7 @@ from typing import Callable
 
 from PIL import Image, ImageGrab, ImageOps, ImageTk
 
-from . import chatgpt, markdown_html, prompt_versions, screenshot
+from . import chatgpt, export_ui, markdown_html, prompt_versions, screenshot
 from .conversations import ConversationStore, ConversationTranscript
 from .prompt_editor import PromptEditor
 from .settings import Settings
@@ -64,6 +64,7 @@ class ChatPanel(ttk.Frame):
         self._new_conversation = False
         self._busy = False
         self._messages: list[tuple[str, str, str, str | None]] = []
+        self._export_answers: dict[str, str] = {}
         self._requests: dict[str, ChatRequest] = {}
         self._active_request_id: str | None = None
         self._render_scheduled = False
@@ -350,6 +351,7 @@ class ChatPanel(ttk.Frame):
     def load_conversation(self) -> None:
         self._clear_image()
         self._messages.clear()
+        self._export_answers = {}
         self._requests.clear()
         self._active_request_id = None
         conversation_id = self._get_conversation_id()
@@ -374,6 +376,9 @@ class ChatPanel(ttk.Frame):
                 if message.role == "user" and message.kind == "chat":
                     action_id = f"chat-{message.id}"
                     self._requests[action_id] = ChatRequest(message.content, image, conversation_id)
+                elif message.role == "bot" and not message.header.startswith("Error"):
+                    action_id = f"answer-{message.id}"
+                    self._export_answers[action_id] = message.content
                 self._messages.append((message.role, message.header, body, action_id))
         self._render()
         self.refresh_state()
@@ -633,7 +638,10 @@ class ChatPanel(ttk.Frame):
         self._send_message(request.message, request.image, reuse_image=True)
 
     def _on_history_link(self, url: str) -> None:
-        if url.startswith("rtc-chat-retry:"):
+        if url.startswith("rtc-answer-export:"):
+            key = url.removeprefix("rtc-answer-export:")
+            self.after_idle(lambda key=key: self._export_response(key))
+        elif url.startswith("rtc-chat-retry:"):
             request_id = url.removeprefix("rtc-chat-retry:")
             self.after_idle(lambda request_id=request_id: self.retry(request_id))
         elif url.startswith("rtc-chat-stop:"):
@@ -642,6 +650,11 @@ class ChatPanel(ttk.Frame):
                 self.after_idle(self._on_stop_chatgpt)
         else:
             webbrowser.open(url)
+
+    def _export_response(self, key: str) -> None:
+        content = self._export_answers.get(key)
+        if content is not None:
+            export_ui.choose_export(self, content, f"chatgpt-{key}")
 
     def new_conversation(self) -> None:
         if not self._busy:
@@ -691,6 +704,11 @@ class ChatPanel(ttk.Frame):
         if image is not None:
             body_html += f"<div class='shot'><img src='{screenshot.thumbnail_data_uri(image)}'></div>"
         action_id = f"chat-{stored_id}" if role == "user" and kind == "chat" and stored_id else None
+        if role == "bot" and markdown:
+            action_id = f"answer-{stored_id or uuid.uuid4().hex}"
+            if not hasattr(self, "_export_answers"):
+                self._export_answers = {}
+            self._export_answers[action_id] = body
         self._messages.append((role, header, body_html, action_id))
         if render:
             self._render()
@@ -712,7 +730,9 @@ class ChatPanel(ttk.Frame):
                     role = "bot"
                 meta = "meta meta-right" if role == "user" else "meta"
                 parts.append(f"<div class='{meta}'>{markdown_html.plain_to_html(header)}</div>")
-                actions = self._request_actions(action_id) if action_id else ""
+                actions = ""
+                if action_id:
+                    actions = self._request_actions(action_id) if role == "user" else export_ui.actions(action_id)
                 parts.append(f"<div class='{role}'>{body}{actions}</div>")
         markdown_html.show(self.history, "".join(parts), scroll_to_end=True)
 
