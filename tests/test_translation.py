@@ -310,6 +310,93 @@ class TranslationPersistenceTests(unittest.TestCase):
         self.assertEqual(self.store.history(first["id"])[0]["status"], "cancelled")
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_batch_sends_once_and_history_has_shared_source_not_fake_line_alignment(self):
+        adapter = SimpleNamespace(translate=Mock(return_value="Shared translated paragraph"))
+        worker = self.worker(adapter)
+        lines = [self.line("test:1", "First."), self.line("test:2", "Second.")]
+        config = translation.Config(key="key")
+        self.assertTrue(worker.submit_batch(lines, config))
+        task, status, _ = worker.results.get(timeout=2)
+        self.assertEqual(status, "done")
+        adapter.translate.assert_called_once_with("First.\nSecond.", config, task.cancel)
+        self.assertEqual(task.members, tuple(lines))
+        for line in lines:
+            row = self.store.history(line["id"])[0]
+            self.assertEqual(row["batch_size"], 2)
+            self.assertEqual(row["source_text"], line["source_text"])
+            self.assertEqual(row["batch_source"], "First.\nSecond.")
+            self.assertEqual(row["translated_text"], "Shared translated paragraph")
+        self.assertEqual(self.store.missing(self.item.id, config), [])
+        self.assertFalse(worker.submit_batch(lines, config))
+        self.assertTrue(worker.submit(lines[0], config, force=True))
+        worker.results.get(timeout=2)
+        self.assertEqual(self.store.history(lines[0]["id"])[-1]["batch_size"], 1)
+        self.assertEqual(len(self.store.history(lines[1]["id"])), 1)
+
+    def test_batch_cancellation_marks_every_member_and_does_not_send_queued_group(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def translate(text, config, cancel):
+            entered.set()
+            release.wait(2)
+            return "discarded response"
+
+        adapter = SimpleNamespace(translate=Mock(side_effect=translate))
+        worker = self.worker(adapter)
+        lines = [self.line(f"test:{i}", f"Sentence {i}") for i in range(4)]
+        config = translation.Config(key="key")
+        try:
+            worker.submit_batch(lines[:2], config)
+            self.assertTrue(entered.wait(2))
+            worker.submit_batch(lines[2:], config)
+            self.assertFalse(worker.submit(lines[1], config, force=True))
+            worker.cancel_all()
+        finally:
+            release.set()
+        self.assertEqual([worker.results.get(timeout=2)[1] for _ in range(2)], ["cancelled", "cancelled"])
+        adapter.translate.assert_called_once()
+        for line in lines:
+            row = self.store.history(line["id"])[0]
+            self.assertEqual(row["status"], "cancelled")
+            self.assertEqual(row["translated_text"], "")
+        self.assertEqual(len(self.store.missing(self.item.id, config)), 4)
+
+    def test_batch_failure_marks_all_members_and_can_be_retried(self):
+        adapter = SimpleNamespace(translate=Mock(side_effect=[translation.TranslationError("quota"), "ok"]))
+        worker = self.worker(adapter)
+        lines = [self.line(), self.line("test:2", "Other")]
+        config = translation.Config(key="key")
+        worker.submit_batch(lines, config)
+        self.assertEqual(worker.results.get(timeout=2)[1], "error")
+        self.assertEqual([self.store.history(line["id"])[0]["status"] for line in lines], ["error", "error"])
+        self.assertTrue(worker.submit_batch(lines, config, force=True))
+        self.assertEqual(worker.results.get(timeout=2)[1], "done")
+
+    def test_batch_rejects_mixed_conversations_and_deduplicates_member_ids(self):
+        worker = self.worker()
+        line = self.line()
+        config = translation.Config(key="key")
+        with self.assertRaises(translation.TranslationError):
+            worker.submit_batch([line, dict(line, conversation_id="another")], config)
+        self.assertEqual(self.store.history(line["id"]), [])
+        worker.submit_batch([line, line], config)
+        task, _, _ = worker.results.get(timeout=2)
+        self.assertEqual(len(task.members), 1)
+        self.assertEqual(len(self.store.history(line["id"])), 1)
+
+    def test_migration_preserves_legacy_single_line_history(self):
+        line = self.line()
+        attempt = self.store.begin(line, translation.Config(key="key"))
+        self.store.finish(attempt, "done", "Existing answer")
+        with self.store.connect() as db:
+            db.execute("ALTER TABLE line_translations DROP COLUMN batch_size")
+            db.execute("ALTER TABLE line_translations DROP COLUMN batch_source")
+        reopened = TranslationStore(self.conversations.db_path)
+        history = reopened.history(line["id"])
+        self.assertEqual(history[0]["translated_text"], "Existing answer")
+        self.assertEqual(history[0]["batch_size"], 1)
+        self.assertEqual(history[0]["batch_source"], "")
+
 
 class TranslationPanelTests(unittest.TestCase):
     def test_continuous_partial_updates_use_latest_text_without_resetting_timer(self):
@@ -348,6 +435,10 @@ class TranslationPanelTests(unittest.TestCase):
         original = settings.Settings()
         self.assertFalse(original.translation_enabled)
         self.assertFalse(original.translation_partial)
+        self.assertEqual(original.translation_batch_size, 1)
+        self.assertEqual(original.translation_batch_timeout, 5.0)
+        original.translation_batch_size = 3
+        original.translation_batch_timeout = 2.5
         original.translation_engine = "gemini"
         original.translation_gemini_key = "test-key"
         original.translation_azure_key = "other-key"
@@ -356,6 +447,8 @@ class TranslationPanelTests(unittest.TestCase):
             restored = settings.Settings.load()
         self.assertEqual(restored.translation_gemini_key, "test-key")
         self.assertEqual(restored.translation_azure_key, "other-key")
+        self.assertEqual(restored.translation_batch_size, 3)
+        self.assertEqual(restored.translation_batch_timeout, 2.5)
 
 
 if __name__ == "__main__":

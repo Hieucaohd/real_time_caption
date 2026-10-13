@@ -105,7 +105,7 @@ class RetryTests(unittest.TestCase):
 
         panel.retry("request-1")
 
-        panel._send_message.assert_called_once_with("question", image, reuse_image=True)
+        panel._send_message.assert_called_once_with("question", image, reuse_image=True, reused_files=())
 
     def test_successful_new_words_retry_creates_a_fresh_request(self) -> None:
         panel = object.__new__(VocabPanel)

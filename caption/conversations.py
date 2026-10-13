@@ -74,6 +74,7 @@ class ChatMessage:
     content: str
     attachment: str | None
     created_at: str
+    files: tuple[str, ...] = ()
 
 
 class ConversationStore:
@@ -124,6 +125,12 @@ class ConversationStore:
                     ON conversations(updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
                     ON chat_messages(conversation_id, id);
+                CREATE TABLE IF NOT EXISTS chat_attachments (
+                    message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    PRIMARY KEY(message_id, position)
+                );
                 """
             )
             # A previous process may have been killed while recording. Nothing is active
@@ -220,6 +227,7 @@ class ConversationStore:
         *,
         kind: str = "chat",
         attachment: Path | None = None,
+        files: tuple[Path, ...] = (),
     ) -> int:
         created = _now()
         relative = None
@@ -229,12 +237,21 @@ class ConversationStore:
                 relative = str(attachment.relative_to(conversation.folder))
             except ValueError:
                 relative = str(attachment)
+        file_paths = []
+        for path in files:
+            path = Path(path)
+            try:
+                file_paths.append(str(path.relative_to(conversation.folder)) if conversation else str(path))
+            except ValueError:
+                file_paths.append(str(path))
         with self._connect() as db:
             cursor = db.execute(
                 "INSERT INTO chat_messages(conversation_id,role,kind,header,content,attachment,created_at) "
                 "VALUES(?,?,?,?,?,?,?)",
                 (conversation_id, role, kind, header, content, relative, created),
             )
+            db.executemany("INSERT INTO chat_attachments(message_id,position,path) VALUES(?,?,?)",
+                           [(cursor.lastrowid, index, path) for index, path in enumerate(file_paths)])
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (created, conversation_id))
         self._write_chat_markdown(conversation_id)
         return int(cursor.lastrowid)
@@ -244,7 +261,14 @@ class ConversationStore:
             rows = db.execute(
                 "SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY id", (conversation_id,)
             ).fetchall()
-        return [ChatMessage(**dict(row)) for row in rows]
+            attachments = db.execute(
+                "SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id "
+                "WHERE m.conversation_id=? ORDER BY a.message_id,a.position", (conversation_id,)
+            ).fetchall()
+        files = {}
+        for attachment in attachments:
+            files.setdefault(attachment["message_id"], []).append(attachment["path"])
+        return [ChatMessage(**dict(row), files=tuple(files.get(row["id"], ()))) for row in rows]
 
     def latest_summary(self, conversation_id: str) -> ChatMessage | None:
         with self._connect() as db:
@@ -291,6 +315,8 @@ class ConversationStore:
         for message in self.messages(conversation_id):
             label = "You" if message.role == "user" else "ChatGPT"
             lines += [f"## {label} · {message.created_at}", "", message.content.strip(), ""]
+            if message.files:
+                lines += ["Attached files: " + ", ".join(Path(path).name for path in message.files), ""]
         (conversation.folder / "chat_history.md").write_text("\n".join(lines), encoding="utf-8")
 
     def _write_manifest(self, conversation_id: str) -> None:

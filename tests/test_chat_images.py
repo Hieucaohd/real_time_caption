@@ -18,6 +18,8 @@ class ChatImageTests(unittest.TestCase):
     def panel(self, folder: Path) -> ChatPanel:
         panel = object.__new__(ChatPanel)
         panel._busy = False
+        panel._file_importing = False
+        panel._selected_files = ()
         panel._selected_image = Image.new("RGBA", (48, 32), (255, 0, 0, 255))
         panel._get_conversation_id = Mock(return_value="conversation")
         panel._store = Mock()
@@ -106,26 +108,33 @@ class ChatImageTests(unittest.TestCase):
     def test_send_clears_draft_only_when_request_is_accepted(self):
         panel = object.__new__(ChatPanel)
         panel._busy = False
+        panel._file_importing = False
         panel.entry = Mock()
         panel.entry.get.return_value = "message"
         panel._send_message = Mock(return_value=False)
         panel._clear_image = Mock()
+        panel._clear_files = Mock()
         panel.send()
         panel.entry.delete.assert_not_called()
         panel._clear_image.assert_not_called()
+        panel._clear_files.assert_not_called()
         panel._send_message.return_value = True
         panel.send()
         panel.entry.delete.assert_called_once_with("1.0", "end")
         panel._clear_image.assert_called_once_with()
+        panel._clear_files.assert_called_once_with()
 
     def test_image_can_be_sent_without_typing_a_message(self):
         panel = object.__new__(ChatPanel)
         panel._busy = False
+        panel._file_importing = False
+        panel._selected_files = ()
         panel._selected_image = Image.new("RGB", (8, 8))
         panel.entry = Mock()
         panel.entry.get.return_value = ""
         panel._send_message = Mock(return_value=True)
         panel._clear_image = Mock()
+        panel._clear_files = Mock()
         panel.send()
         panel._send_message.assert_called_once_with("Hãy giải thích nội dung ảnh này.")
         panel._clear_image.assert_called_once_with()

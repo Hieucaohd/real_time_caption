@@ -792,6 +792,7 @@ class App:
     def _close_session_file(self, tfile: ConversationTranscript) -> None:
         captured = tfile.close()
         self.translation.on_lines(tfile.conversation_id, captured)
+        self.translation.flush_pending(tfile.conversation_id)
         self._open_files.discard(tfile)
 
     def start(self) -> None:

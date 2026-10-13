@@ -18,6 +18,7 @@ from typing import Callable
 from PIL import Image, ImageGrab, ImageOps, ImageTk
 
 from . import chatgpt, export_ui, markdown_html, prompt_versions, screenshot
+from .chat_files import snapshot_files
 from .conversations import ConversationStore, ConversationTranscript
 from .prompt_editor import PromptEditor
 from .settings import Settings
@@ -35,6 +36,7 @@ class ChatRequest:
     job: Callable | None = None
     failed: bool = False
     active: bool = False
+    files: tuple[Path, ...] = ()
 
 
 class ChatPanel(ttk.Frame):
@@ -75,6 +77,9 @@ class ChatPanel(ttk.Frame):
         self._scanning_tabs = False
         self._selected_image: Image.Image | None = None
         self._image_preview: ImageTk.PhotoImage | None = None
+        self._selected_files: tuple[Path, ...] = ()
+        self._file_importing = False
+        self._file_generation = 0
 
         tab_bar = ttk.Frame(self, padding=(0, 4))
         tab_bar.pack(fill="x")
@@ -184,6 +189,24 @@ class ChatPanel(ttk.Frame):
         self.remove_image_btn.pack(side="left", padx=2)
         self.image_label = ttk.Label(image_row, wraplength=170)
         self.image_label.pack(side="left", padx=4)
+        file_row = ttk.Frame(self, padding=(4, 2))
+        file_row.pack(side="bottom", fill="x")
+        file_actions = ttk.Frame(file_row)
+        file_actions.pack(fill="x")
+        self.upload_files_btn = ttk.Button(file_actions, text="Attach files…", command=self._choose_files)
+        self.upload_files_btn.pack(side="left", padx=2)
+        self.remove_file_btn = ttk.Button(file_actions, text="Remove selected", command=self._remove_file, state="disabled")
+        self.remove_file_btn.pack(side="left", padx=2)
+        self.clear_files_btn = ttk.Button(file_actions, text="Clear files", command=self._clear_files, state="disabled")
+        self.clear_files_btn.pack(side="left", padx=2)
+        self.files_status = tk.StringVar(value="No files attached")
+        ttk.Label(file_actions, textvariable=self.files_status, foreground="#777777").pack(side="left", padx=4)
+        self.files_frame = ttk.Frame(file_row)
+        self.files_list = tk.Listbox(self.files_frame, height=3, exportselection=False)
+        self.files_list.pack(side="left", fill="x", expand=True)
+        files_scroll = ttk.Scrollbar(self.files_frame, orient="vertical", command=self.files_list.yview)
+        files_scroll.pack(side="right", fill="y")
+        self.files_list.configure(yscrollcommand=files_scroll.set)
         self.entry.bind("<Control-v>", self._on_paste)
         self.entry.bind("<Control-V>", self._on_paste)
         self.history = markdown_html.make_view(self, self._on_history_link)
@@ -199,6 +222,7 @@ class ChatPanel(ttk.Frame):
         self.upload_image_btn.configure(state="disabled" if busy else "normal")
         self.paste_image_btn.configure(state="disabled" if busy else "normal")
         self.remove_image_btn.configure(state="normal" if self._selected_image and not busy else "disabled")
+        self._refresh_files()
         self.refresh_state()
         self._schedule_render()
 
@@ -270,7 +294,7 @@ class ChatPanel(ttk.Frame):
             if self.history_var.get():
                 context.append("saved history")
             self.hint_var.set(" + ".join(context).capitalize() + " will be attached" + suffix)
-        disabled = self._busy or self._get_conversation_id() is None
+        disabled = self._busy or self._file_importing or self._get_conversation_id() is None
         self.send_btn.configure(state="disabled" if disabled else "normal")
 
     @staticmethod
@@ -350,6 +374,7 @@ class ChatPanel(ttk.Frame):
 
     def load_conversation(self) -> None:
         self._clear_image()
+        self._clear_files()
         self._messages.clear()
         self._export_answers = {}
         self._requests.clear()
@@ -373,9 +398,14 @@ class ChatPanel(ttk.Frame):
                     else:
                         image = None
                 action_id = None
+                files = tuple(
+                    Path(path) if Path(path).is_absolute() else conversation.folder / path
+                    for path in message.files
+                ) if conversation else ()
+                body += self._files_html(files)
                 if message.role == "user" and message.kind == "chat":
                     action_id = f"chat-{message.id}"
-                    self._requests[action_id] = ChatRequest(message.content, image, conversation_id)
+                    self._requests[action_id] = ChatRequest(message.content, image, conversation_id, files=files)
                 elif message.role == "bot" and not message.header.startswith("Error"):
                     action_id = f"answer-{message.id}"
                     self._export_answers[action_id] = message.content
@@ -461,19 +491,104 @@ class ChatPanel(ttk.Frame):
         self._selected_image.save(path, "PNG")
         return path
 
+    def _refresh_files(self) -> None:
+        self.files_list.delete(0, "end")
+        for path in self._selected_files:
+            self.files_list.insert("end", path.name)
+        if self._selected_files:
+            self.files_frame.pack(fill="x", pady=(3, 0))
+        else:
+            self.files_frame.pack_forget()
+        disabled = self._busy or self._file_importing
+        self.upload_files_btn.configure(state="disabled" if disabled else "normal")
+        state = "normal" if self._selected_files and not disabled else "disabled"
+        self.remove_file_btn.configure(state=state)
+        self.clear_files_btn.configure(state=state)
+        self.files_status.set("Importing files…" if self._file_importing else
+                              f"{len(self._selected_files)} file(s) attached" if self._selected_files else "No files attached")
+
+    def _choose_files(self) -> None:
+        if self._busy or self._file_importing:
+            return
+        cid = self._get_conversation_id()
+        conversation = self._store.get(cid) if cid else None
+        if conversation is None:
+            messagebox.showinfo("Attach files", "Select or create a conversation first.", parent=self)
+            return
+        filenames = filedialog.askopenfilenames(
+            parent=self, title="Choose files to send to ChatGPT",
+            filetypes=[("Documents", "*.pdf *.docx *.doc *.txt *.md *.csv *.xlsx *.xls *.pptx"),
+                       ("All files", "*.*")],
+        )
+        if not filenames:
+            return
+        self._file_importing = True
+        generation = self._file_generation
+        filenames = tuple(filenames)
+        existing = tuple(path.name for path in self._selected_files)
+        self._refresh_files()
+        self.refresh_state()
+
+        def import_files():
+            try:
+                files = snapshot_files(conversation.folder, filenames, existing)
+                error = ""
+            except Exception as exc:
+                files = ()
+                error = str(exc) if isinstance(exc, OSError) else "Could not copy the selected files."
+            self._tab_results.put(lambda: self._files_imported(cid, generation, files, error))
+
+        threading.Thread(target=import_files, name="chat-file-import", daemon=True).start()
+
+    def _files_imported(self, cid, generation, files, error):
+        if generation != self._file_generation or cid != self._get_conversation_id():
+            return
+        self._file_importing = False
+        self._selected_files += tuple(files)
+        self._refresh_files()
+        self.refresh_state()
+        if error:
+            messagebox.showerror("Attach files", f"Could not import files:\n{error}", parent=self)
+
+    def _clear_files(self) -> None:
+        self._file_generation += 1
+        self._file_importing = False
+        self._selected_files = ()
+        self._refresh_files()
+        self.refresh_state()
+
+    def _remove_file(self) -> None:
+        if self._busy or self._file_importing:
+            return
+        selected = set(self.files_list.curselection())
+        self._selected_files = tuple(path for index, path in enumerate(self._selected_files) if index not in selected)
+        self._refresh_files()
+
+    @staticmethod
+    def _files_html(files) -> str:
+        if not files:
+            return ""
+        names = ", ".join(path.name + (" (missing)" if not path.is_file() else "") for path in files)
+        return f"<div class='meta'>Files: {markdown_html.plain_to_html(names)}</div>"
+
     def send(self) -> None:
         message = self.entry.get("1.0", "end").strip()
-        if self._busy:
+        if self._busy or self._file_importing:
             return
         if not message:
-            if self._selected_image is None:
+            if self._selected_files:
+                message = "Hãy phân tích nội dung các file đính kèm này."
+            elif self._selected_image is None:
                 return
-            message = "Hãy giải thích nội dung ảnh này."
+            else:
+                message = "Hãy giải thích nội dung ảnh này."
         if self._send_message(message):
             self.entry.delete("1.0", "end")
             self._clear_image()
+            self._clear_files()
 
-    def _send_message(self, message: str, reused_image: Path | None = None, reuse_image: bool = False) -> bool:
+    def _send_message(self, message: str, reused_image: Path | None = None, reuse_image: bool = False,
+                      reused_files: tuple[Path, ...] | None = None) -> bool:
         """Send a new user turn, rebuilding transcript/history from the current settings."""
         conversation_id = self._get_conversation_id()
         if conversation_id is None:
@@ -482,6 +597,11 @@ class ChatPanel(ttk.Frame):
         selected_tab = self._selected_chrome_tab_key()
         if selected_tab is None:
             messagebox.showinfo("Chat", "Choose a ChatGPT Chrome tab, or press Refresh tabs first.")
+            return False
+        files = tuple(self._selected_files if reused_files is None else reused_files)
+        missing = [path.name for path in files if not path.is_file()]
+        if missing:
+            messagebox.showerror("Attach files", "Attached files are missing: " + ", ".join(missing))
             return False
         version = prompt_versions.resolve(self.prompt_var.get(), prompt_versions.CHAT_DIR)
         if not version:
@@ -527,7 +647,7 @@ class ChatPanel(ttk.Frame):
                 messagebox.showerror("Chat", f"Could not take the screenshot:\n{exc}")
                 return False
 
-        attachments = [p for p in (transcript, history, shot) if p]
+        attachments = [p for p in (transcript, history, shot) if p] + list(files)
         new_chat, power = self._new_conversation, self._power()
 
         def job(status: Callable[[str], None], cancel_event) -> str:
@@ -559,12 +679,13 @@ class ChatPanel(ttk.Frame):
             f"You · {datetime.now():%H:%M:%S}{attached}",
             message,
             image=shot,
+            files=files,
             conversation_id=conversation_id,
             render=False,
         )
         assert action_id is not None
         self._requests[action_id] = ChatRequest(
-            message, shot, conversation_id, job=job, active=True
+            message, shot, conversation_id, job=job, active=True, files=files
         )
         self._active_request_id = action_id
         self._set_pending("ChatGPT is thinking…")
@@ -633,9 +754,9 @@ class ChatPanel(ttk.Frame):
             self._set_pending("Retrying with ChatGPT…")
             return
 
-        # A successful turn is sent as a new turn. The message and screenshot are
+        # A successful turn is sent as a new turn. Message, screenshot and files are
         # reused, while transcript/history are rebuilt from the current settings.
-        self._send_message(request.message, request.image, reuse_image=True)
+        self._send_message(request.message, request.image, reuse_image=True, reused_files=request.files)
 
     def _on_history_link(self, url: str) -> None:
         if url.startswith("rtc-answer-export:"):
@@ -691,18 +812,20 @@ class ChatPanel(ttk.Frame):
         conversation_id: str | None = None,
         kind: str = "chat",
         render: bool = True,
+        files: tuple[Path, ...] = (),
     ) -> str | None:
         conversation_id = conversation_id or self._get_conversation_id()
         stored_id = None
         if conversation_id:
             stored_id = self._store.add_message(
-                conversation_id, role, header, body, kind=kind, attachment=image
+                conversation_id, role, header, body, kind=kind, attachment=image, files=files
             )
         if conversation_id != self._get_conversation_id():
             return None
         body_html = markdown_html.to_html(body) if markdown else markdown_html.plain_to_html(body)
         if image is not None:
             body_html += f"<div class='shot'><img src='{screenshot.thumbnail_data_uri(image)}'></div>"
+        body_html += self._files_html(files)
         action_id = f"chat-{stored_id}" if role == "user" and kind == "chat" and stored_id else None
         if role == "bot" and markdown:
             action_id = f"answer-{stored_id or uuid.uuid4().hex}"

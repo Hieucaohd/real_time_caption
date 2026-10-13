@@ -18,6 +18,12 @@ class Task:
     preview: bool = False
     revision: int = 0
     cancel: threading.Event = field(default_factory=threading.Event)
+    lines: tuple = ()
+    attempts: tuple = ()
+
+    @property
+    def members(self):
+        return self.lines or (self.line,)
 
 
 class TranslationWorker:
@@ -41,22 +47,37 @@ class TranslationWorker:
         return line["id"], line["source_text"], config.fingerprint
 
     def submit(self, line, config, *, force=False):
+        return self.submit_batch([line], config, force=force)
+
+    def submit_batch(self, lines, config, *, force=False):
         config.validate()
-        key = self._key(line, config)
+        if not lines:
+            return False
+        if len({line["conversation_id"] for line in lines}) != 1:
+            raise TranslationError("Cannot batch lines from different conversations.")
         with self._condition:
-            if self._closed or key in self._keys:
+            if self._closed:
                 return False
             if self._paused:
                 if not force:
                     raise TranslationError("Translation paused after an error. Retry a line or enable Auto translate again.")
                 self._paused = False
-            if not force and self.store.has_success(line, config):
+            pending, seen = [], set()
+            for line in lines:
+                key = self._key(line, config)
+                if key in seen or key in self._keys:
+                    continue
+                seen.add(key)
+                if force or not self.store.has_success(line, config):
+                    pending.append(dict(line))
+            if not pending:
                 return False
             if len(self._tasks) >= self.capacity:
                 raise TranslationError("Translation queue is full. Untranslated lines are saved; use Translate missing later.")
-            task = Task(dict(line), config, self.store.begin(line, config))
+            attempts = tuple(self.store.begin_batch(pending, config))
+            task = Task(pending[0], config, attempts[0], lines=tuple(pending), attempts=attempts)
             self._tasks.append(task)
-            self._keys.add(key)
+            self._keys.update(self._key(line, config) for line in pending)
             self._condition.notify()
             return True
 
@@ -87,10 +108,12 @@ class TranslationWorker:
             while self._tasks:
                 task = self._tasks.popleft()
                 try:
-                    self.store.finish(task.attempt, "cancelled", error="Cancelled before sending.")
+                    for attempt in task.attempts:
+                        self.store.finish(attempt, "cancelled", error="Cancelled before sending.")
                 except Exception:
                     pass  # Startup recovery will mark interrupted rows; keep cancelling safely.
-                self._keys.discard(self._key(task.line, task.config))
+                for line in task.members:
+                    self._keys.discard(self._key(line, task.config))
                 self.results.put((task, "cancelled", ""))
 
     def close(self):
@@ -112,8 +135,10 @@ class TranslationWorker:
             status, value = "done", ""
             try:
                 if not task.preview:
-                    self.store.finish(task.attempt, "working")
-                value = self.translator.translate(task.line["source_text"], task.config, task.cancel)
+                    for attempt in task.attempts:
+                        self.store.finish(attempt, "working")
+                text = "\n".join(line["source_text"] for line in task.members)
+                value = self.translator.translate(text, task.config, task.cancel)
             except Exception as error:
                 # Do not log exception bodies: third-party errors can contain keys.
                 status, value = "error", "Translation failed. Check settings, connection or offline dependencies."
@@ -124,13 +149,15 @@ class TranslationWorker:
                 status, value = "cancelled", "Cancelled; the provider may already have received this request."
             try:
                 if not task.preview:
-                    self.store.finish(task.attempt, status, value if status == "done" else "", value if status != "done" else "")
+                    for attempt in task.attempts:
+                        self.store.finish(attempt, status, value if status == "done" else "", value if status != "done" else "")
             except Exception:
                 status, value = "error", "Could not save translation history. Retry after checking SQLite access."
             finally:
                 with self._condition:
                     if not task.preview:
-                        self._keys.discard(self._key(task.line, task.config))
+                        for line in task.members:
+                            self._keys.discard(self._key(line, task.config))
                     self._active = None
                     if status == "error":
                         self._paused = True

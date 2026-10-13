@@ -147,7 +147,7 @@ class AnswerExportUITests(unittest.TestCase):
 
     def test_saved_chat_answers_receive_export_links_after_reopening(self):
         panel = object.__new__(ChatPanel)
-        panel._clear_image = panel.refresh_state = panel._render = Mock()
+        panel._clear_image = panel._clear_files = panel.refresh_state = panel._render = Mock()
         panel._messages, panel._requests = [], {}
         panel._get_conversation_id = Mock(return_value="conversation")
         panel._store = Mock()

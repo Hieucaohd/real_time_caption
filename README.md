@@ -89,6 +89,16 @@ Tab **Chat** hoạt động như một app chat: câu hỏi của bạn nằm b�
 - Gõ câu hỏi vào ô dưới cùng rồi bấm **Send ➤** hoặc Enter. Shift+Enter để xuống dòng.
 - **Upload image…** chọn ảnh từ máy; **Paste image** hoặc Ctrl+V dán ảnh đã Copy từ ứng dụng khác. Ảnh hiện bản xem trước, có thể bỏ bằng **Remove image**. Ảnh thủ công thay cho screenshot tự động của tin nhắn đó, được lưu trong folder conversation và dùng lại khi Retry. Ctrl+V vẫn dán chữ bình thường nếu clipboard không chứa ảnh.
 - Hai nút **↑ Top** và **↓ Bottom** cuộn nhanh lịch sử chat lên đầu hoặc xuống cuối.
+- **Attach files…** chọn một hoặc nhiều file từ máy (PDF, Word, văn bản, bảng tính,
+  code…). File được sao chép ở background vào `attachments/` của conversation trước
+  khi gửi; app không chạy file hay sửa bản gốc. **Remove selected** gỡ file đang chọn,
+  **Clear files** bỏ toàn bộ file khỏi tin nhắn sắp gửi. Bạn có thể gửi kèm ảnh,
+  transcript/history theo các ô tích hiện tại; nếu không có transcript thì bỏ tích
+  **Attach transcript**. Chỉ chọn file rồi Send cũng được, app dùng câu hỏi mặc định.
+  Tên file được lưu theo từng tin nhắn trong SQLite và hiện trong lịch sử; Retry dùng
+  đúng bản sao cũ (kể cả sau khi mở lại app/đổi tên conversation), không lấy file từ
+  draft mới. Đính kèm bị gỡ khỏi draft không làm xóa bản gốc. ChatGPT quyết định
+  định dạng, dung lượng và quota upload được chấp nhận; lỗi vẫn có thể Retry/Stop.
 - **Chat prompt** cho chọn prompt mặc định trong [prompts/chat/](prompts/chat/). Bạn chỉ cần nhập câu hỏi; app chèn nó vào biến `{message}` của prompt đang chọn. Trong cửa sổ sửa, **Update current version** cập nhật đúng phiên bản hiện tại, còn **Save as new version** tạo phiên bản mới. Nút 📁 mở thư mục prompt. Có thể dùng thêm `{file_name}`, `{source}`, `{started}`, `{now}`.
 - **Attach transcript** gửi transcript đã tự ghép các part. Prompt vẫn được áp dụng khi không đính kèm transcript. **Attach saved chat history** là lựa chọn riêng và mặc định tắt để phản hồi nhanh hơn; chỉ bật khi thực sự cần gửi lại lịch sử cục bộ cho ChatGPT.
 - Chat và Summarize **dùng chung một cuộc trò chuyện ChatGPT của conversation đang chọn**, nên bạn hỏi tiếp dựa trên bản tóm tắt được mà không lẫn sang conversation khác. Mỗi lần Summarize, yêu cầu và câu trả lời cũng hiện trong lịch sử Chat cục bộ.
@@ -203,7 +213,22 @@ Chọn dòng trong danh sách để xem câu gốc, thời gian và **tất cả
 **Translate selected / Retry** tạo một lần dịch mới theo engine/cấu hình đang chọn;
 không ghi đè câu trả lời trước. **Translate missing…** có xác nhận trước khi gửi hàng loạt
 và bỏ qua các dòng đã dịch thành công bằng cùng engine/model/ngôn ngữ/prompt.
-Hàng đợi tối đa 256 dòng; các dòng chưa xếp được vẫn giữ nguyên, có thể bấm lại sau.
+Hàng đợi tối đa 256 nhóm; các dòng chưa xếp được vẫn giữ nguyên, có thể bấm lại sau.
+
+Trong **Settings** của tab dịch:
+
+- **Lines per batch**: số dòng transcript đã chốt cần gom trước khi dịch (1–50).
+- **Max wait (seconds)**: thời gian chờ tối đa khi chưa đủ dòng (0,1–300 giây),
+  tính từ dòng đầu tiên của nhóm, không reset khi có dòng mới.
+
+Ví dụ chọn 3 dòng / 5 giây: đủ 3 dòng thì dịch ngay; sau 5 giây mới có 1–2 dòng
+thì vẫn gửi nhóm đó. Mặc định 1 dòng / 5 giây nên vẫn dịch ngay như trước.
+Bấm **Save settings** để lưu. Khi dừng nghe, chuyển conversation, đổi engine/ngôn ngữ
+hoặc lưu settings, nhóm còn thiếu được gửi với cấu hình gốc, không trộn conversation.
+**Stop** trong tab dịch hoặc đóng app thì hủy nhóm chưa gửi; dòng gốc vẫn được lưu,
+có thể dùng **Translate missing…** sau. Lịch sử ghi rõ bản dịch dùng chung của nhóm
+và toàn bộ câu gốc, không tự đoán cách ghép từng câu. **Translate missing…** cũng
+gom theo số dòng đã chọn nhưng gửi ngay nhóm cuối; **Retry** dịch riêng dòng được chọn.
 
 Mặc định chỉ dịch dòng đã chốt. **Translate provisional speech** dịch tạm tối đa theo
 nhịp 1,2 giây, có gom yêu cầu mới nhất; không lưu bản tạm vào lịch sử. Chế độ này tốn

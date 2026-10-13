@@ -36,6 +36,12 @@ class TranslationStore:
                 );
                 CREATE INDEX IF NOT EXISTS translation_history ON line_translations(line_id,id);
             """)
+            # Existing databases keep all their single-line translation history.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(line_translations)")}
+            for name, definition in (("batch_source", "TEXT NOT NULL DEFAULT ''"),
+                                     ("batch_size", "INTEGER NOT NULL DEFAULT 1")):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE line_translations ADD COLUMN {name} {definition}")
 
     @contextmanager
     def connect(self):
@@ -95,11 +101,20 @@ class TranslationStore:
                               (line["id"], config.fingerprint, line["source_text"])).fetchone() is not None
 
     def begin(self, line, config):
+        return self.begin_batch([line], config)[0]
+
+    def begin_batch(self, lines, config):
+        # Each source line links to the shared result and its full source context.
+        # Never claim that an arbitrary paragraph is a per-sentence alignment.
+        source = "\n".join(line["source_text"] for line in lines) if len(lines) > 1 else ""
+        attempts = []
         with self.connect() as db:
-            cursor = db.execute("INSERT INTO line_translations(line_id,engine,model,source_lang,target_lang,fingerprint,source_text,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                                (line["id"], config.engine, config.model, config.source, config.target,
-                                 config.fingerprint, line["source_text"], "queued", datetime.now().isoformat(timespec="seconds")))
-            return cursor.lastrowid
+            for line in lines:
+                cursor = db.execute("INSERT INTO line_translations(line_id,engine,model,source_lang,target_lang,fingerprint,source_text,status,created_at,batch_source,batch_size) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                    (line["id"], config.engine, config.model, config.source, config.target,
+                                     config.fingerprint, line["source_text"], "queued", datetime.now().isoformat(timespec="seconds"), source, len(lines)))
+                attempts.append(cursor.lastrowid)
+        return attempts
 
     def finish(self, attempt, status, text="", error=""):
         with self.connect() as db:

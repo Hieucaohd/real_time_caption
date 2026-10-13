@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from . import markdown_html, translation
+from .translation_batch import SentenceBatcher, batch_options
 from .translation_store import TranslationStore
 from .translation_worker import TranslationWorker
 
@@ -36,6 +37,7 @@ class TranslationPanel(ttk.Frame):
         self.store = TranslationStore(store.db_path)
         self.store.recover()
         self.worker = TranslationWorker(self.store)
+        self.batcher = SentenceBatcher(self.after, self.after_cancel, self._submit_batch, self._batch_error)
         self._results = queue.Queue()
         self._lines = {}
         self._revision = 0
@@ -51,6 +53,8 @@ class TranslationPanel(ttk.Frame):
         self.device_var = tk.StringVar(value=settings.translation_device)
         self.enabled_var = tk.BooleanVar(value=settings.translation_enabled)
         self.partial_var = tk.BooleanVar(value=settings.translation_partial)
+        self.batch_size_var = tk.StringVar(value=str(settings.translation_batch_size))
+        self.batch_timeout_var = tk.StringVar(value=str(settings.translation_batch_timeout))
         self.follow_var = tk.BooleanVar(value=True)
 
         bar = ttk.Frame(self, padding=(4, 5))
@@ -70,6 +74,13 @@ class TranslationPanel(ttk.Frame):
         self.status_label.pack(fill="x")
 
         self.config_frame = ttk.LabelFrame(self, text="Translation settings", padding=8)
+        batch = ttk.Frame(self.config_frame)
+        batch.pack(fill="x", pady=(0, 4))
+        ttk.Label(batch, text="Lines per batch").pack(side="left", padx=(0, 4))
+        ttk.Spinbox(batch, textvariable=self.batch_size_var, from_=1, to=50, width=5).pack(side="left", padx=(0, 12))
+        ttk.Label(batch, text="Max wait (seconds)").pack(side="left", padx=(0, 4))
+        ttk.Spinbox(batch, textvariable=self.batch_timeout_var, from_=0.1, to=300, increment=0.5, width=7).pack(side="left")
+        ttk.Label(self.config_frame, text="Auto: send when enough finalized lines arrive, or timeout from the first line. Save settings to remember these values. Provisional speech uses separate requests.", wraplength=650, foreground="#666666").pack(fill="x", pady=(0, 5))
         langs = ttk.Frame(self.config_frame)
         langs.pack(fill="x")
         for label, var in (("From", self.source_var), ("To", self.target_var)):
@@ -139,6 +150,13 @@ class TranslationPanel(ttk.Frame):
         return next((key for key, label in translation.ENGINES.items() if label == self.engine_var.get()), "azure")
 
     def persist_settings(self):
+        try:
+            count, timeout = self.batch_options()
+        except translation.TranslationError:
+            pass  # Do not overwrite valid saved numbers with an unfinished entry.
+        else:
+            self.settings.translation_batch_size = count
+            self.settings.translation_batch_timeout = timeout
         self.settings.translation_engine = self.engine()
         self.settings.translation_source, self.settings.translation_target = self.source_var.get(), self.target_var.get()
         self.settings.translation_enabled, self.settings.translation_partial = self.enabled_var.get(), self.partial_var.get()
@@ -148,6 +166,7 @@ class TranslationPanel(ttk.Frame):
             setattr(self.settings, name, variable.get().strip())
 
     def config(self):
+        self.batch_options()
         self.persist_settings()
         config = translation.Config.from_settings(self.settings)
         config.validate()
@@ -156,6 +175,13 @@ class TranslationPanel(ttk.Frame):
         return config
 
     def save_settings(self):
+        try:
+            self.batch_options()
+        except translation.TranslationError as exc:
+            messagebox.showinfo("Translation", str(exc), parent=self)
+            return
+        if not self.flush_pending():
+            return
         self.persist_settings()
         self.settings.save()
         self.status.set("Translation settings saved locally.")
@@ -167,6 +193,7 @@ class TranslationPanel(ttk.Frame):
             self.config_frame.pack(fill="x", before=self.actions_frame)
 
     def _engine_changed(self):
+        self.flush_pending()
         self.invalidate_preview()
         for page in self._config_pages.values():
             page.pack_forget()
@@ -181,6 +208,7 @@ class TranslationPanel(ttk.Frame):
         self.persist_settings()
 
     def _options_changed(self):
+        self.flush_pending()
         self.invalidate_preview()
         self.persist_settings()
         if self.enabled_var.get():
@@ -247,12 +275,43 @@ class TranslationPanel(ttk.Frame):
                 if conversation_id == self._get_conversation_id():
                     self._put_line(line)
                 if self.enabled_var.get() and not self._closed:
-                    self.worker.submit(line, self.config())
+                    config = self.config()
+                    count, timeout = self.batch_options()
+                    self.batcher.add(line, config, count, timeout)
+                    if self.batcher.lines:
+                        self.status.set(f"Collecting {len(self.batcher.lines)}/{count} lines; max wait {timeout:g}s from first line.")
             except Exception as exc:
-                self.status.set(str(exc) if isinstance(exc, translation.TranslationError) else "Could not index/queue the translation. Original transcript remains saved.")
-                self.enabled_var.set(False)
+                self._batch_error(exc)
+
+    def batch_options(self):
+        return batch_options(self.batch_size_var.get(), self.batch_timeout_var.get())
+
+    def _batch_error(self, exc):
+        self.batcher.clear()
+        self.enabled_var.set(False)
+        self.settings.translation_enabled = False
+        self.status.set(str(exc) if isinstance(exc, translation.TranslationError) else "Could not index/queue the translation. Original transcript remains saved; use Translate missing to retry.")
+
+    def _submit_batch(self, lines, config):
+        accepted = self.worker.submit_batch(lines, config)
+        for line in lines:
+            if line["conversation_id"] == self._get_conversation_id():
+                self._put_line(line)
+        if accepted:
+            self.status.set(f"Queued a batch of {len(lines)} line(s).")
+
+    def flush_pending(self, conversation_id=None):
+        if conversation_id is not None and self.batcher.lines and self.batcher.boundary[0] != conversation_id:
+            return True
+        try:
+            self.batcher.flush()
+        except Exception as exc:
+            self._batch_error(exc)
+            return False
+        return True
 
     def load_conversation(self):
+        self.flush_pending()
         self.invalidate_preview()
         self._lines = {}
         self.tree.delete(*self.tree.get_children())
@@ -299,7 +358,10 @@ class TranslationPanel(ttk.Frame):
         body = f"<div class='meta'>{e(line['stamp'])}</div><p><b>Original</b></p><p>{e(line['source_text'])}</p>"
         for item in self.store.history(line["id"]):
             meta = f"{translation.ENGINES.get(item['engine'], item['engine'])} · {item['source_lang']} → {item['target_lang']} · {item['model']} · {item['created_at']} · {item['status']}"
-            body += f"<hr><div class='meta'>{e(meta)}</div><p>{e(item['translated_text'] or item['error'] or 'Waiting…')}</p>"
+            body += f"<hr><div class='meta'>{e(meta)}</div>"
+            if item.get("batch_size", 1) > 1:
+                body += f"<p><b>Shared translation of {item['batch_size']} lines</b></p><p>{e(item['batch_source'])}</p>"
+            body += f"<p>{e(item['translated_text'] or item['error'] or 'Waiting…')}</p>"
         markdown_html.show(self.view, body, scroll_to_end=True)
 
     def translate_selected(self):
@@ -326,11 +388,15 @@ class TranslationPanel(ttk.Frame):
             return
         if not messagebox.askyesno("Translate missing", f"Translate {len(lines)} line(s) with {self.engine_var.get()}?\nCloud requests consume your quota and may be billed. No provider fallback.", parent=self):
             return
+        self.batcher.clear()  # Missing already includes any not-yet-submitted buffered lines.
         self.worker.resume()
         count = 0
         try:
-            for line in lines:
-                count += int(self.worker.submit(line, config))
+            size, _ = self.batch_options()
+            for start in range(0, len(lines), size):
+                group = lines[start:start + size]
+                if self.worker.submit_batch(group, config):
+                    count += len(group)
         except translation.TranslationError as exc:
             self.status.set(f"Queued {count} lines. {exc}")
         else:
@@ -338,6 +404,7 @@ class TranslationPanel(ttk.Frame):
 
     def stop_translation(self):
         self.enabled_var.set(False)
+        self.batcher.clear()
         self.invalidate_preview()
         self.worker.cancel_all()
         self.persist_settings()
@@ -392,6 +459,7 @@ class TranslationPanel(ttk.Frame):
             except queue.Empty:
                 break
             if status == "error":
+                self.batcher.clear()
                 self.enabled_var.set(False)
                 self.invalidate_preview()
                 self.settings.translation_enabled = False
@@ -401,11 +469,13 @@ class TranslationPanel(ttk.Frame):
                     self.preview_label.configure(text=f"Provisional ({task.config.engine}): {task.line['source_text']}\n{value}")
             elif task.line["conversation_id"] == self._get_conversation_id():
                 try:
-                    self._put_line(task.line)
+                    for line in task.members:
+                        self._put_line(line)
                 except Exception:
                     self.enabled_var.set(False)
                     self.settings.translation_enabled = False
                     self.invalidate_preview()
+                    self.batcher.clear()
                     self.worker.cancel_all()
                     self.status.set("Could not refresh translation history. Check SQLite access; original transcript remains saved.")
                     continue
@@ -414,6 +484,7 @@ class TranslationPanel(ttk.Frame):
         self.after(100, self._drain)
 
     def close(self):
+        self.batcher.clear()
         self.invalidate_preview()
         self._closed = True
         self.worker.close()
