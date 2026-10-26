@@ -10,6 +10,7 @@ import threading
 import tkinter as tk
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Callable
@@ -26,6 +27,7 @@ from .settings import Settings
 from .stream_preview import StreamPreview
 from .translation_tab import TranslationPanel
 from .transcript_file import TRANSCRIPTS_DIR
+from .transcript_export import last_lines
 from .transcriber import Event, StreamingTranscriber, TranscriberConfig
 
 log = logging.getLogger(__name__)
@@ -212,6 +214,9 @@ class App:
         transcript_actions = ttk.Frame(transcript_tab, padding=(4, 4))
         transcript_actions.pack(fill="x")
         ttk.Button(transcript_actions, text="⭳ Export text…", command=self.export_transcript).pack(
+            side="right", padx=4
+        )
+        ttk.Button(transcript_actions, text="Download transcript…", command=self.download_transcript).pack(
             side="right", padx=4
         )
         ttk.Button(transcript_actions, text="📂 Saved files", command=self.open_transcripts_folder).pack(
@@ -1235,6 +1240,46 @@ class App:
 
     def open_transcripts_folder(self) -> None:
         self._open_folder(TRANSCRIPTS_DIR)
+
+    def download_transcript(self) -> None:
+        """Download all saved parts or the last N caption lines of this conversation."""
+        title = "Download transcript"
+        try:
+            content = self.session_file.read_text() if self.session_file is not None else self.transcript.get("1.0", "end-1c")
+            source_paths = self.session_file.parts() if self.session_file is not None else []
+        except OSError as exc:
+            messagebox.showerror(title, f"Could not read the transcript:\n{exc}", parent=self.root)
+            return
+        if not any(line.strip() and not line.startswith("#") for line in content.splitlines()):
+            messagebox.showinfo(title, "There is no transcript to download yet.", parent=self.root)
+            return
+        count = simpledialog.askinteger(
+            title, "Export the last how many transcript lines?\n0 = all lines.\nMetadata and visual word wrapping do not count as caption lines.",
+            initialvalue=getattr(self, "_download_max_lines", 0), minvalue=0, parent=self.root,
+        )
+        if count is None:
+            return
+        self._download_max_lines = count
+        content = last_lines(content, count)
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title=title, defaultextension=".txt",
+            initialfile=datetime.now().strftime("transcript_%Y%m%d_%H%M%S") + (f"_last_{count}" if count else "") + ".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            target = Path(path)
+            if any(target.resolve() == source.resolve() or
+                   (target.exists() and source.exists() and target.samefile(source)) for source in source_paths):
+                messagebox.showerror(title, "Choose a different filename to keep the original transcript unchanged.", parent=self.root)
+                return
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(content + "\n")
+        except OSError as exc:
+            messagebox.showerror(title, f"Could not write {path}:\n{exc}", parent=self.root)
+            return
+        self.status_var.set(f"Downloaded transcript to {path}")
 
     @staticmethod
     def _open_folder(folder) -> None:

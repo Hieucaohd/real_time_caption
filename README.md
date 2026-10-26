@@ -58,6 +58,12 @@ Chữ **xám** là phần đang nghe và có thể còn thay đổi. Chữ **tr�
 
 Câu nào được chốt là ghi ngay xuống đĩa, nên app bị tắt đột ngột cũng không mất phần đã chốt. Trong tab **Transcript**, **📂 Saved files** mở kho dữ liệu, **⭳ Export text…** lưu nội dung đang xem ra một nơi khác và **Clear** xoá phần transcript đang hiển thị. **Open conversation folder** mở đúng folder đang chọn.
 
+**Download transcript…** mở hộp chọn số dòng cuối cần tải (`0` = toàn bộ), rồi chọn
+nơi lưu file `.txt`. Nút này đọc transcript đã lưu của conversation, tự ghép các part,
+kể cả khi bạn đã Clear phần hiển thị. Chỉ đếm dòng phụ đề, không đếm header hay dòng
+tự xuống do màn hình hẹp. File gốc giữ nguyên; lời nói tạm chưa ghi xuống transcript
+không được đưa vào bản tải. Số dòng vừa chọn được nhớ trong phiên chạy app hiện tại.
+
 ### Tóm tắt bằng ChatGPT
 
 Nút **🤖 Summarize (ChatGPT)** dùng được cho conversation đang chọn, kể cả khi đã pause. App chỉ gửi transcript cùng prompt tóm tắt; `chat_history.md` không được đính kèm. Nội dung chat và các summary cũ vẫn được lưu cục bộ để xem lại.
