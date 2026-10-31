@@ -1,0 +1,6 @@
+Dựa vào các file tổng hợp kiến thức và file bài tập, hãy tạo giúp tôi các nội dung để đăng lên website knowledge. Các thông tin về website được ghi trong file đính kèm.
+
+Topic: Giải tích 2
+Collection: 1 collection theo chủ đề của bài
+
+Tạo file python và file json để tôi tự chạy, API key được lưu trong env, tuy nhiên, cho tôi lệnh để set api key trong powershell của window
