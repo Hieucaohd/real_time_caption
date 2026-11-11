@@ -108,29 +108,46 @@ _RESPONSE_TEXT_JS = """
 # Intercept the page's clipboard writes so the Copy button hands us the markdown
 # without touching the user's real clipboard (same trick as ai-orchestrator).
 COPY_HOOK = """() => {
-  window.__rtcCopy = [];
+  if (window.__rtcClipboard) return null; // another copy operation owns these hooks
   const c = navigator.clipboard;
-  window.__rtcOrig = {wt: c.writeText, w: c.write};
-  c.writeText = async (t) => { window.__rtcCopy.push({k: 'text/plain', t: t}); };
-  c.write = async (items) => {
+  const state = {items: [], wt: c?.writeText, w: c?.write, exec: document.execCommand};
+  window.__rtcClipboard = state;
+  state.writeText = async t => { state.items.push({k: 'text/plain', t: String(t)}); };
+  state.write = async items => {
     for (const it of items) for (const k of it.types) {
-      try { window.__rtcCopy.push({k: k, t: await (await it.getType(k)).text()}); } catch (e) {}
+      try { state.items.push({k, t: await (await it.getType(k)).text()}); } catch (e) {}
     }
   };
-  window.__rtcListen = (e) => {
-    if (e.clipboardData) for (const k of e.clipboardData.types || [])
-      window.__rtcCopy.push({k: k, t: e.clipboardData.getData(k)});
+  state.execCommand = function(command, ...args) {
+    if (String(command).toLowerCase() !== 'copy') return state.exec.call(this, command, ...args);
+    // ChatGPT's window capture listener stops propagation before document listeners.
+    // Dispatch locally, then read the data it supplied after all handlers finished.
+    // A synthetic copy event never writes to the system clipboard.
+    const data = new DataTransfer();
+    const target = document.activeElement || document;
+    target.dispatchEvent(new ClipboardEvent('copy', {
+      clipboardData: data, bubbles: true, cancelable: true, composed: true
+    }));
+    for (const k of data.types) state.items.push({k, t: data.getData(k)});
+    return data.types.length > 0;
   };
-  document.addEventListener('copy', window.__rtcListen, true);
+  document.execCommand = state.execCommand;
+  if (c) { c.writeText = state.writeText; c.write = state.write; }
+  return document.execCommand === state.execCommand &&
+    (!c || (c.writeText === state.writeText && c.write === state.write));
 }"""
 
+COPY_READ = "() => window.__rtcClipboard?.items || []"
+
 COPY_UNHOOK = """() => {
+  const state = window.__rtcClipboard;
+  if (!state) return [];
   const c = navigator.clipboard;
-  if (window.__rtcOrig) { c.writeText = window.__rtcOrig.wt; c.write = window.__rtcOrig.w; }
-  document.removeEventListener('copy', window.__rtcListen, true);
-  const got = window.__rtcCopy || [];
-  window.__rtcCopy = null; window.__rtcOrig = null;
-  return got;
+  if (c?.writeText === state.writeText) c.writeText = state.wt;
+  if (c?.write === state.write) c.write = state.w;
+  if (document.execCommand === state.execCommand) document.execCommand = state.exec;
+  delete window.__rtcClipboard;
+  return state.items;
 }"""
 
 # Shared JS helper: id of the turn that contains element ``e``.
@@ -553,7 +570,7 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
 
 
 def _read_answer(page, turn_id: str) -> str:
-    """Markdown via the answer's Copy button; falls back to the rendered text."""
+    """Read copied Markdown, never save flattened DOM text as a formatted answer."""
     turn = _turn_locator(page, turn_id)
     copy_button = turn.locator(REPLY_COPY_BUTTON).first
     try:
@@ -562,26 +579,38 @@ def _read_answer(page, turn_id: str) -> str:
     except Exception:  # noqa: BLE001
         pass
 
-    page.evaluate(COPY_HOOK)
+    captured = []
+    owns_hook = True
     try:
+        installed = page.evaluate(COPY_HOOK)
+        if installed is None:
+            owns_hook = False
+        if not installed:
+            raise ChatGPTError("Could not capture ChatGPT's Copy action safely.")
         copy_button.click(timeout=8000)
-        time.sleep(0.6)  # give the page time to call the clipboard API
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            captured = page.evaluate(COPY_READ)
+            if any(item.get("k") in ("text/plain", "text/markdown") and (item.get("t") or "").strip()
+                   for item in captured or []):
+                break
+            time.sleep(0.1)
     except Exception:  # noqa: BLE001
-        log.warning("Could not click ChatGPT's Copy button", exc_info=True)
+        log.warning("Could not capture ChatGPT's copied Markdown", exc_info=True)
     finally:
-        captured = page.evaluate(COPY_UNHOOK)
-    for item in captured or []:
-        if item.get("k") == "text/plain" and (item.get("t") or "").strip():
-            return clean_answer(item["t"])
-
-    # Fallback: rendered text of the answer part of the turn (loses markdown formatting).
-    try:
-        text = turn.evaluate("turn => {" + _RESPONSE_TEXT_JS + "return responseText(turn);}", timeout=5000)
-    except Exception:  # noqa: BLE001
-        text = ""
-    if text and text.strip():
-        return clean_answer(text)
-    raise ChatGPTError("ChatGPT answered, but the answer could not be read. See the Chrome tab.")
+        if owns_hook:
+            try:
+                captured = page.evaluate(COPY_UNHOOK) or captured
+            except Exception:  # noqa: BLE001 - navigating away also destroys the hooks
+                log.warning("Could not restore ChatGPT clipboard hooks", exc_info=True)
+    for kind in ("text/markdown", "text/plain"):
+        for item in captured or []:
+            if item.get("k") == kind and (item.get("t") or "").strip():
+                return clean_answer(item["t"])
+    raise ChatGPTError(
+        "ChatGPT answered, but its Markdown could not be copied. "
+        "See the Chrome tab and try again. The answer was not saved as unformatted text."
+    )
 
 
 # --------------------------------------------------------------------------- main
