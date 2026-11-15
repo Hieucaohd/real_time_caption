@@ -43,8 +43,10 @@ def main():
             expect(page.get_by_label('chat Power', exact=True)).to_have_value('2')
             page.get_by_label('Đính kèm transcript', exact=True).uncheck()
             page.locator('nav button').nth(2).click()
+            tabs[0]['title'] = 'Updated conversation title'
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             dialog = page.locator('.branch-composer')
+            expect(page.get_by_label('research ChatGPT tab', exact=True).locator('option:checked')).to_have_text('Updated conversation title')
             expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
             expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
             assert page.get_by_label('research Prompt', exact=True).locator('option').all_text_contents() == chat_prompts
@@ -146,7 +148,10 @@ def main():
             expect(dialog.locator('.composer-files')).to_be_empty()
             page.get_by_label('research Power', exact=True).select_option('0')
             dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            tabs.append({'key':'another-tab', 'title':'Opened since last branch'})
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            expect(page.get_by_label('research ChatGPT tab', exact=True).locator('option')).to_have_count(4)
+            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
             expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
             assert not errors, errors
             print('Composer browser checks passed: refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite defaults, save failure/retry, reload.')

@@ -46,6 +46,18 @@ export default function BranchComposer({
     !uploads;
   useEffect(() => {
     area.current?.focus();
+    let active = true;
+    // Refresh once per opening, including branches created from selected text.
+    scanTabs()
+      .then((failure) => {
+        if (active && failure) setError(failure);
+      })
+      .catch((e) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function saveSettings() {
