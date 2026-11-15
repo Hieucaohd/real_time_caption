@@ -148,15 +148,6 @@
 .research-map:active {
   cursor: grabbing;
 }
-.research-map-size {
-  position: relative;
-  min-width: 100%;
-  min-height: 100%;
-}
-.research-map-world {
-  position: absolute;
-  transform-origin: top left;
-}
 .research-edges {
   position: absolute;
   pointer-events: none;
@@ -252,24 +243,6 @@
 .research-collapse:hover {
   color: white;
   background: #596b80;
-}
-.research-map-footer {
-  padding: 10px 12px;
-  border-top: 1px solid #38404a;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 10px;
-}
-.research-map-footer button {
-  background: #303b46;
-  border-color: #46525f;
-  color: #e1e8ee;
-  padding: 5px;
-}
-.research-map-footer .inline {
-  gap: 6px;
 }
 .research-reader {
   min-width: 0;
@@ -520,9 +493,6 @@
   }
   .research-map-toolbar select {
     width: 100%;
-  }
-  .research-map-footer > span {
-    display: none;
   }
 }
 @media (max-width: 900px) {

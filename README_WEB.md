@@ -36,7 +36,20 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 6. Power và tab Chrome nằm trên thanh chung. Nút tùy chỉnh lưu mặc định riêng cho nghiên cứu: hướng dẫn cách giải thích, transcript, số dòng và tự chụp màn hình. Hộp tạo nhánh cho phép đổi riêng các lựa chọn này, upload file, dán ảnh hoặc chọn ảnh chụp. Mặc định không đính kèm transcript/ảnh; ngữ cảnh tổ tiên luôn được gửi.
 7. File, transcript, hướng dẫn và Power được chụp lại khi xếp hàng; tự chụp màn hình cũng chạy ngay lúc đó, không chụp một màn hình khác sau thời gian chờ. Retry dùng lại yêu cầu này; nút thử lại cho phép dùng tab Chrome đang được chọn nếu tab cũ đã đóng.
 
-Kéo nền để di chuyển cây; dùng +/−, vừa khung và thu gọn nhánh để điều hướng. Mỗi node có trạng thái chờ/đang trả lời/lỗi và checkbox **Đã hiểu**. Có thể đổi tên node mà không đổi câu hỏi. Tìm kiếm tìm theo câu hỏi hoặc đoạn trích.
+Đồ thị hỗ trợ kéo/thả và điều hướng theo các thao tác quen thuộc của [draw.io](https://www.drawio.com/docs/reference/shortcuts/modifier-shortcuts-in-diagrams/):
+
+- **Kéo node** để đổi vị trí; bấm node để đọc. Kéo chỉ đổi bố cục, không đổi quan hệ cha–con hay ngữ cảnh câu hỏi.
+- **Kéo nền**, **Space + kéo**, **chuột giữa** hoặc **chuột phải + kéo** để di chuyển khung nhìn tự do. Công cụ bàn tay (**H**) cho phép kéo khung nhìn ngay trên node; **V** quay về công cụ chọn/kéo node.
+- **Shift/Ctrl + bấm** để chọn nhiều node; **Shift + kéo nền** để khoanh vùng chọn. Kéo một node được chọn để di chuyển cả nhóm. Bật **Kéo cả nhánh** để các node con, kể cả đang thu gọn, đi theo.
+- **Lăn chuột** zoom tại con trỏ; **Alt + lăn** di chuyển, **Shift + lăn** di chuyển ngang. Với trackpad, tắt **Lăn để zoom** để cuộn khung nhìn; **Ctrl + lăn** vẫn zoom.
+- Bật **Bám lưới** để kéo theo bước 10 px; giữ **Alt** khi kéo để bỏ bám lưới tạm thời. **Mũi tên** dịch node 1 px, **Shift + mũi tên** dịch 10 px.
+- **Ctrl+Z** hoàn tác vị trí, **Ctrl+Shift+Z / Ctrl+Y** làm lại. **Esc** hủy lượt kéo đang diễn ra. Hoàn tác áp dụng cho bố cục, được giữ trong phiên đang mở.
+- **F** vừa khung, **C** tới node đang đọc, **0** trở về zoom 100%; **+/−** phóng/thu. Bản đồ thu nhỏ cho phép bấm/kéo để đi nhanh. Nút **Mở rộng đồ thị** dành toàn bộ chiều rộng cho cây; bấm node để mở lại khung đọc.
+- Nút **Tự sắp xếp cây** sắp lại các node và có thể hoàn tác. Các node mới được đặt cạnh node cha, không đẩy các node bạn đã sắp xếp.
+
+Tọa độ, khung nhìn/zoom, trạng thái thu gọn và các tùy chọn thao tác tự lưu vào bảng `research_graph_layouts` trong SQLite, riêng cho từng cây. Góc dưới báo **Đang lưu / Đã lưu DB / Chưa lưu — Thử lại**. Bố cục được tải lại từ database, không phụ thuộc localStorage của Chrome. Phím tắt chỉ có hiệu lực khi đồ thị được focus, không chiếm phím khi soạn câu hỏi hoặc đọc câu trả lời.
+
+Mỗi node có trạng thái chờ/đang trả lời/lỗi và checkbox **Đã hiểu**. Có thể đổi tên node mà không đổi câu hỏi. Tìm kiếm tìm theo câu hỏi hoặc đoạn trích.
 
 Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`: câu hỏi, câu trả lời, đoạn trích, quan hệ cha–con, tùy chỉnh từng node, yêu cầu đã chuẩn bị, trạng thái, tên node và dấu “Đã hiểu”. Nội dung đang stream và tiến độ được ghi vào database theo mỗi cập nhật nhận được, để còn đọc được phần đã nhận khi server bị ngắt. File/ảnh, bản chụp transcript và ngữ cảnh dài được lưu dạng BLOB trong `research_assets`, liên kết qua `research_node_assets`; các file cache chỉ là bản tạm để upload và tự dựng lại từ database. Node và file đính kèm được ghi trong cùng một transaction; các nhánh dùng cùng file không lưu lặp nội dung file.
 
@@ -60,6 +73,9 @@ npm run build
 cd ..
 .venv\Scripts\python.exe web_main.py
 .venv\Scripts\python.exe -m unittest discover -s tests
+npm --prefix web test
+# Kiểm thử chuột/phím bằng Chrome headless, dùng database tạm, không gửi ChatGPT:
+.venv\Scripts\python.exe -X utf8 tests/check_research_graph_browser.py
 ```
 
 Backend: `web_api/server.py`, `web_api/service.py`. Frontend: `web/src/main.jsx`, `web/src/style.css`; React được bundle bằng esbuild, không cần Node server khi sử dụng.

@@ -1,0 +1,231 @@
+.graph-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.graph-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3b444f;
+  position: relative;
+  z-index: 8;
+  background: #282f38;
+}
+.graph-tool-group {
+  display: flex;
+  gap: 3px;
+}
+.graph-tools button,
+.graph-footer button {
+  padding: 5px 6px;
+  background: #333e4a;
+  color: #dce5ef;
+  border-color: #485563;
+}
+.graph-tools button:hover,
+.graph-footer button:hover {
+  background: #48566a;
+}
+.graph-tools button[aria-pressed="true"] {
+  background: #56577c;
+  border-color: #a7a5e5;
+  color: white;
+}
+.graph-tools label,
+.graph-footer label {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.graph-tools input,
+.graph-footer input {
+  accent-color: #a4a0ee;
+}
+.graph-help {
+  margin-left: auto;
+}
+.graph-help > summary {
+  list-style: none;
+  display: flex;
+  padding: 5px;
+  color: #c5d1dd;
+  cursor: pointer;
+}
+.graph-help > summary::-webkit-details-marker {
+  display: none;
+}
+.graph-help > div {
+  position: absolute;
+  z-index: 30;
+  right: 10px;
+  top: 100%;
+  width: min(360px, 90vw);
+  background: #303944;
+  border: 1px solid #5b6a7b;
+  border-radius: 9px;
+  padding: 16px;
+  box-shadow: 0 8px 24px #1119;
+  color: #e3eaf2;
+  line-height: 1.6;
+}
+.graph-help p {
+  font-size: 11px;
+  margin: 10px 0;
+}
+.graph-help small {
+  font-size: 10px;
+  color: #99b4a8;
+}
+.research-map.graph-canvas {
+  overflow: clip;
+  user-select: none;
+  overscroll-behavior: contain;
+  outline: none;
+  cursor: default;
+  touch-action: none;
+}
+.research-map.graph-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px #a3a1e4;
+}
+.graph-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.graph-world .research-edges {
+  overflow: visible;
+}
+.graph-world .research-edges path {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.5;
+}
+.graph-canvas .research-node {
+  cursor: move;
+}
+.graph-canvas .research-node.selected {
+  border-color: #a0a5b3;
+  box-shadow: none;
+}
+.graph-canvas .research-node.picked {
+  border-color: #c1bfff;
+  box-shadow: 0 0 0 2px #aaa5f455;
+}
+.graph-canvas .research-node.picked:after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 1px dashed #a7a4e5;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.graph-canvas.hand-mode,
+.graph-canvas.hand-mode .research-node {
+  cursor: grab;
+}
+.graph-canvas.is-dragging.pan,
+.graph-canvas.is-dragging.pan * {
+  cursor: grabbing !important;
+}
+.graph-canvas.is-dragging.nodes,
+.graph-canvas.is-dragging.nodes * {
+  cursor: move !important;
+}
+.graph-canvas.is-dragging.marquee {
+  cursor: crosshair;
+}
+.graph-marquee {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid #b2b2f3;
+  background: #a9a6ef22;
+}
+.graph-minimap {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 145px;
+  height: 86px;
+  border: 1px solid #576474;
+  background: #202732e8;
+  border-radius: 5px;
+  cursor: crosshair;
+  box-shadow: 0 3px 12px #1118;
+  touch-action: none;
+}
+.minimap-viewport {
+  fill: #bcbaff16;
+  stroke: #c7c4ff;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.graph-footer {
+  padding: 9px 12px;
+  border-top: 1px solid #38404a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  background: #262d35;
+}
+.graph-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.graph-zoom button:nth-child(2) {
+  min-width: 45px;
+  font-size: 10px;
+}
+.graph-save {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #9bbfae;
+}
+.graph-save.saving {
+  color: #d8c893;
+}
+.graph-save.error button {
+  color: #ffb6ac;
+  border-color: #9d6158;
+}
+.graph-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+  color: #a6b6c4;
+}
+.research-body.full-graph {
+  grid-template-columns: minmax(0, 1fr);
+}
+.research-body.full-graph .research-reader {
+  display: none;
+}
+@media (max-width: 900px) {
+  .research-body.full-graph .research-graph {
+    height: 100%;
+    flex: 1;
+  }
+  .graph-picked {
+    display: none;
+  }
+}

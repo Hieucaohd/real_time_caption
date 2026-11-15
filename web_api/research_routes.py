@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -39,6 +39,30 @@ class RetryInput(BaseModel):
     selected_tab: str | None = Field(default=None, max_length=500)
 
 
+class GraphPoint(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    x: float = Field(ge=-1_000_000, le=1_000_000)
+    y: float = Field(ge=-1_000_000, le=1_000_000)
+
+
+class GraphCamera(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    x: float = Field(ge=-10_000_000, le=10_000_000)
+    y: float = Field(ge=-10_000_000, le=10_000_000)
+    zoom: float = Field(ge=0.1, le=4)
+
+
+class GraphLayoutPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    positions: dict[str, GraphPoint] | None = Field(default=None, max_length=10000)
+    camera: GraphCamera | None = None
+    collapsed: list[str] | None = Field(default=None, max_length=10000)
+    snap: bool | None = None
+    wheel_zoom: bool | None = None
+    mode: Literal['select', 'hand'] | None = None
+    move_subtree: bool | None = None
+
+
 def research(request, cid):
     request.app.state.service.conversation(cid)
     return request.app.state.service.research
@@ -53,6 +77,16 @@ def nodes(cid: str, request: Request):
 @router.post('/import')
 def import_answer(cid: str, body: RootInput, request: Request):
     return research(request, cid).store.import_answer(cid, body.message_id)
+
+
+@router.get('/{nid}/layout')
+def graph_layout(cid: str, nid: str, request: Request):
+    return research(request, cid).store.graph_layout(cid, nid)
+
+
+@router.patch('/{nid}/layout')
+def save_graph_layout(cid: str, nid: str, body: GraphLayoutPatch, request: Request):
+    return research(request, cid).store.save_graph_layout(cid, nid, body.model_dump(exclude_none=True))
 
 
 @router.get('/{nid}')

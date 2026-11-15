@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   GitBranch,
   Plus,
@@ -6,9 +6,6 @@ import {
   X,
   Check,
   ChevronRight,
-  ChevronDown,
-  Minus,
-  Maximize,
   Copy,
   Settings2,
   Send,
@@ -18,6 +15,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import "./research.css";
+import ResearchGraph from "./ResearchGraph";
 
 const labels = {
   done: "Đã trả lời",
@@ -30,11 +28,6 @@ const labels = {
 const defaultInstructions =
   "Giải thích bằng tiếng Việt, từ trực giác đến chi tiết. Định nghĩa các thuật ngữ mới, đưa ví dụ cụ thể và giữ công thức toán khi cần. Tập trung vào câu hỏi hiện tại.";
 const statusOf = (n) => (n.understood ? "Đã hiểu" : labels[n.status]);
-const nodeWidth = 236,
-  nodeHeight = 78,
-  columnGap = 72,
-  rowGap = 28;
-
 function readSaved(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -53,44 +46,6 @@ function pathTo(nodes, id) {
     id = n.parent_id;
   }
   return path;
-}
-
-// Place parents between their visible children; the tree has no fixed depth limit.
-function layoutTree(nodes, rootId, collapsed) {
-  const children = new Map(),
-    positions = [],
-    edges = [];
-  for (const n of nodes) {
-    if (!children.has(n.parent_id)) children.set(n.parent_id, []);
-    children.get(n.parent_id).push(n);
-  }
-  const root = nodes.find((n) => n.id === rootId);
-  let row = 0,
-    maxDepth = 0;
-  function place(n, depth) {
-    maxDepth = Math.max(maxDepth, depth);
-    const kids = collapsed.has(n.id) ? [] : children.get(n.id) || [];
-    const items = kids.map((k) => place(k, depth + 1));
-    const y = items.length
-      ? (items[0].y + items.at(-1).y) / 2
-      : 48 + row++ * (nodeHeight + rowGap);
-    const item = {
-      ...n,
-      x: 40 + depth * (nodeWidth + columnGap),
-      y,
-      childCount: (children.get(n.id) || []).length,
-    };
-    positions.push(item);
-    for (const child of items) edges.push({ from: item, to: child });
-    return item;
-  }
-  if (root) place(root, 0);
-  return {
-    positions,
-    edges,
-    width: 100 + (maxDepth + 1) * (nodeWidth + columnGap),
-    height: Math.max(320, 96 + row * (nodeHeight + rowGap)),
-  };
 }
 
 function TabSelect({ value, onChange, tabs }) {
@@ -149,17 +104,14 @@ export default function ResearchTab({
   const [detail, setDetail] = useState(null),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  const [collapsed, setCollapsed] = useState(new Set()),
-    [zoom, setZoom] = useState(1),
-    [query, setQuery] = useState("");
+  const [query, setQuery] = useState("");
+  const [graphExpanded, setGraphExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
     [draft, setDraft] = useState(null),
     [defaultsOpen, setDefaultsOpen] = useState(false);
   const [defaults, setDefaults] = useState(null),
     [savingDefaults, setSavingDefaults] = useState(false);
-  const viewport = useRef(null),
-    answer = useRef(null),
-    pan = useRef(null),
+  const answer = useRef(null),
     contextButton = useRef(null),
     focusSeen = useRef(null);
   const base = "/conversations/" + cid + "/research";
@@ -167,10 +119,6 @@ export default function ResearchTab({
   const roots = nodes.filter((n) => !n.parent_id);
   const rootId = selectedMeta?.root_id || roots.at(-1)?.id;
   const treeNodes = nodes.filter((n) => n.root_id === rootId);
-  const layout = useMemo(
-    () => layoutTree(nodes, rootId, collapsed),
-    [nodes, rootId, collapsed],
-  );
   const trail = pathTo(nodes, selected);
   const currentTab =
     settings.research_selected_tab || settings.chatgpt_selected_tab || "";
@@ -188,11 +136,6 @@ export default function ResearchTab({
     setSelected(id);
     localStorage.setItem(storageKey, JSON.stringify(id));
     setMenu(null);
-    setCollapsed((old) => {
-      const value = new Set(old);
-      for (const n of pathTo(all, id)) value.delete(n.id);
-      return value;
-    });
   }
   async function refresh() {
     const list = await api(base);
@@ -305,40 +248,6 @@ export default function ResearchTab({
       y: Math.max(8, Math.min(e.clientY, window.innerHeight - 76)),
       excerpt,
     });
-  }
-  function fit() {
-    const el = viewport.current;
-    if (!el) return;
-    setZoom(
-      Math.min(
-        1.15,
-        Math.max(
-          0.25,
-          Math.min(
-            (el.clientWidth - 24) / layout.width,
-            (el.clientHeight - 24) / layout.height,
-          ),
-        ),
-      ),
-    );
-    el.scrollTo(0, 0);
-  }
-  function centerNode() {
-    const expanded = new Set(collapsed);
-    for (const node of trail) expanded.delete(node.id);
-    setCollapsed(expanded);
-    const n = layoutTree(nodes, rootId, expanded).positions.find(
-      (n) => n.id === selected,
-    );
-    const el = viewport.current;
-    if (n && el)
-      requestAnimationFrame(() =>
-        el.scrollTo({
-          left: (n.x + nodeWidth / 2) * zoom - el.clientWidth / 2,
-          top: (n.y + nodeHeight / 2) * zoom - el.clientHeight / 2,
-          behavior: "smooth",
-        }),
-      );
   }
   async function saveDefaults() {
     setSavingDefaults(true);
@@ -496,7 +405,7 @@ export default function ResearchTab({
           </button>
         </div>
       ) : (
-        <div className="research-body">
+        <div className={"research-body " + (graphExpanded ? "full-graph" : "")}>
           <div className="research-graph">
             <div className="research-map-toolbar">
               <select
@@ -543,148 +452,21 @@ export default function ResearchTab({
                   ))}
               </div>
             )}
-            <div
-              className="research-map"
-              ref={viewport}
-              onPointerDown={(e) => {
-                if (e.button !== 0 || e.target.closest("button")) return;
-                pan.current = {
-                  x: e.clientX,
-                  y: e.clientY,
-                  left: e.currentTarget.scrollLeft,
-                  top: e.currentTarget.scrollTop,
-                };
-                e.currentTarget.setPointerCapture(e.pointerId);
+            <ResearchGraph
+              key={rootId}
+              nodes={treeNodes}
+              rootId={rootId}
+              selected={selected}
+              onSelect={(id) => {
+                select(id);
+                setGraphExpanded(false);
               }}
-              onPointerMove={(e) => {
-                if (pan.current) {
-                  e.currentTarget.scrollLeft =
-                    pan.current.left - (e.clientX - pan.current.x);
-                  e.currentTarget.scrollTop =
-                    pan.current.top - (e.clientY - pan.current.y);
-                }
-              }}
-              onPointerUp={() => (pan.current = null)}
-              onPointerCancel={() => (pan.current = null)}
-            >
-              <div
-                className="research-map-size"
-                style={{
-                  width: layout.width * zoom,
-                  height: layout.height * zoom,
-                }}
-              >
-                <div
-                  className="research-map-world"
-                  style={{
-                    width: layout.width,
-                    height: layout.height,
-                    transform: `scale(${zoom})`,
-                  }}
-                >
-                  <svg
-                    className="research-edges"
-                    width={layout.width}
-                    height={layout.height}
-                    aria-hidden="true"
-                  >
-                    {layout.edges.map(({ from, to }) => {
-                      const x = from.x + nodeWidth,
-                        y = from.y + nodeHeight / 2,
-                        ex = to.x,
-                        ey = to.y + nodeHeight / 2;
-                      return (
-                        <path
-                          key={to.id}
-                          d={`M ${x} ${y} C ${x + 36} ${y}, ${ex - 36} ${ey}, ${ex} ${ey}`}
-                          className={to.understood ? "understood" : ""}
-                        />
-                      );
-                    })}
-                  </svg>
-                  {layout.positions.map((n) => (
-                    <div
-                      key={n.id}
-                      className="research-node-wrap"
-                      style={{
-                        left: n.x,
-                        top: n.y,
-                        width: nodeWidth,
-                        height: nodeHeight,
-                      }}
-                    >
-                      <button
-                        aria-label={"Đọc: " + n.title}
-                        title={n.question}
-                        className={`research-node ${selected === n.id ? "selected" : ""} ${!n.parent_id ? "root" : ""} ${n.understood ? "understood" : ""}`}
-                        onClick={() => select(n.id)}
-                      >
-                        <strong>{n.title}</strong>
-                        <span className={"research-status " + n.status}>
-                          {n.understood ? (
-                            <Check size={12} />
-                          ) : n.status === "working" ? (
-                            <LoaderCircle className="spin" size={12} />
-                          ) : (
-                            <span className="research-status-dot" />
-                          )}
-                          {statusOf(n)}
-                        </span>
-                      </button>
-                      {n.childCount > 0 && (
-                        <button
-                          className="research-collapse"
-                          aria-label={
-                            (collapsed.has(n.id) ? "Mở" : "Thu") +
-                            " nhánh " +
-                            n.title
-                          }
-                          onClick={() =>
-                            setCollapsed((old) => {
-                              const value = new Set(old);
-                              value.has(n.id)
-                                ? value.delete(n.id)
-                                : value.add(n.id);
-                              return value;
-                            })
-                          }
-                        >
-                          {collapsed.has(n.id) ? (
-                            <ChevronRight size={12} />
-                          ) : (
-                            <ChevronDown size={12} />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="research-map-footer">
-              <span>Kéo nền để di chuyển · Bấm node để đọc</span>
-              <div className="inline">
-                <button
-                  title="Thu nhỏ"
-                  onClick={() => setZoom((z) => Math.max(0.25, z - 0.15))}
-                >
-                  <Minus size={14} />
-                </button>
-                <span>{Math.round(zoom * 100)}%</span>
-                <button
-                  title="Phóng to"
-                  onClick={() => setZoom((z) => Math.min(1.75, z + 0.15))}
-                >
-                  <Plus size={14} />
-                </button>
-                <button title="Vừa khung" onClick={fit}>
-                  <Maximize size={14} />
-                </button>
-                <button title="Tới node đang đọc" onClick={centerNode}>
-                  <GitBranch size={14} />
-                </button>
-              </div>
-            </div>
+              statusOf={statusOf}
+              api={api}
+              base={base}
+              expanded={graphExpanded}
+              onExpand={() => setGraphExpanded((v) => !v)}
+            />
           </div>
           <div className="research-reader">
             <div className="research-breadcrumb">

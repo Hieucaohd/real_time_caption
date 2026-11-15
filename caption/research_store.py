@@ -56,6 +56,12 @@ class ResearchStore:
                     filename TEXT NOT NULL,
                     PRIMARY KEY(node_id, position)
                 );
+                CREATE TABLE IF NOT EXISTS research_graph_layouts (
+                    root_id TEXT PRIMARY KEY REFERENCES research_nodes(id) ON DELETE CASCADE,
+                    state TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                );
             ''')
             owners = db.execute("SELECT DISTINCT owner_pid FROM research_nodes WHERE status='working'").fetchall()
             for owner in owners:
@@ -63,6 +69,37 @@ class ResearchStore:
                     db.execute("UPDATE research_nodes SET status='interrupted', detail=? WHERE status='working' AND owner_pid=?",
                                ('Server stopped before completion. Retry manually to avoid sending twice.', owner['owner_pid']))
         self.archive_legacy_attachments()
+
+    def graph_layout(self, cid, rid):
+        root = self.get(cid, rid)
+        if root['parent_id'] is not None:
+            raise ValueError('Layout belongs to the root of a research tree.')
+        with self.conversations._connect() as db:
+            row = db.execute('SELECT * FROM research_graph_layouts WHERE root_id=?', (rid,)).fetchone()
+        defaults = dict(positions={}, camera=None, collapsed=[], snap=True, wheel_zoom=True, mode='select', move_subtree=False)
+        return {**defaults, **(json.loads(row['state']) if row else {}), 'revision': row['revision'] if row else 0}
+
+    def save_graph_layout(self, cid, rid, changes):
+        # Merge only the moved nodes, so another tab's unrelated positions survive.
+        with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            root = db.execute('SELECT parent_id FROM research_nodes WHERE id=? AND conversation_id=?', (rid, cid)).fetchone()
+            if root is None:
+                raise KeyError('Research tree not found')
+            if root['parent_id'] is not None:
+                raise ValueError('Layout belongs to the root of a research tree.')
+            ids = {row['id'] for row in db.execute('SELECT id FROM research_nodes WHERE conversation_id=? AND root_id=?', (cid, rid))}
+            if not set(changes.get('positions', {})) <= ids or not set(changes.get('collapsed', [])) <= ids:
+                raise ValueError('Layout contains nodes outside this research tree.')
+            row = db.execute('SELECT state FROM research_graph_layouts WHERE root_id=?', (rid,)).fetchone()
+            state = json.loads(row['state']) if row else {}
+            if 'positions' in changes:
+                state['positions'] = {**state.get('positions', {}), **changes['positions']}
+            state.update({key: value for key, value in changes.items() if key != 'positions'})
+            db.execute('''INSERT INTO research_graph_layouts(root_id, state, revision, updated_at) VALUES (?, ?, 1, ?)
+                ON CONFLICT(root_id) DO UPDATE SET state=excluded.state, revision=revision+1, updated_at=excluded.updated_at''',
+                (rid, json.dumps(state, ensure_ascii=False), now()))
+        return self.graph_layout(cid, rid)
 
     @staticmethod
     def _archive_assets(db, nid, request, known):
