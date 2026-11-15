@@ -47,6 +47,17 @@ class TabComparisonTests(unittest.TestCase):
         after = {str(i): {'page': object(), 'url': 'https://chatgpt.com/c/created'} for i in range(2)}
         self.assertIsNone(chatgpt_branch._new_branch_tab({}, {}, after, object(), 'created'))
 
+    def test_local_route_must_belong_to_confirmed_response_page(self):
+        helper, other = object(), object()
+        before_click = {'helper': {'page': helper, 'url': 'https://chatgpt.com/c/source'}}
+        after = {'helper': {'page': helper, 'url': 'https://chatgpt.com/g/project/c/local-chatgpt%3Adraft-id'},
+                 'other': {'page': other, 'url': 'https://chatgpt.com/c/local-chatgpt%3Aunrelated'}}
+        self.assertIs(chatgpt_branch._new_branch_tab({}, before_click, after, helper, 'server-id', helper), helper)
+        self.assertIs(chatgpt_branch._new_branch_tab({}, before_click, after, helper, None, helper), helper)
+        self.assertIsNone(chatgpt_branch._new_branch_tab({}, before_click, after, helper, None))
+        # An existing tab can never be promoted to the newly created branch.
+        self.assertIsNone(chatgpt_branch._new_branch_tab(before_click, before_click, after, helper, None, helper))
+
 
 SOURCE_HTML = '''<title>Source</title><form><div id="prompt-textarea" contenteditable="true"></div></form>
 <div id="scroll" style="height:300px;overflow:auto;position:relative" data-app-action-timeline-scroll>
@@ -77,7 +88,11 @@ function openMenu(id){
 }
 async function branch(id){const r=await fetch('/backend-api/conversation/new_branch',{
   method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:'source',message_id:id})});
-  if(r.ok){const data=await r.json();location.href='/g/project/c/'+data.conversation.conversation_id;}}
+  if(r.ok){const data=await r.json();
+    const destination=window.localBranch?'local-chatgpt%3Adraft-id':data.conversation.conversation_id;
+    if(window.discardBranchBody){location.href='/g/project/c/'+destination;}
+    else {history.pushState({},'', '/g/project/c/'+destination);document.title='Branch';}
+  }}
 </script>'''
 
 
@@ -97,6 +112,7 @@ class NativeBranchUITests(unittest.TestCase):
         self.context = self.browser.new_context()
         self.requests, self.visits = [], []
         self.reject = self.same_tab = self.direct_menu = False
+        self.local_branch = self.discard_body = self.source_id_response = False
         self.context.route('**/*', self.serve)
         self.original = self.context.new_page()
         self.original.goto('https://chatgpt.com/g/project/c/source')
@@ -113,13 +129,13 @@ class NativeBranchUITests(unittest.TestCase):
             route.fulfill(json={'mapping': conversation_mapping(), 'current_node': 'a4'})
         elif path == '/backend-api/conversation/new_branch':
             self.requests.append(route.request.post_data_json)
-            route.fulfill(status=403 if self.reject else 200, json={'conversation': {'conversation_id': 'created'}})
+            route.fulfill(status=403 if self.reject else 200, json={'conversation': {'conversation_id': 'source' if self.source_id_response else 'created'}})
         elif path.startswith('/native-ui-branch?'):
             self.visits.append(path)
             route.fulfill(content_type='text/html', body=SOURCE_HTML + '<script>branch(new URL(location).searchParams.get("message"));</script>')
         elif path == '/g/project/c/source':
-            route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};</script>')
-        elif path in ('/g/project/c/created', '/c/unrelated'):
+            route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};window.localBranch={str(self.local_branch).lower()};window.discardBranchBody={str(self.discard_body).lower()};</script>')
+        elif path in ('/g/project/c/created', '/g/project/c/local-chatgpt%3Adraft-id', '/c/unrelated'):
             self.visits.append(path)
             route.fulfill(content_type='text/html', body='<title>Duplicate title</title><form><div id="prompt-textarea" contenteditable="true"></div></form>')
         else:
@@ -152,6 +168,21 @@ class NativeBranchUITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.original.url, 'https://chatgpt.com/g/project/c/source')
         self.assertGreater(len(self.context.pages), 1)  # Keep tabs available for inspection.
+
+    def test_native_local_branch_is_selected_without_waiting_for_server_url(self):
+        self.same_tab = self.local_branch = True
+        result = chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2)
+        self.assertEqual(result['url'], 'https://chatgpt.com/g/project/c/local-chatgpt%3Adraft-id')
+        self.assertEqual(len(self.requests), 1)
+        selected, _ = chatgpt._selected_chatgpt_tab(self.browser, result['key'])
+        self.assertEqual(selected.url, result['url'])
+
+    def test_local_branch_survives_lost_response_body_and_source_server_id(self):
+        self.same_tab = self.local_branch = self.source_id_response = True
+        self.discard_body = True
+        result = chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2)
+        self.assertIn('/c/local-chatgpt%3A', result['url'])
+        self.assertEqual(len(self.requests), 1)
 
     def test_invalid_ordinal_does_not_click_any_response(self):
         with self.assertRaises(ValueError):

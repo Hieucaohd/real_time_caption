@@ -1,15 +1,17 @@
 """Branch a saved response through ChatGPT's UI and identify the new Chrome tab."""
 import re
+import logging
 import time
 import uuid
 from dataclasses import asdict
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from . import chatgpt
 from .chatgpt_source import CONVERSATION_SNAPSHOT, conversation_path, response_message_at_position
 
 CHATGPT_HOSTS = ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com')
 BRANCH_TIMEOUT = 45
+log = logging.getLogger(__name__)
 
 
 def _tab_snapshot(browser):
@@ -83,13 +85,21 @@ def _branch_menu_item(page, turn):
     return final
 
 
-def _new_branch_tab(before, before_click, after, helper, conversation_id):
+def _new_branch_tab(before, before_click, after, helper, conversation_id, confirmed_page=None):
     candidates = []
     for target_id, tab in after.items():
         if target_id in before or (target_id in before_click and tab['page'] != helper):
             continue
         match = re.search(r'/c/([^/]+)/?$', urlsplit(tab['url']).path)
-        if match and match[1] == conversation_id:
+        if not match:
+            continue
+        route_id = unquote(match[1])
+        remote_match = bool(conversation_id) and route_id == conversation_id
+        # Native branches can stay on a local-chatgpt: route until the next user message.
+        # Accept that route only on the page receiving the successful, exact-source branch request.
+        local_match = (tab['page'] == confirmed_page
+                       and re.fullmatch(r'local-chatgpt:[A-Za-z0-9_-]+', route_id) is not None)
+        if remote_match or local_match:
             candidates.append(tab['page'])
     return candidates[0] if len(candidates) == 1 else None
 
@@ -153,7 +163,9 @@ def _branch_in_browser(browser, url, position):
             # only the page that received this exact successful branch response may identify the result.
             new_id = None
         if new_id == source_id:
-            raise chatgpt.ChatGPTError('ChatGPT chưa trả về hội thoại nhánh mới.')
+            # A branch draft may still carry the source server ID. Its confirmed local route
+            # identifies the draft; the unchanged source tab must never be selected.
+            new_id = None
         target = None
         while time.monotonic() < deadline:
             after = _tab_snapshot(browser)
@@ -161,7 +173,7 @@ def _branch_in_browser(browser, url, position):
                 match = re.search(r'/c/([A-Za-z0-9_-]+)/?$', urlsplit(response_page.url).path)
                 if match and match[1] != source_id and any(tab['page'] == response_page for tab in after.values()):
                     new_id = match[1]
-            target = _new_branch_tab(before, before_click, after, page, new_id) if new_id else None
+            target = _new_branch_tab(before, before_click, after, page, new_id, response_page)
             if target:
                 break
             page.wait_for_timeout(100)
@@ -185,6 +197,7 @@ def _branch_in_browser(browser, url, position):
                 raise
             raise chatgpt.ChatGPTError('Không đọc được hội thoại nguồn. Kiểm tra link và đăng nhập ChatGPT trên Chrome 9222.') from exc
         # Do not click again automatically: a delayed result could create a duplicate.
+        log.warning('Could not confirm the ChatGPT branch tab after the UI click', exc_info=True)
         raise chatgpt.ChatGPTError('Chưa xác nhận được nhánh ChatGPT đã sẵn sàng. Tab mới vẫn mở; hãy kiểm tra tab đó và Refresh danh sách tab trước khi thử lại.') from exc
     finally:
         if listener:

@@ -44,6 +44,8 @@ Trong hộp **Tạo nhánh con**, bấm **Tạo nhánh ChatGPT** để mở link
 
 Mở **Nguồn ChatGPT → Cập nhật nguồn** để nhập đúng hai trường: **Link cuộc hội thoại ChatGPT** (giữ nguyên link đầy đủ, kể cả Project, query và fragment) và **Số thứ tự câu trả lời** (1, 2, 3… tính từ đầu cuộc hội thoại, chỉ đếm câu trả lời ChatGPT, không đếm tin nhắn người dùng). Bấm **Lưu nguồn** để lưu vào SQLite. Có thể để trống trường chưa biết hoặc sửa lại thông tin đã nhập. Chat và node gốc nhập từ chính response đó đồng bộ hai chiều, còn node con giữ nguồn riêng.
 
+Tab nhánh mới có thể dùng đường dẫn tạm `local-chatgpt:…`. App vẫn tự chọn tab đó khi nó thuộc chính trang nhận xác nhận tạo nhánh thành công; không cần chờ link đổi sang mã hội thoại trên server hoặc gửi thêm câu hỏi.
+
 Mỗi câu trả lời mới trong Chat và nghiên cứu lưu `response_conversation_url` và `response_position` cùng nội dung. App đọc lịch sử đầy đủ qua tab ChatGPT đã đăng nhập rồi đếm theo nhánh hội thoại dẫn đến response được Copy, bỏ qua suy luận, thao tác công cụ, tin nhắn ẩn và phiên bản trả lời khác. Không đếm số phần tử DOM đang hiển thị vì ChatGPT có thể chỉ dựng một phần lịch sử. Nếu không truy xuất được lịch sử hoặc không xác định chắc chắn thứ tự, vị trí để trống cho người dùng bổ sung. Các cột Message ID/Turn ID cũ được giữ nội bộ để tương thích dữ liệu; giao diện chỉ hiển thị link và số thứ tự, không chuyển mã định danh thành số thứ tự phỏng đoán.
 
 Trong **Settings → Giao diện web → Chế độ hiển thị**, chọn **Sáng** hoặc **Tối** rồi bấm **Save settings**. Lựa chọn lưu vào bảng `web_preferences` trong SQLite và áp dụng cho toàn bộ web app, gồm Chat, nghiên cứu, công thức, code và các hộp thoại. Trình duyệt nhớ tạm lựa chọn để tránh chớp nền sáng khi tải lại; database là nguồn cài đặt chính.
