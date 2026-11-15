@@ -40,6 +40,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Mỗi câu trả lời mới trong Chat và nghiên cứu lưu nguồn ChatGPT cùng nội dung trong SQLite: `response_conversation_url` (link hội thoại, kể cả hội thoại trong Project), `response_message_id` (mã assistant response) và `response_turn_id` (mã lượt chứa câu trả lời được Copy). Mở **Nguồn ChatGPT** để xem link và vị trí. Node gốc nhập từ Chat giữ nguyên nguồn; từng nhánh con lưu nguồn riêng. Dùng mã định danh thay vì đếm phần tử đang tải trong trang, vì ChatGPT có thể chỉ dựng một phần lịch sử. Link mở cuộc hội thoại; Message ID/Turn ID ghi lại vị trí của response. Câu trả lời cũ hoặc trang không cung cấp đủ metadata sẽ hiện thông tin còn thiếu; app không đoán nguồn từ tab đang mở.
+
 Trong **Settings → Giao diện web → Chế độ hiển thị**, chọn **Sáng** hoặc **Tối** rồi bấm **Save settings**. Lựa chọn lưu vào bảng `web_preferences` trong SQLite và áp dụng cho toàn bộ web app, gồm Chat, nghiên cứu, công thức, code và các hộp thoại. Trình duyệt nhớ tạm lựa chọn để tránh chớp nền sáng khi tải lại; database là nguồn cài đặt chính.
 
 Để nhớ chỗ đã đọc, bôi đen một đoạn trong câu trả lời rồi bấm **Đánh dấu** (hoặc chuột phải → **Đánh dấu đã đọc tới đây**). Đoạn đó được tô vàng và lưu vào SQLite riêng cho node, vẫn còn khi chuyển qua node con rồi quay lại hoặc tải lại trang. Mỗi node có một dấu đọc; đánh dấu đoạn mới thay thế đoạn cũ. **Tới dấu** cuộn đến đoạn đã tô, **Bỏ dấu** xóa dấu. Không tự theo dõi vị trí cuộn và không thay đổi Markdown gốc.

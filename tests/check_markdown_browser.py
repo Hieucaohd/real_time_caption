@@ -71,7 +71,9 @@ def main():
     fixture = WebApiTests(); fixture.setUp()
     fixture.service.busy = True
     fixture.service.store.add_message(fixture.cid, 'user', 'You', 'Giải thích khái niệm')
-    mid = fixture.service.store.add_message(fixture.cid, 'bot', 'ChatGPT', ANSWER)
+    mid = fixture.service.store.add_message(fixture.cid, 'bot', 'ChatGPT', ANSWER,
+        response_conversation_url='https://chatgpt.com/g/project/c/source-conversation',
+        response_turn_id='source-turn', response_message_id='source-response')
     fixture.service.research.store.import_answer(fixture.cid, mid)
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
@@ -92,6 +94,12 @@ def main():
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
             md = page.locator('.message.bot .response-markdown')
+            source = page.locator('.message.bot .response-source')
+            source.locator('summary').click()
+            expect(source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/g/project/c/source-conversation')
+            expect(source).to_contain_text('source-response')
+            expect(source).to_contain_text('source-turn')
+            source.locator('summary').click()
             expect(md.locator('.katex-display')).to_have_count(8)
             assert md.locator('.katex:not(.katex-display)').count() >= 10
             expect(md.locator('.katex-error')).to_have_count(0)
@@ -121,6 +129,11 @@ def main():
             page.screenshot(path='cache/markdown-chat.png')
             page.locator('nav button').nth(2).click()
             branch = page.locator('.research-answer .response-markdown')
+            branch_source = page.locator('.research-reader .response-source')
+            branch_source.locator('summary').click()
+            expect(branch_source).to_contain_text('source-response')
+            expect(branch_source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/g/project/c/source-conversation')
+            branch_source.locator('summary').click()
             expect(branch.locator('.katex-display')).to_have_count(8)
             expect(branch.locator('.katex-error')).to_have_count(0)
             expect(branch.locator('.katex [style*="color"]')).to_have_count(0)

@@ -159,17 +159,19 @@ class Research:
                     pass
                 attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
                 response_tab = {}
+                response_source = {}
                 result = chatgpt.ask(request['prompt'], attachments,
                     lambda text: progress(detail=text),
                     new_chat=config.get('new_chat', False), selected_tab=config['selected_tab'], tab_name='rtc-research',
                     power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
                     on_partial=lambda text: progress(partial=text),
-                    on_response_tab=lambda title: response_tab.update(title=title))
+                    on_response_tab=lambda title: response_tab.update(title=title),
+                    on_response_source=response_source.update)
                 with self.service.lock:
                     if cancel.is_set():
                         raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
                     saved = finish(status='done', answer=result, partial='', detail='Completed',
-                                   response_tab_title=response_tab.get('title', ''))
+                                   response_tab_title=response_tab.get('title', ''), **response_source)
                     self.service.update_job(job, status='done' if saved else 'cancelled', partial='',
                                             detail='Completed' if saved else 'Node đã bị xóa.')
         except BusyError:

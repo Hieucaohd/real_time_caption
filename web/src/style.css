@@ -8,6 +8,18 @@
   --line: #e4e9e6;
   --muted: #7c8782;
 }
+.response-source {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.response-source summary { cursor: pointer; width: fit-content; }
+.response-source > a { display: block; margin-top: 8px; }
+.response-source dl { margin: 8px 0; }
+.response-source dt { font-weight: 600; margin-top: 6px; }
+.response-source dd { margin: 2px 0; font-family: ui-monospace, monospace; }
+.response-source p { margin: 8px 0; }
 * {
   box-sizing: border-box;
 }

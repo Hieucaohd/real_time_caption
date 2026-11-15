@@ -71,6 +71,9 @@ class ResearchStore:
             columns = {row['name'] for row in db.execute('PRAGMA table_info(research_nodes)')}
             for name, definition in (('hidden', 'INTEGER NOT NULL DEFAULT 0'),
                                      ('response_tab_title', "TEXT NOT NULL DEFAULT ''"),
+                                     ('response_conversation_url', "TEXT NOT NULL DEFAULT ''"),
+                                     ('response_turn_id', "TEXT NOT NULL DEFAULT ''"),
+                                     ('response_message_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('reading_mark', 'TEXT')):
                 if name not in columns:
                     db.execute(f'ALTER TABLE research_nodes ADD COLUMN {name} {definition}')
@@ -209,9 +212,11 @@ class ResearchStore:
         nid, stamp = uuid.uuid4().hex, now()
         with self.conversations._connect() as db:
             db.execute('''INSERT OR IGNORE INTO research_nodes
-                (id, conversation_id, root_id, source_message_id, title, question, answer, status, created_at, updated_at, response_tab_title)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?)''',
-                (nid, cid, nid, mid, question.strip().splitlines()[0][:100], question, source.content, stamp, stamp, source.response_tab_title))
+                (id, conversation_id, root_id, source_message_id, title, question, answer, status, created_at, updated_at, response_tab_title,
+                 response_conversation_url, response_turn_id, response_message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?)''',
+                (nid, cid, nid, mid, question.strip().splitlines()[0][:100], question, source.content, stamp, stamp, source.response_tab_title,
+                 source.response_conversation_url, source.response_turn_id, source.response_message_id))
             return self.row(db.execute('SELECT * FROM research_nodes WHERE source_message_id=?', (mid,)).fetchone())
 
     def ancestry(self, cid, nid):
@@ -312,7 +317,8 @@ class ResearchStore:
                               (os.getpid(), nid, cid)).rowcount == 1
 
     def update(self, cid, nid, **values):
-        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title', 'reading_mark'}
+        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title', 'reading_mark',
+                   'response_conversation_url', 'response_turn_id', 'response_message_id'}
         if not values or not values.keys() <= allowed:
             raise ValueError('Invalid node update')
         for key in ('config', 'request', 'reading_mark'):

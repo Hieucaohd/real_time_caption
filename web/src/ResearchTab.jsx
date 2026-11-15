@@ -19,6 +19,7 @@ import {
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
+import ResponseSource from "./ResponseSource";
 import { selectedReadingMark, readingMarkRange } from "./readingMark";
 
 const labels = {
@@ -487,6 +488,7 @@ export default function ResearchTab({
                   <p className="research-response-tab" title={reading.response_tab_title || ""}>
                     Tab ChatGPT trả lời: <strong>{reading.response_tab_title || "Chưa có tên tab được lưu"}</strong>
                   </p>
+                  <ResponseSource response={reading} />
                   <div className="research-question">
                     <small>CÂU HỎI</small>
                     <h3>{reading.question}</h3>

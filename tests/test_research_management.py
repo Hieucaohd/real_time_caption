@@ -104,12 +104,19 @@ class ResearchManagementTests(unittest.TestCase):
     def test_response_tab_title_comes_from_completed_response_and_survives_restart(self):
         def answer(*args, **kwargs):
             kwargs['on_response_tab']('Renamed after response')
+            kwargs['on_response_source'](dict(response_conversation_url='https://chatgpt.com/c/branch',
+                                             response_turn_id='branch-turn', response_message_id='branch-message'))
             return 'Answer'
         with patch('web_api.research.chatgpt.ask', side_effect=answer):
             node = self.child()[0]
             done = self.wait_nodes([node])[0]
         self.assertEqual(done['response_tab_title'], 'Renamed after response')
         self.assertEqual(ResearchStore(self.service.store).get(self.cid, node['id'])['response_tab_title'], 'Renamed after response')
+        reopened = ResearchStore(self.service.store).get(self.cid, node['id'])
+        for key, expected in dict(response_conversation_url='https://chatgpt.com/c/branch',
+                                  response_turn_id='branch-turn', response_message_id='branch-message').items():
+            self.assertEqual(done[key], expected)
+            self.assertEqual(reopened[key], expected)
 
     def test_root_import_preserves_chat_response_tab_title(self):
         mid = self.service.store.add_message(self.cid, 'bot', 'ChatGPT', 'Another answer', response_tab_title='Original Chat tab')
@@ -122,11 +129,16 @@ class ResearchManagementTests(unittest.TestCase):
         with self.service.store._connect() as db:
             db.execute('ALTER TABLE research_nodes DROP COLUMN hidden')
             db.execute('ALTER TABLE research_nodes DROP COLUMN response_tab_title')
+            for name in ('response_conversation_url', 'response_turn_id', 'response_message_id'):
+                db.execute(f'ALTER TABLE research_nodes DROP COLUMN {name}')
         reopened = ResearchStore(self.service.store)
         node = reopened.get(self.cid, self.root_node['id'])
         self.assertEqual(node['answer'], self.root_node['answer'])
         self.assertFalse(node['hidden'])
         self.assertEqual(node['response_tab_title'], '')
+        self.assertEqual(node['response_conversation_url'], '')
+        self.assertEqual(node['response_turn_id'], '')
+        self.assertEqual(node['response_message_id'], '')
 
 
 if __name__ == '__main__':

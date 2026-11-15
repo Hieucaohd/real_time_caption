@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import Md from "./MarkdownResponse";
 import ResearchTab from "./ResearchTab";
+import ResponseSource from "./ResponseSource";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import {
@@ -915,6 +916,7 @@ function App() {
                           <p className="user-text">{m.content}</p>
                         )}
                         <Attachments message={m} cid={cid} />
+                        {m.role === "bot" && <ResponseSource response={m} />}
                         {m.role === "bot" && answerActions(m)}
                         {m.role === "user" && (
                           <Button onClick={() => setMessage(m.content)}>

@@ -13,13 +13,19 @@ class ReadAnswerTests(unittest.TestCase):
         reads = iter([[], [], [{"k": "text/plain", "t": markdown}]])
         page.title.return_value = 'Title at response completion'
         on_tab = Mock()
+        on_source = Mock()
+        page.locator.return_value.first.evaluate.return_value = {
+            'url': 'https://chatgpt.com/c/conversation-one?tracking=x#old', 'message_id': 'response-one',
+        }
         page.evaluate.side_effect = lambda script: (
             next(reads) if script == chatgpt.COPY_READ else
             True if script == chatgpt.COPY_HOOK else []
         )
         with patch.object(chatgpt.time, "sleep"):
-            self.assertEqual(chatgpt._read_answer(page, "answer", on_tab), markdown)
+            self.assertEqual(chatgpt._read_answer(page, "answer", on_tab, on_source), markdown)
         on_tab.assert_called_once_with('Title at response completion')
+        on_source.assert_called_once_with({'response_conversation_url': 'https://chatgpt.com/c/conversation-one',
+                                          'response_turn_id': 'answer', 'response_message_id': 'response-one'})
         page.evaluate.assert_called_with(chatgpt.COPY_UNHOOK)
 
     def test_copy_failure_does_not_save_flattened_math(self):
@@ -147,6 +153,34 @@ class ClipboardBrowserTests(unittest.TestCase):
         }""")
         self.assertEqual(chatgpt._read_answer(self.page, "answer"), "**Answer**")
         self.assert_restored()
+
+    def test_source_uses_exact_response_in_virtualized_project_conversation(self):
+        url = 'https://chatgpt.com/g/project/c/conversation-one'
+        self.page.route(url, lambda route: route.fulfill(content_type='text/html', body='''
+            <div data-turn-key="unrelated"><div data-message-author-role="assistant" data-message-id="wrong-response">Other</div></div>
+            <div data-turn-key="chosen-turn">
+              <div data-message-author-role="user" data-message-id="user-message">Question</div>
+              <div data-content-search-unit-key="fallback-turn-98:2:assistant"
+                   data-chatgpt-search-message-ids="chosen-response chosen-response">Answer</div>
+              <button data-testid="copy-turn-action-button" onclick="navigator.clipboard.writeText('Chosen answer')">Copy</button>
+            </div>'''))
+        self.page.goto(url)
+        source = {}
+        answer = chatgpt._read_answer(self.page, 'chosen-turn', on_response_source=source.update)
+        self.assertEqual(answer, 'Chosen answer')
+        self.assertEqual(source, dict(response_conversation_url=url, response_turn_id='chosen-turn', response_message_id='chosen-response'))
+        # The source is a frozen snapshot, not a reference to the tab's future URL.
+        self.page.evaluate("history.replaceState({}, '', '/c/a-different-conversation')")
+        self.assertEqual(source['response_conversation_url'], url)
+        self.page.locator('[data-content-search-unit-key]').evaluate("el=>{el.removeAttribute('data-chatgpt-search-message-ids');el.setAttribute('data-message-author-role','assistant');el.setAttribute('data-message-id','legacy-response')}")
+        legacy = chatgpt._response_source(self.page.locator('[data-turn-key="chosen-turn"]'), 'chosen-turn')
+        self.assertEqual(legacy['response_message_id'], 'legacy-response')
+
+    def test_source_never_makes_a_conversation_url_from_an_unrelated_page(self):
+        source = chatgpt._response_source(self.page.locator('[data-turn-key="answer"]'), 'answer')
+        self.assertEqual(source['response_conversation_url'], '')
+        self.assertEqual(source['response_turn_id'], 'answer')
+        self.assertEqual(source['response_message_id'], '')
 
 
 if __name__ == "__main__":

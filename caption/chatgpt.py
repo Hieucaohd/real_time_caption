@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit, urlunsplit
 
 log = logging.getLogger(__name__)
 
@@ -570,9 +571,33 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
         time.sleep(0.4)
 
 
-def _read_answer(page, turn_id: str, on_response_tab=None) -> str:
+def _response_source(turn, turn_id: str) -> dict[str, str]:
+    """Read the exact copied turn, never infer an absolute index from a virtualized DOM."""
+    source = dict(response_conversation_url='', response_turn_id=turn_id, response_message_id='')
+    try:
+        value = turn.evaluate('''turn => {
+            const explicit = [...turn.querySelectorAll('[data-message-author-role="assistant"][data-message-id]')];
+            const units = [...turn.querySelectorAll('[data-content-search-unit-key$=":assistant"], [data-chatgpt-search-unit-key$=":assistant"]')];
+            const final = explicit.at(-1);
+            const unit = units.at(-1);
+            const ids = (unit?.getAttribute('data-chatgpt-search-message-ids') || '').trim().split(/\\s+/).filter(Boolean);
+            return {url: turn.ownerDocument.location.href,
+                message_id: final?.getAttribute('data-message-id') || ids.at(-1) || ''};
+        }''')
+        url = urlsplit(value['url'])
+        if url.scheme == 'https' and url.hostname in ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com') and re.search(r'/c/[^/]+/?$', url.path):
+            source['response_conversation_url'] = urlunsplit((url.scheme, url.netloc, url.path.rstrip('/'), '', ''))
+        source['response_message_id'] = value.get('message_id', '')
+    except Exception:
+        # Keep the copied answer even if the page disappears; never attach another turn's URL.
+        log.warning('Could not read ChatGPT response source', exc_info=True)
+    return source
+
+
+def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=None) -> str:
     """Read copied Markdown, never save flattened DOM text as a formatted answer."""
     turn = _turn_locator(page, turn_id)
+    source = _response_source(turn, turn_id) if on_response_source else None
     copy_button = turn.locator(REPLY_COPY_BUTTON).first
     try:
         turn.scroll_into_view_if_needed(timeout=5000)
@@ -614,6 +639,8 @@ def _read_answer(page, turn_id: str, on_response_tab=None) -> str:
                         log.warning('Could not read response tab title', exc_info=True)
                         title = ''
                     on_response_tab(title)
+                if on_response_source:
+                    on_response_source(source)
                 return clean_answer(item["t"])
     raise ChatGPTError(
         "ChatGPT answered, but its Markdown could not be copied. "
@@ -648,6 +675,7 @@ def ask(
     selected_tab: str | None = None,
     on_partial: Callable[[str], None] | None = None,
     on_response_tab: Callable[[str], None] | None = None,
+    on_response_source: Callable[[dict[str, str]], None] | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
@@ -758,4 +786,4 @@ def ask(
             ) from exc
         _wait_stable(page, turn_id, 60, cancel_event)
         on_status("Reading the answer…")
-        return _read_answer(page, turn_id, on_response_tab)
+        return _read_answer(page, turn_id, on_response_tab, on_response_source)
