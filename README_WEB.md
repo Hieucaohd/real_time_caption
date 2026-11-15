@@ -38,7 +38,9 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 Kéo nền để di chuyển cây; dùng +/−, vừa khung và thu gọn nhánh để điều hướng. Mỗi node có trạng thái chờ/đang trả lời/lỗi và checkbox **Đã hiểu**. Có thể đổi tên node mà không đổi câu hỏi. Tìm kiếm tìm theo câu hỏi hoặc đoạn trích.
 
-Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`; giao diện cây hiện có ở bản web. Đóng tab không hủy hàng đợi. Sau restart, các node chưa bắt đầu tiếp tục chạy; node bị ngắt khi đang gửi phải **Thử lại** thủ công để tránh gửi trùng. Hủy một node không hủy nhánh khác. Lỗi không tự gửi lại. Khi native app đang dùng ChatGPT, hàng đợi nghiên cứu chờ khóa được nhả.
+Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`: câu hỏi, câu trả lời, đoạn trích, quan hệ cha–con, tùy chỉnh từng node, yêu cầu đã chuẩn bị, trạng thái, tên node và dấu “Đã hiểu”. Nội dung đang stream và tiến độ được ghi vào database theo mỗi cập nhật nhận được, để còn đọc được phần đã nhận khi server bị ngắt. File/ảnh, bản chụp transcript và ngữ cảnh dài được lưu dạng BLOB trong `research_assets`, liên kết qua `research_node_assets`; các file cache chỉ là bản tạm để upload và tự dựng lại từ database. Node và file đính kèm được ghi trong cùng một transaction; các nhánh dùng cùng file không lưu lặp nội dung file.
+
+Giao diện cây hiện có ở bản web. Đóng tab không hủy hàng đợi. Sau restart, các node chưa bắt đầu tiếp tục chạy; node bị ngắt khi đang gửi phải **Thử lại** thủ công để tránh gửi trùng. Hủy một node không hủy nhánh khác. Lỗi không tự gửi lại. Khi native app đang dùng ChatGPT, hàng đợi nghiên cứu chờ khóa được nhả. Khi nâng cấp, snapshot của nhánh cũ được nhập vào database nếu file cũ còn tồn tại.
 
 ## Dữ liệu và đồng bộ
 
@@ -46,7 +48,7 @@ Web sử dụng trực tiếp `conversations.sqlite3`, `transcripts/conversation
 
 Hai app có thể cùng mở. Web cập nhật dữ liệu mỗi giây; desktop cập nhật dữ liệu bên ngoài khoảng mỗi hai giây. Khởi động lại native app sau khi cập nhật code để nhận đồng bộ và khóa liên tiến trình mới. Mỗi thời điểm chỉ một giao diện được ghi transcript; pause ở giao diện đang ghi trước khi chuyển sang giao diện kia. Rename bị chặn trong lúc capture/ChatGPT đang sử dụng file. ChatGPT request cũng được khóa giữa desktop và web để tránh thao tác cùng tab đồng thời.
 
-Settings chỉ ghi những trường thay đổi kể từ lúc tải, dưới khóa file và bằng thay thế nguyên tử. Mỗi tác vụ dịch có PID chủ sở hữu để mở thêm giao diện không hủy nhầm tác vụ còn chạy. Lịch sử đã lưu tồn tại sau restart; trạng thái Cancel/Retry của Chat/Summary web nằm trong bộ nhớ server. Riêng nghiên cứu lưu cả trạng thái/yêu cầu vào SQLite, cùng các file snapshot trong `cache/research/`; giữ thư mục này để tiếp tục hàng đợi và Retry sau restart.
+Settings chỉ ghi những trường thay đổi kể từ lúc tải, dưới khóa file và bằng thay thế nguyên tử. Mỗi tác vụ dịch có PID chủ sở hữu để mở thêm giao diện không hủy nhầm tác vụ còn chạy. Lịch sử đã lưu tồn tại sau restart; trạng thái Cancel/Retry của Chat/Summary web nằm trong bộ nhớ server. Riêng nghiên cứu lưu cả trạng thái/yêu cầu và nội dung file vào SQLite, không cần giữ cache để tiếp tục hàng đợi hoặc Retry. Cài đặt mặc định chung của ứng dụng vẫn dùng `settings.json`; từng node giữ bản tùy chỉnh của chính nó trong database.
 
 ## Phát triển và kiểm tra
 

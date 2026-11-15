@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import threading
 import time
 import unittest
@@ -68,6 +70,7 @@ class ResearchTests(unittest.TestCase):
             self.assertTrue(started.wait(3))
             detail = self.client.get(self.base + '/' + first[0]['id']).json()
             self.assertEqual(detail['partial'], 'Working answer')
+            self.assertEqual(self.store.get(self.cid, first[0]['id'])['partial'], 'Working answer')
             rest = self.child(questions=['Branch question B', 'Branch question C', 'Branch question D'])
             self.assertEqual([n['status'] for n in rest], ['queued'] * 3)
             release.set()
@@ -184,6 +187,69 @@ class ResearchTests(unittest.TestCase):
         self.assertLess(len(request['prompt']),3000)
         context=json.loads(Path(request['attachments'][0]).read_text(encoding='utf-8'))
         self.assertEqual(context[0]['answer'],text)
+
+    def test_database_restores_attachments_after_cache_files_are_lost(self):
+        from pathlib import Path
+        self.service.busy=True
+        upload=self.client.post(f'/api/conversations/{self.cid}/files',headers=self.headers,
+                               files={'file':('notes.txt',b'Database owns this content')}).json()
+        nodes=self.child(questions=['First branch','Second branch'],files=[upload['path']])
+        cached=Path(self.store.get(self.cid,nodes[0]['id'],private=True)['request']['attachments'][0])
+        cached.unlink()
+        self.service.file_path(self.cid,upload['path']).unlink()
+        with self.service.store._connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM research_assets').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT count(*) FROM research_node_assets').fetchone()[0],2)
+        def answer(prompt,files,*args,**kwargs):
+            self.assertEqual(files[0].read_bytes(),b'Database owns this content')
+            self.assertNotEqual(files[0],cached)
+            return 'Restored answer'
+        with patch('web_api.research.chatgpt.ask',side_effect=answer):
+            self.service.busy=False
+            self.wait_nodes(nodes)
+
+    def test_stream_progress_survives_new_process_and_recovery(self):
+        self.service.busy=True
+        node=self.child(excerpt='Selected text')[0]
+        self.assertTrue(self.store.claim(self.cid,node['id']))
+        self.store.progress(self.cid,node['id'],partial='Durable partial answer',detail='Still generating')
+        script="import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row; print(json.dumps(dict(c.execute('SELECT * FROM research_nodes WHERE id=?',(sys.argv[2],)).fetchone())))"
+        result=subprocess.run([sys.executable,'-c',script,str(self.service.store.db_path),node['id']],capture_output=True,text=True,check=True)
+        persisted=json.loads(result.stdout)
+        self.assertEqual(persisted['partial'],'Durable partial answer')
+        self.assertEqual(persisted['excerpt'],'Selected text')
+        self.assertEqual(json.loads(persisted['config'])['power'],2)
+        with patch('caption.research_store.process_alive',return_value=False):
+            recovered=ResearchStore(self.service.store)
+        saved=recovered.get(self.cid,node['id'])
+        self.assertEqual(saved['status'],'interrupted')
+        self.assertEqual(saved['partial'],'Durable partial answer')
+
+    def test_legacy_attachment_paths_are_backfilled_into_database(self):
+        from pathlib import Path
+        self.service.busy=True
+        node=self.child()[0]
+        path=self.root/'legacy.txt';path.write_bytes(b'Legacy snapshot')
+        with self.service.store._connect() as db:
+            db.execute('UPDATE research_nodes SET request=? WHERE id=?',
+                       (json.dumps({'prompt':'Old prompt','attachments':[str(path)]}),node['id']))
+        recovered=ResearchStore(self.service.store)
+        path.unlink()
+        files=recovered.restore_attachments(self.cid,node['id'],self.root/'restored')
+        self.assertEqual(files[0].read_bytes(),b'Legacy snapshot')
+        self.assertEqual(files[0].name,'legacy.txt')
+        self.assertTrue(recovered.get(self.cid,node['id'],private=True)['request']['assets_in_database'])
+
+    def test_missing_asset_rolls_back_node_and_asset_insertion(self):
+        self.service.busy=True
+        good=self.root/'good.txt';good.write_bytes(b'Valid file')
+        child={'id':'atomic-node','title':'Atomic','question':'Do not partially save', 'excerpt':'',
+               'config':{},'request':{'prompt':'Prompt','attachments':[str(good),str(self.root/'missing.txt')]}}
+        with self.assertRaises(FileNotFoundError):
+            self.store.add_children(self.cid,self.root_node,[child])
+        self.assertEqual(len(self.store.list(self.cid)),1)
+        with self.service.store._connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM research_assets').fetchone()[0],0)
 
 
 if __name__ == '__main__':

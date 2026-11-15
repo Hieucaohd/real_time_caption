@@ -6,7 +6,6 @@ import logging
 import shutil
 import threading
 import uuid
-from pathlib import Path
 
 from caption import chatgpt, paths
 from caption.research_store import ResearchStore
@@ -122,15 +121,23 @@ class Research:
         cid, nid = node['conversation_id'], node['id']
         cancel = self.service.job_cancel[job['id']]
         config, request = node['config'], node['request']
+        def progress(**values):
+            self.store.progress(cid, nid, **values)
+            self.service.update_job(job, **values)
         try:
             with ProcessLock(paths.CACHE_DIR / 'web-job.lock'):
                 if cancel.is_set() or self.stop.is_set():
                     raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
-                result = chatgpt.ask(request['prompt'], [Path(p) for p in request['attachments']],
-                    lambda text: self.service.update_job(job, detail=text),
+                # Avoid restoring large uploads repeatedly while native ChatGPT is busy.
+                # ask() still acquires its own lock before touching Chrome.
+                with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'):
+                    pass
+                attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
+                result = chatgpt.ask(request['prompt'], attachments,
+                    lambda text: progress(detail=text),
                     new_chat=True, selected_tab=config['selected_tab'], tab_name='rtc-research',
                     power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
-                    on_partial=lambda text: self.service.update_job(job, partial=text))
+                    on_partial=lambda text: progress(partial=text))
                 if cancel.is_set():
                     raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
                 self.store.update(cid, nid, status='done', answer=result, partial='', detail='Completed')
