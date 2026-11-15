@@ -40,6 +40,10 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Mỗi câu trả lời mới lưu tên tab ChatGPT tại lúc nhận xong vào SQLite (`response_tab_title`), hiển thị trong khung đọc và tooltip node. Node gốc nhập từ Chat giữ tên tab của câu trả lời gốc (cả Chat web và native từ phiên bản này). Node cũ chưa ghi thông tin sẽ hiện “Chưa có tên tab được lưu”; tên hiện tại của tab không được dùng để đoán lại lịch sử.
+
+Trong khung đọc, **Ẩn nhánh** ẩn node và toàn bộ node con, vẫn giữ câu trả lời và tiếp tục các yêu cầu đang chạy. Bật **Hiện node đã ẩn** để xem rồi chọn **Hiện lại nhánh**; trạng thái ẩn lưu trong database. **Xóa nhánh** hỏi xác nhận rồi xóa vĩnh viễn toàn bộ nhánh, dữ liệu bố cục liên quan và ảnh đính kèm không còn được node khác sử dụng. Yêu cầu đang chạy trong backend này được hủy và kết quả về trễ không tạo lại node; nếu backend khác đang xử lý nhánh, cần hủy ở đó trước. Thao tác xóa không xóa lịch sử Chat nguồn hay cuộc hội thoại trên ChatGPT.
+
 Giao diện ưu tiên nội dung: thanh tiêu đề/Live Captions thu gọn, **Tùy chọn Chat** mặc định đóng (bấm để mở), ô nhập tự giãn theo nội dung. Nút **Tập trung đọc** ẩn danh sách hội thoại, điều khiển và ô soạn; **Thoát tập trung** khôi phục giao diện cùng bản nháp. Trong nghiên cứu, câu trả lời chiếm phần rộng hơn; **Mở rộng câu trả lời / Hiện đồ thị** chuyển giữa đọc toàn chiều rộng và xem cây. Các nút này không thay đổi dữ liệu hay bố cục node đã lưu.
 
 Câu trả lời web dùng chung `MarkdownResponse` trong Chat, Summary và nghiên cứu: `react-markdown`, `remark-gfm`, `remark-math`/KaTeX và `rehype-highlight`. Kiểu chữ, dòng, tiêu đề và vùng đọc bám theo thông số đo từ tab ChatGPT ngày 15/11/2026 (nội dung 16px/26px, rộng tối đa 768px). Công thức `$$...$$` một dòng vẫn hiển thị dạng khối; code có tô màu và nút copy riêng, bảng/cuộn công thức không làm tràn khung. Markdown gốc trong database không thay đổi. Đây là bản dựng lại giao diện Markdown sáng, không nhúng toàn bộ giao diện ChatGPT: citation tương tác, Canvas và các widget riêng không có trong dữ liệu Copy nên không thể khôi phục chỉ từ Markdown.

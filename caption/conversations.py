@@ -76,6 +76,7 @@ class ChatMessage:
     attachment: str | None
     created_at: str
     files: tuple[str, ...] = ()
+    response_tab_title: str = ''
 
 
 class ConversationStore:
@@ -134,6 +135,9 @@ class ConversationStore:
                 );
                 """
             )
+            db.execute('BEGIN IMMEDIATE')
+            if 'response_tab_title' not in {row['name'] for row in db.execute('PRAGMA table_info(chat_messages)')}:
+                db.execute("ALTER TABLE chat_messages ADD COLUMN response_tab_title TEXT NOT NULL DEFAULT ''")
             # A previous process may have been killed while recording. Nothing is active
             # until this process explicitly starts a capture again.
             try:
@@ -237,6 +241,7 @@ class ConversationStore:
         kind: str = "chat",
         attachment: Path | None = None,
         files: tuple[Path, ...] = (),
+        response_tab_title: str = '',
     ) -> int:
         created = _now()
         relative = None
@@ -255,9 +260,9 @@ class ConversationStore:
                 file_paths.append(str(path))
         with self._connect() as db:
             cursor = db.execute(
-                "INSERT INTO chat_messages(conversation_id,role,kind,header,content,attachment,created_at) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (conversation_id, role, kind, header, content, relative, created),
+                "INSERT INTO chat_messages(conversation_id,role,kind,header,content,attachment,created_at,response_tab_title) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (conversation_id, role, kind, header, content, relative, created, response_tab_title),
             )
             db.executemany("INSERT INTO chat_attachments(message_id,position,path) VALUES(?,?,?)",
                            [(cursor.lastrowid, index, path) for index, path in enumerate(file_paths)])

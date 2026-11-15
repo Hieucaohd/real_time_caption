@@ -11,6 +11,9 @@ import {
   LoaderCircle,
   Maximize2,
   Minimize2,
+  Eye,
+  EyeOff,
+  Trash2,
 } from "lucide-react";
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
@@ -70,6 +73,8 @@ export default function ResearchTab({
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+  const [changingBranch, setChangingBranch] = useState(false);
   const [graphExpanded, setGraphExpanded] = useState(false);
   const [readerExpanded, setReaderExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
@@ -79,9 +84,10 @@ export default function ResearchTab({
     focusSeen = useRef(null);
   const base = "/conversations/" + cid + "/research";
   const selectedMeta = nodes.find((n) => n.id === selected);
-  const roots = nodes.filter((n) => !n.parent_id);
+  const visibleNodes = nodes.filter((n) => showHidden || !n.hidden);
+  const roots = visibleNodes.filter((n) => !n.parent_id);
   const rootId = selectedMeta?.root_id || roots.at(-1)?.id;
-  const treeNodes = nodes.filter((n) => n.root_id === rootId);
+  const treeNodes = visibleNodes.filter((n) => n.root_id === rootId);
   const trail = pathTo(nodes, selected);
   const currentTab = settings.chatgpt_selected_tab || "";
   const currentDefaults = () => ({
@@ -105,13 +111,17 @@ export default function ResearchTab({
     const list = await api(base);
     setNodes(list);
     let id = selectedRef.current;
-    if (!list.some((n) => n.id === id)) {
-      id = list.filter((n) => !n.parent_id).at(-1)?.id || "";
+    if (!list.some((n) => n.id === id && (showHidden || !n.hidden))) {
+      id = list.filter((n) => !n.parent_id && (showHidden || !n.hidden)).at(-1)?.id || "";
       select(id, list);
     }
     if (id) {
-      const value = await api(base + "/" + id);
-      if (selectedRef.current === id) setDetail(value);
+      try {
+        const value = await api(base + "/" + id);
+        if (selectedRef.current === id) setDetail(value);
+      } catch (e) {
+        if (selectedRef.current === id) throw e;
+      }
     } else setDetail(null);
   }
   useEffect(() => {
@@ -130,7 +140,7 @@ export default function ResearchTab({
       live = false;
       clearTimeout(timer);
     };
-  }, [cid]);
+  }, [cid, showHidden]);
   useEffect(() => {
     setDetail(null);
     if (selected)
@@ -138,7 +148,7 @@ export default function ResearchTab({
         .then((value) => {
           if (selectedRef.current === selected) setDetail(value);
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => { if (selectedRef.current === selected) setError(e.message); });
   }, [selected]);
   useEffect(() => {
     if (
@@ -147,6 +157,7 @@ export default function ResearchTab({
       nodes.some((n) => n.id === focus.id)
     ) {
       focusSeen.current = focus.nonce;
+      if (nodes.find((n) => n.id === focus.id)?.hidden) setShowHidden(true);
       select(focus.id);
     }
   }, [focus, nodes]);
@@ -178,6 +189,33 @@ export default function ResearchTab({
     } catch (e) {
       setError(e.message);
     }
+  }
+  async function changeBranch(node, operation) {
+    if (changingBranch) return;
+    const ids = new Set([node.id]);
+    let size;
+    do {
+      size = ids.size;
+      nodes.forEach((n) => { if (ids.has(n.parent_id)) ids.add(n.id); });
+    } while (size !== ids.size);
+    if (operation === "delete" && !window.confirm(
+      `Xóa vĩnh viễn “${node.title}” và ${ids.size - 1} node con? Câu trả lời và ảnh của nhánh sẽ bị xóa. Lịch sử Chat gốc vẫn được giữ.`,
+    )) return;
+    setChangingBranch(true);
+    await action(async () => {
+      if (operation === "delete") {
+        await api(base + "/" + node.id, { method: "DELETE" });
+        select(node.parent_id || "");
+      } else {
+        await api(base + "/" + node.id + "/visibility", {
+          method: "PUT", body: { hidden: operation === "hide" },
+        });
+        if (operation === "hide" && !showHidden) select(node.parent_id || "");
+      }
+      setNotice(operation === "delete" ? "Đã xóa nhánh và các node con." : operation === "hide"
+        ? "Đã ẩn nhánh. Bật Hiện node đã ẩn để khôi phục." : "Đã hiện lại nhánh và các node con.");
+    });
+    setChangingBranch(false);
   }
   async function createDraft(excerpt = "") {
     if (detail?.status !== "done") return;
@@ -220,7 +258,7 @@ export default function ResearchTab({
       excerpt,
     });
   }
-  const reading = detail?.id === selected ? detail : null;
+  const reading = detail?.id === selected && (showHidden || !detail.hidden) ? detail : null;
 
   return (
     <section className="research">
@@ -240,6 +278,10 @@ export default function ResearchTab({
             </span>
           </div>
         </div>
+        <label className="toggle research-show-hidden">
+          <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+          Hiện node đã ẩn ({nodes.filter((n) => n.hidden).length})
+        </label>
         {!readingFocus && roots.length > 0 && (
           <button
             className="reader-expand"
@@ -299,7 +341,7 @@ export default function ResearchTab({
               >
                 {roots.map((n) => (
                   <option key={n.id} value={n.id}>
-                    {n.title}
+                    {n.hidden ? "[Ẩn] " : ""}{n.title}
                   </option>
                 ))}
               </select>
@@ -315,7 +357,7 @@ export default function ResearchTab({
             </div>
             {query && (
               <div className="research-search-results">
-                {nodes
+                {visibleNodes
                   .filter((n) =>
                     (n.question + " " + n.excerpt)
                       .toLowerCase()
@@ -367,9 +409,18 @@ export default function ResearchTab({
               <>
                 <div className="research-reader-head">
                   <span className={"research-status " + reading.status}>
-                    {statusOf(reading)}
+                    {statusOf(reading)}{reading.hidden ? " · Đã ẩn" : ""}
                   </span>
                   <div className="inline">
+                    <button disabled={changingBranch} onClick={() => changeBranch(reading, reading.hidden ? "show" : "hide")}
+                      title="Áp dụng cho node này và toàn bộ node con">
+                      {reading.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                      {reading.hidden ? "Hiện lại nhánh" : "Ẩn nhánh"}
+                    </button>
+                    <button disabled={changingBranch} onClick={() => changeBranch(reading, "delete")}
+                      title="Xóa node này và toàn bộ node con">
+                      <Trash2 size={13} />Xóa nhánh
+                    </button>
                     <button
                       title="Đổi tên node"
                       onClick={() => {
@@ -409,6 +460,9 @@ export default function ResearchTab({
                   </div>
                 </div>
                 <div className="research-reading scroll">
+                  <p className="research-response-tab" title={reading.response_tab_title || ""}>
+                    Tab ChatGPT trả lời: <strong>{reading.response_tab_title || "Chưa có tên tab được lưu"}</strong>
+                  </p>
                   <div className="research-question">
                     <small>CÂU HỎI</small>
                     <h3>{reading.question}</h3>

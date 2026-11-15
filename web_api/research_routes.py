@@ -51,6 +51,10 @@ class NodePatch(BaseModel):
 class RetryInput(BaseModel):
     selected_tab: str | None = Field(default=None, max_length=500)
 
+class VisibilityInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    hidden: bool
+
 
 class GraphPoint(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
@@ -131,6 +135,15 @@ def update(cid: str, nid: str, body: NodePatch, request: Request):
 @router.post('/{nid}/cancel')
 def cancel(cid: str, nid: str, request: Request):
     return research(request, cid).cancel(cid, nid)
+
+@router.put('/{nid}/visibility')
+def visibility(cid: str, nid: str, body: VisibilityInput, request: Request):
+    return research(request, cid).store.set_hidden(cid, nid, body.hidden)
+
+
+@router.delete('/{nid}')
+def delete_node(cid: str, nid: str, request: Request):
+    return research(request, cid).delete(cid, nid)
 
 
 @router.post('/{nid}/retry')

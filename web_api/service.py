@@ -228,11 +228,13 @@ class Service:
                     payload['_prepared'] = prepared
                     if cancel.is_set():
                         raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
+                    response_tab = {}
                     result = chatgpt.ask(prepared['prompt'], [Path(x) for x in prepared['attachments']],
                         lambda text: self.update_job(job, detail=text),
                         new_chat=prepared['new_chat'], tab_name=prepared['tab_name'],
                         selected_tab=prepared['selected_tab'], power=prepared['power'], cancel_event=cancel,
-                        on_partial=lambda text: self.update_job(job, partial=text))
+                        on_partial=lambda text: self.update_job(job, partial=text),
+                        on_response_tab=lambda title: response_tab.update(title=title))
                     if kind == 'vocab':
                         words = [vocab.NewWord(**w) for w in prepared['words']]
                         vocab.parse_answer(result, words)
@@ -242,7 +244,8 @@ class Service:
                             result = self.save_vocab(result, settings)
                             self.store.update_message_content(cid, mid, json.dumps(result, ensure_ascii=False))
                     else:
-                        self.store.add_message(cid, 'bot', 'ChatGPT', result, kind=kind)
+                        self.store.add_message(cid, 'bot', 'ChatGPT', result, kind=kind,
+                                               response_tab_title=response_tab.get('title', ''))
                         if kind == 'summary':
                             with (self.conversation(cid).folder / 'summaries.md').open('a', encoding='utf-8') as stream:
                                 stream.write(f'<!-- ChatGPT summary, {datetime.now():%Y-%m-%d %H:%M:%S} -->\n\n{result}\n\n---\n\n')

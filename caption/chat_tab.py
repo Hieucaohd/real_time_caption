@@ -655,6 +655,7 @@ class ChatPanel(ttk.Frame):
         new_chat, power = self._new_conversation, self._power()
 
         def job(status: Callable[[str], None], cancel_event) -> str:
+            self._response_tab_title = ''
             preview = StreamPreview(self._tab_results, self._on_partial)
             try:
                 return chatgpt.ask(
@@ -667,6 +668,7 @@ class ChatPanel(ttk.Frame):
                     cancel_event=cancel_event,
                     selected_tab=selected_tab,
                     on_partial=preview.push,
+                    on_response_tab=lambda title: setattr(self, '_response_tab_title', title),
                 )
             finally:
                 preview.close()
@@ -716,6 +718,7 @@ class ChatPanel(ttk.Frame):
             answer,
             markdown=True,
             conversation_id=self._pending_conversation_id,
+            response_tab_title=getattr(self, '_response_tab_title', ''),
         )
         self._active_request_id = None
         self._pending_conversation_id = None
@@ -817,12 +820,14 @@ class ChatPanel(ttk.Frame):
         kind: str = "chat",
         render: bool = True,
         files: tuple[Path, ...] = (),
+        response_tab_title: str = '',
     ) -> str | None:
         conversation_id = conversation_id or self._get_conversation_id()
         stored_id = None
         if conversation_id:
             stored_id = self._store.add_message(
-                conversation_id, role, header, body, kind=kind, attachment=image, files=files
+                conversation_id, role, header, body, kind=kind, attachment=image, files=files,
+                response_tab_title=response_tab_title,
             )
         if conversation_id != self._get_conversation_id():
             return None

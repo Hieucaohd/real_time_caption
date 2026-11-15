@@ -153,6 +153,44 @@ def main():
             expect(page.get_by_label('research ChatGPT tab', exact=True).locator('option')).to_have_count(4)
             expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
             expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
+            dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            # Manage a subtree with a grandchild, preserving siblings and the source Chat.
+            child_id = nodes[0]['id']
+            store.update(fixture.cid, child_id, status='done', answer='A completed child', response_tab_title='Actual response tab')
+            grandchild = fixture.service.research.children(fixture.cid, child_id,
+                {'questions': ['Deeper child'], 'config': {'selected_tab': 'new-tab'}})[0]
+            page.get_by_label('Tìm node', exact=True).fill('Explain limits')
+            page.locator('.research-search-results button').first.click()
+            expect(page.locator('.research-response-tab')).to_contain_text('Actual response tab')
+            page.get_by_role('button', name='Ẩn nhánh', exact=True).click()
+            expect(page.get_by_label('Hiện node đã ẩn (2)', exact=True)).to_be_visible()
+            assert store.get(fixture.cid, grandchild['id'])['hidden']
+            page.reload()
+            page.locator('nav button').nth(2).click()
+            expect(page.get_by_label('Hiện node đã ẩn (2)', exact=True)).not_to_be_checked()
+            page.get_by_label('Hiện node đã ẩn (2)', exact=True).check()
+            page.get_by_label('Tìm node', exact=True).fill('Explain limits')
+            page.locator('.research-search-results button').first.click()
+            expect(page.get_by_role('button', name='Hiện lại nhánh', exact=True)).to_be_visible()
+            page.get_by_role('button', name='Hiện lại nhánh', exact=True).click()
+            expect(page.get_by_label('Hiện node đã ẩn (0)', exact=True)).to_be_visible()
+            assert not store.get(fixture.cid, grandchild['id'])['hidden']
+            page.once('dialog', lambda d: d.dismiss())
+            page.get_by_role('button', name='Xóa nhánh', exact=True).click()
+            assert len(store.list(fixture.cid)) == 5
+            page.once('dialog', lambda d: d.accept())
+            page.get_by_role('button', name='Xóa nhánh', exact=True).click()
+            expect(page.locator('.research-response-tab')).to_contain_text('Chưa có tên tab được lưu')
+            assert len(store.list(fixture.cid)) == 3
+            assert len(fixture.service.store.messages(fixture.cid)) == 2
+            # Even an entirely hidden tree can be found and restored.
+            page.get_by_label('Hiện node đã ẩn (0)', exact=True).uncheck()
+            page.get_by_role('button', name='Ẩn nhánh', exact=True).click()
+            expect(page.get_by_label('Hiện node đã ẩn (3)', exact=True)).to_be_visible()
+            expect(page.locator('.research-welcome')).to_be_visible()
+            page.get_by_label('Hiện node đã ẩn (3)', exact=True).check()
+            page.get_by_role('button', name='Hiện lại nhánh', exact=True).click()
+            expect(page.get_by_label('Hiện node đã ẩn (0)', exact=True)).to_be_visible()
             assert not errors, errors
             print('Composer browser checks passed: refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite defaults, save failure/retry, reload.')
             browser.close()

@@ -102,6 +102,19 @@ class Research:
                 config['selected_tab'] = selected_tab
             return self.store.update(cid, nid, status='queued', detail='', partial='', config=config)
 
+    def delete(self, cid, nid):
+        with self.service.lock:
+            result = self.store.delete_subtree(cid, nid)
+            for node_id in result['ids']:
+                jid = 'research-' + node_id
+                cancel = self.service.job_cancel.get(jid)
+                if cancel:
+                    cancel.set()
+                job = self.service.jobs.get(jid)
+                if job:
+                    self.service.update_job(job, status='cancelled', detail='Node đã bị xóa.', partial='')
+            return result
+
     def work(self):
         while not self.stop.wait(.25):
             try:
@@ -124,9 +137,18 @@ class Research:
         cid, nid = node['conversation_id'], node['id']
         cancel = self.service.job_cancel[job['id']]
         config, request = node['config'], node['request']
+        def finish(**values):
+            # Deleting a running subtree must never resurrect it when Chrome returns.
+            try:
+                self.store.update(cid, nid, **values)
+                return True
+            except KeyError:
+                return False
         def progress(**values):
-            self.store.progress(cid, nid, **values)
-            self.service.update_job(job, **values)
+            with self.service.lock:
+                if not cancel.is_set():
+                    self.store.progress(cid, nid, **values)
+                    self.service.update_job(job, **values)
         try:
             with ProcessLock(paths.CACHE_DIR / 'web-job.lock'):
                 if cancel.is_set() or self.stop.is_set():
@@ -136,23 +158,28 @@ class Research:
                 with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'):
                     pass
                 attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
+                response_tab = {}
                 result = chatgpt.ask(request['prompt'], attachments,
                     lambda text: progress(detail=text),
                     new_chat=config.get('new_chat', False), selected_tab=config['selected_tab'], tab_name='rtc-research',
                     power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
-                    on_partial=lambda text: progress(partial=text))
-                if cancel.is_set():
-                    raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
-                self.store.update(cid, nid, status='done', answer=result, partial='', detail='Completed')
-                self.service.update_job(job, status='done', partial='', detail='Completed')
+                    on_partial=lambda text: progress(partial=text),
+                    on_response_tab=lambda title: response_tab.update(title=title))
+                with self.service.lock:
+                    if cancel.is_set():
+                        raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
+                    saved = finish(status='done', answer=result, partial='', detail='Completed',
+                                   response_tab_title=response_tab.get('title', ''))
+                    self.service.update_job(job, status='done' if saved else 'cancelled', partial='',
+                                            detail='Completed' if saved else 'Node đã bị xóa.')
         except BusyError:
             # The native UI owns Chrome. Nothing has been sent; leave this queued.
             status = 'cancelled' if cancel.is_set() else 'queued'
-            self.store.update(cid, nid, status=status, detail='Đang chờ thao tác ChatGPT khác hoàn tất.')
+            finish(status=status, detail='Đang chờ thao tác ChatGPT khác hoàn tất.')
             self.service.update_job(job, status='cancelled' if status == 'cancelled' else 'waiting')
         except Exception as exc:
             status = 'cancelled' if cancel.is_set() or self.stop.is_set() else 'error'
-            self.store.update(cid, nid, status=status, detail=str(exc), partial=job['partial'])
+            finish(status=status, detail=str(exc), partial=job['partial'])
             self.service.update_job(job, status=status, error=str(exc))
         finally:
             with self.service.lock:

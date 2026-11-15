@@ -133,6 +133,9 @@ export default function ResearchGraph({
     clearTimeout(timer.current);
     if (saving.current || !Object.keys(pending.current).length) return;
     const patch = pending.current;
+    const ids = new Set(nodesRef.current.map((n) => n.id));
+    if (patch.positions) patch.positions = Object.fromEntries(Object.entries(patch.positions).filter(([id]) => ids.has(id)));
+    if (patch.collapsed) patch.collapsed = patch.collapsed.filter((id) => ids.has(id));
     pending.current = {};
     saving.current = true;
     if (alive.current) setSaveState("saving");
@@ -841,7 +844,8 @@ export default function ResearchGraph({
                   >
                     <button
                       aria-label={"Đọc: " + n.title}
-                      title={n.question}
+                      title={n.question + (n.response_tab_title ? "\nTab ChatGPT: " + n.response_tab_title : "") + (n.hidden ? "\nĐã ẩn" : "")}
+                      data-hidden={n.hidden || undefined}
                       className={`research-node ${selected === n.id ? "selected" : ""} ${picked.has(n.id) ? "picked" : ""} ${!n.parent_id ? "root" : ""} ${n.understood ? "understood" : ""}`}
                       onFocus={() => reveal(n.id, true)}
                       onClick={(e) => {

@@ -11,12 +11,15 @@ class ReadAnswerTests(unittest.TestCase):
         page = Mock()
         markdown = "## Answer\n\n**Important**\n\n" + r"\[x_1 = 2\]"
         reads = iter([[], [], [{"k": "text/plain", "t": markdown}]])
+        page.title.return_value = 'Title at response completion'
+        on_tab = Mock()
         page.evaluate.side_effect = lambda script: (
             next(reads) if script == chatgpt.COPY_READ else
             True if script == chatgpt.COPY_HOOK else []
         )
         with patch.object(chatgpt.time, "sleep"):
-            self.assertEqual(chatgpt._read_answer(page, "answer"), markdown)
+            self.assertEqual(chatgpt._read_answer(page, "answer", on_tab), markdown)
+        on_tab.assert_called_once_with('Title at response completion')
         page.evaluate.assert_called_with(chatgpt.COPY_UNHOOK)
 
     def test_copy_failure_does_not_save_flattened_math(self):
@@ -30,6 +33,15 @@ class ReadAnswerTests(unittest.TestCase):
         page.evaluate.assert_called_with(chatgpt.COPY_UNHOOK)
         # The old fallback read innerText and duplicated MathML/KaTeX glyphs.
         page.locator.return_value.evaluate.assert_not_called()
+
+    def test_tab_title_failure_does_not_discard_a_copied_answer(self):
+        page = Mock()
+        page.evaluate.side_effect = lambda script: True if script == chatgpt.COPY_HOOK else [{'k': 'text/plain', 't': 'Answer'}]
+        page.title.side_effect = RuntimeError('Tab closed')
+        on_tab = Mock()
+        with self.assertLogs('caption.chatgpt', level='WARNING'):
+            self.assertEqual(chatgpt._read_answer(page, 'answer', on_tab), 'Answer')
+        on_tab.assert_called_once_with('')
 
     def test_click_failure_restores_hooks(self):
         page = Mock()

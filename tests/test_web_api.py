@@ -140,7 +140,10 @@ class WebApiTests(unittest.TestCase):
         self.post(f'/api/conversations/{self.cid}/capture')
         self.service.on_caption(Event('final','Original caption',end_of_utterance=True))
         self.post('/api/capture/pause')
-        with patch('web_api.service.chatgpt.ask', return_value='## Saved\n\n**Answer**') as ask:
+        def answer(*args, **kwargs):
+            kwargs['on_response_tab']('Actual Chat tab')
+            return '## Saved\n\n**Answer**'
+        with patch('web_api.service.chatgpt.ask', side_effect=answer) as ask:
             job = self.post(f'/api/conversations/{self.cid}/jobs',
                 {'kind':'chat','message':'Explain','selected_tab':'tab','attach_transcript':True}).json()
             result = self.wait_job(job['id'])
@@ -149,6 +152,9 @@ class WebApiTests(unittest.TestCase):
             attachment=ask.call_args.args[1][0]
             self.assertIn('Original caption',attachment.read_text(encoding='utf-8'))
             self.assertEqual(self.service.store.messages(self.cid)[-1].content,'## Saved\n\n**Answer**')
+            message = self.service.store.messages(self.cid)[-1]
+            root = self.service.research.store.import_answer(self.cid, message.id)
+            self.assertEqual(root['response_tab_title'], 'Actual Chat tab')
             summary = self.post(f'/api/conversations/{self.cid}/jobs',
                 {'kind':'summary','selected_tab':'tab','attach_transcript':True}).json()
             result = self.wait_job(summary['id'])

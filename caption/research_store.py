@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from .shared_access import process_alive
+from .shared_access import process_alive, BusyError
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,12 @@ class ResearchStore:
                     config TEXT NOT NULL
                 );
             ''')
+            db.execute('BEGIN IMMEDIATE')
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(research_nodes)')}
+            for name, definition in (('hidden', 'INTEGER NOT NULL DEFAULT 0'),
+                                     ('response_tab_title', "TEXT NOT NULL DEFAULT ''")):
+                if name not in columns:
+                    db.execute(f'ALTER TABLE research_nodes ADD COLUMN {name} {definition}')
             owners = db.execute("SELECT DISTINCT owner_pid FROM research_nodes WHERE status='working'").fetchall()
             for owner in owners:
                 if not process_alive(owner['owner_pid']):
@@ -177,6 +183,7 @@ class ResearchStore:
         result = dict(value)
         result['config'] = json.loads(result['config'])
         result['understood'] = bool(result['understood'])
+        result['hidden'] = bool(result['hidden'])
         if private:
             result['request'] = json.loads(result['request'])
         else:
@@ -200,9 +207,9 @@ class ResearchStore:
         nid, stamp = uuid.uuid4().hex, now()
         with self.conversations._connect() as db:
             db.execute('''INSERT OR IGNORE INTO research_nodes
-                (id, conversation_id, root_id, source_message_id, title, question, answer, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?)''',
-                (nid, cid, nid, mid, question.strip().splitlines()[0][:100], question, source.content, stamp, stamp))
+                (id, conversation_id, root_id, source_message_id, title, question, answer, status, created_at, updated_at, response_tab_title)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?)''',
+                (nid, cid, nid, mid, question.strip().splitlines()[0][:100], question, source.content, stamp, stamp, source.response_tab_title))
             return self.row(db.execute('SELECT * FROM research_nodes WHERE source_message_id=?', (mid,)).fetchone())
 
     def ancestry(self, cid, nid):
@@ -216,8 +223,60 @@ class ResearchStore:
             nid = node['parent_id']
         return list(reversed(chain))
 
+    @staticmethod
+    def _subtree(db, cid, nid):
+        rows = db.execute('''WITH RECURSIVE branch(id) AS (
+            SELECT id FROM research_nodes WHERE id=? AND conversation_id=?
+            UNION SELECT n.id FROM research_nodes n JOIN branch b ON n.parent_id=b.id
+                WHERE n.conversation_id=?
+            ) SELECT n.* FROM research_nodes n JOIN branch b ON n.id=b.id''', (nid, cid, cid)).fetchall()
+        if not rows:
+            raise KeyError('Research node not found')
+        return rows
+
+    def set_hidden(self, cid, nid, hidden):
+        with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = self._subtree(db, cid, nid)
+            ids = {row['id'] for row in rows}
+            # Restoring a nested node also reveals its path, so it cannot be orphaned.
+            if not hidden:
+                parent = next(row['parent_id'] for row in rows if row['id'] == nid)
+                while parent and parent not in ids:
+                    row = db.execute('SELECT parent_id FROM research_nodes WHERE id=? AND conversation_id=?', (parent, cid)).fetchone()
+                    if row is None:
+                        break
+                    ids.add(parent)
+                    parent = row['parent_id']
+            db.executemany('UPDATE research_nodes SET hidden=?, updated_at=? WHERE id=? AND conversation_id=?',
+                           [(int(hidden), now(), node_id, cid) for node_id in ids])
+        return dict(ids=sorted(ids), hidden=hidden)
+
+    def delete_subtree(self, cid, nid):
+        with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = self._subtree(db, cid, nid)
+            if any(row['status'] == 'working' and row['owner_pid'] != os.getpid()
+                   and process_alive(row['owner_pid']) for row in rows):
+                raise BusyError('Nhánh đang chạy ở tiến trình khác. Hủy yêu cầu ở đó trước khi xóa.')
+            ids = {row['id'] for row in rows}
+            # One statement removes all descendants before FK checks; attachments/layouts cascade.
+            db.execute('DELETE FROM research_nodes WHERE id IN (' + ','.join('?' for _ in ids) + ')', tuple(ids))
+            for root_id in {row['root_id'] for row in rows} - ids:
+                layout = db.execute('SELECT state FROM research_graph_layouts WHERE root_id=?', (root_id,)).fetchone()
+                if layout:
+                    state = json.loads(layout['state'])
+                    state['positions'] = {key: value for key, value in state.get('positions', {}).items() if key not in ids}
+                    state['collapsed'] = [key for key in state.get('collapsed', []) if key not in ids]
+                    db.execute('UPDATE research_graph_layouts SET state=?, revision=revision+1, updated_at=? WHERE root_id=?',
+                               (json.dumps(state), now(), root_id))
+            db.execute('DELETE FROM research_assets WHERE NOT EXISTS (SELECT 1 FROM research_node_assets n WHERE n.asset_id=research_assets.id)')
+        return dict(ids=sorted(ids))
+
     def add_children(self, cid, parent, children):
         with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            parent = self.row(db.execute('SELECT * FROM research_nodes WHERE id=? AND conversation_id=?', (parent['id'], cid)).fetchone())
             known_assets = {}
             for child in children:
                 stamp = now()
@@ -227,6 +286,8 @@ class ResearchStore:
                     (child['id'], cid, parent['id'], parent['root_id'], child['title'], child['question'], child['excerpt'],
                      json.dumps(child['config'], ensure_ascii=False), json.dumps(child['request'], ensure_ascii=False), stamp, stamp))
                 self._archive_assets(db, child['id'], child['request'], known_assets)
+                if parent['hidden']:
+                    db.execute('UPDATE research_nodes SET hidden=1 WHERE id=?', (child['id'],))
         return [self.get(cid, child['id']) for child in children]
 
     def progress(self, cid, nid, **values):
@@ -249,7 +310,7 @@ class ResearchStore:
                               (os.getpid(), nid, cid)).rowcount == 1
 
     def update(self, cid, nid, **values):
-        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request'}
+        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title'}
         if not values or not values.keys() <= allowed:
             raise ValueError('Invalid node update')
         for key in ('config', 'request'):

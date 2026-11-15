@@ -570,7 +570,7 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
         time.sleep(0.4)
 
 
-def _read_answer(page, turn_id: str) -> str:
+def _read_answer(page, turn_id: str, on_response_tab=None) -> str:
     """Read copied Markdown, never save flattened DOM text as a formatted answer."""
     turn = _turn_locator(page, turn_id)
     copy_button = turn.locator(REPLY_COPY_BUTTON).first
@@ -607,6 +607,13 @@ def _read_answer(page, turn_id: str) -> str:
     for kind in ("text/markdown", "text/plain"):
         for item in captured or []:
             if item.get("k") == kind and (item.get("t") or "").strip():
+                if on_response_tab:
+                    try:
+                        title = page.title()
+                    except Exception:
+                        log.warning('Could not read response tab title', exc_info=True)
+                        title = ''
+                    on_response_tab(title)
                 return clean_answer(item["t"])
     raise ChatGPTError(
         "ChatGPT answered, but its Markdown could not be copied. "
@@ -640,6 +647,7 @@ def ask(
     use_current_tab: bool = False,
     selected_tab: str | None = None,
     on_partial: Callable[[str], None] | None = None,
+    on_response_tab: Callable[[str], None] | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
@@ -750,4 +758,4 @@ def ask(
             ) from exc
         _wait_stable(page, turn_id, 60, cancel_event)
         on_status("Reading the answer…")
-        return _read_answer(page, turn_id)
+        return _read_answer(page, turn_id, on_response_tab)
