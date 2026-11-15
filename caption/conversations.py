@@ -80,6 +80,7 @@ class ChatMessage:
     response_conversation_url: str = ''
     response_turn_id: str = ''
     response_message_id: str = ''
+    response_position: int | None = None
 
 
 class ConversationStore:
@@ -147,6 +148,8 @@ class ConversationStore:
             for name in ('response_tab_title', 'response_conversation_url', 'response_turn_id', 'response_message_id'):
                 if name not in columns:
                     db.execute(f"ALTER TABLE chat_messages ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+            if 'response_position' not in columns:
+                db.execute('ALTER TABLE chat_messages ADD COLUMN response_position INTEGER CHECK(response_position >= 1)')
             # A previous process may have been killed while recording. Nothing is active
             # until this process explicitly starts a capture again.
             try:
@@ -265,6 +268,7 @@ class ConversationStore:
         response_conversation_url: str = '',
         response_turn_id: str = '',
         response_message_id: str = '',
+        response_position: int | None = None,
     ) -> int:
         created = _now()
         relative = None
@@ -284,9 +288,9 @@ class ConversationStore:
         with self._connect() as db:
             cursor = db.execute(
                 "INSERT INTO chat_messages(conversation_id,role,kind,header,content,attachment,created_at,response_tab_title,"
-                "response_conversation_url,response_turn_id,response_message_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "response_conversation_url,response_turn_id,response_message_id,response_position) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (conversation_id, role, kind, header, content, relative, created, response_tab_title,
-                 response_conversation_url, response_turn_id, response_message_id),
+                 response_conversation_url, response_turn_id, response_message_id, response_position),
             )
             db.executemany("INSERT INTO chat_attachments(message_id,position,path) VALUES(?,?,?)",
                            [(cursor.lastrowid, index, path) for index, path in enumerate(file_paths)])

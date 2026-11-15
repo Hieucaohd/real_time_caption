@@ -16,8 +16,7 @@ export default function ResponseSource({ response, onSave }) {
   const [error, setError] = useState("");
   const fields = [
     ["response_conversation_url", "Link cuộc hội thoại ChatGPT", "url"],
-    ["response_message_id", "Message ID", "text"],
-    ["response_turn_id", "Turn ID", "text"],
+    ["response_position", "Số thứ tự câu trả lời", "number"],
   ];
   const url = conversationLink(response.response_conversation_url);
   async function save(e) {
@@ -26,7 +25,7 @@ export default function ResponseSource({ response, onSave }) {
     setSaving(true);
     setError("");
     try {
-      await onSave(draft);
+      await onSave({ ...draft, response_position: draft.response_position === "" ? null : Number(draft.response_position) });
       setEditing(false);
     } catch (e) {
       let message = e.message;
@@ -43,10 +42,8 @@ export default function ResponseSource({ response, onSave }) {
       {url ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a>
         : <p>Chưa lưu link cuộc hội thoại cho câu trả lời này.</p>}
       <dl>
-        <dt>Vị trí response (Message ID)</dt>
-        <dd>{response.response_message_id || "Chưa có mã response"}</dd>
-        <dt>Lượt hội thoại (Turn ID)</dt>
-        <dd>{response.response_turn_id || "Chưa có mã lượt hội thoại"}</dd>
+        <dt>Vị trí trong cuộc hội thoại</dt>
+        <dd>{response.response_position ? `Câu trả lời thứ ${response.response_position}` : "Chưa có số thứ tự"}</dd>
       </dl>
       {onSave && !editing && <button type="button" onClick={() => {
         setDraft(Object.fromEntries(fields.map(([key]) => [key, response[key] || ""])));
@@ -55,10 +52,13 @@ export default function ResponseSource({ response, onSave }) {
       }}>Cập nhật nguồn</button>}
       {editing && <form className="response-source-editor" onSubmit={save}>
         <p>Nhập thông tin bạn có; trường chưa biết có thể để trống.</p>
+        <p>Đếm các câu trả lời của ChatGPT từ đầu cuộc hội thoại: 1, 2, 3… Không đếm tin nhắn của bạn.</p>
         {fields.map(([key, title, type]) => <label className="field" key={key}>
           <span>{title}</span>
           <input aria-label={title} type={type} value={draft[key]} disabled={saving}
-            maxLength={type === "url" ? 2000 : 500}
+            maxLength={type === "url" ? 2000 : undefined}
+            min={type === "number" ? 1 : undefined} max={type === "number" ? 2147483647 : undefined}
+            step={type === "number" ? 1 : undefined}
             onChange={(e) => setDraft((old) => ({ ...old, [key]: e.target.value }))} />
         </label>)}
         {error && <p className="alert" role="alert">{error}</p>}

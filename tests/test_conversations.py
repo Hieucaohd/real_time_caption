@@ -65,6 +65,24 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertTrue(old.exists())
         self.assertIn("hello", conversations.ConversationTranscript(self.store.list()[0], self.store).read_text())
 
+    def test_response_position_migration_preserves_old_content_and_source_ids(self):
+        item = self.store.create('Test')
+        self.store.add_message(item.id, 'bot', 'ChatGPT', 'Old answer',
+                               response_conversation_url='https://chatgpt.com/c/old', response_message_id='legacy-id')
+        with self.store._connect() as db:
+            db.execute('ALTER TABLE chat_messages DROP COLUMN response_position')
+        reopened = conversations.ConversationStore(self.store.db_path)
+        old = reopened.messages(item.id)[0]
+        self.assertEqual(old.content, 'Old answer')
+        self.assertEqual(old.response_conversation_url, 'https://chatgpt.com/c/old')
+        self.assertEqual(old.response_message_id, 'legacy-id')
+        self.assertIsNone(old.response_position)
+        link = 'https://chatgpt.com/g/g-p-project/c/new?keep=this#fragment'
+        reopened.add_message(item.id, 'bot', 'ChatGPT', 'New answer', response_conversation_url=link, response_position=4)
+        latest = conversations.ConversationStore(self.store.db_path).messages(item.id)[-1]
+        self.assertEqual(latest.response_conversation_url, link)
+        self.assertEqual(latest.response_position, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

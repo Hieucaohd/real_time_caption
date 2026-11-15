@@ -24,8 +24,8 @@ class ReadAnswerTests(unittest.TestCase):
         with patch.object(chatgpt.time, "sleep"):
             self.assertEqual(chatgpt._read_answer(page, "answer", on_tab, on_source), markdown)
         on_tab.assert_called_once_with('Title at response completion')
-        on_source.assert_called_once_with({'response_conversation_url': 'https://chatgpt.com/c/conversation-one',
-                                          'response_turn_id': 'answer', 'response_message_id': 'response-one'})
+        on_source.assert_called_once_with({'response_conversation_url': 'https://chatgpt.com/c/conversation-one?tracking=x#old',
+                                          'response_turn_id': 'answer', 'response_message_id': 'response-one', 'response_position': None})
         page.evaluate.assert_called_with(chatgpt.COPY_UNHOOK)
 
     def test_copy_failure_does_not_save_flattened_math(self):
@@ -155,7 +155,12 @@ class ClipboardBrowserTests(unittest.TestCase):
         self.assert_restored()
 
     def test_source_uses_exact_response_in_virtualized_project_conversation(self):
+        from test_chatgpt_source import conversation_mapping
         url = 'https://chatgpt.com/g/project/c/conversation-one'
+        # Full history contains 4 answers, but the DOM only mounts two turns.
+        mapping = conversation_mapping()
+        mapping['a4']['message']['id'] = 'chosen-response'
+        self.page.route('https://chatgpt.com/backend-api/conversation/*', lambda route: route.fulfill(json={'mapping': mapping}))
         self.page.route(url, lambda route: route.fulfill(content_type='text/html', body='''
             <div data-turn-key="unrelated"><div data-message-author-role="assistant" data-message-id="wrong-response">Other</div></div>
             <div data-turn-key="chosen-turn">
@@ -168,13 +173,38 @@ class ClipboardBrowserTests(unittest.TestCase):
         source = {}
         answer = chatgpt._read_answer(self.page, 'chosen-turn', on_response_source=source.update)
         self.assertEqual(answer, 'Chosen answer')
-        self.assertEqual(source, dict(response_conversation_url=url, response_turn_id='chosen-turn', response_message_id='chosen-response'))
+        self.assertEqual(source, dict(response_conversation_url=url, response_turn_id='chosen-turn', response_message_id='chosen-response', response_position=4))
         # The source is a frozen snapshot, not a reference to the tab's future URL.
         self.page.evaluate("history.replaceState({}, '', '/c/a-different-conversation')")
         self.assertEqual(source['response_conversation_url'], url)
         self.page.locator('[data-content-search-unit-key]').evaluate("el=>{el.removeAttribute('data-chatgpt-search-message-ids');el.setAttribute('data-message-author-role','assistant');el.setAttribute('data-message-id','legacy-response')}")
         legacy = chatgpt._response_source(self.page.locator('[data-turn-key="chosen-turn"]'), 'chosen-turn')
         self.assertEqual(legacy['response_message_id'], 'legacy-response')
+        self.assertIsNone(legacy['response_position'])
+
+    def test_source_auth_retry_keeps_credentials_in_page_and_failure_keeps_answer(self):
+        from test_chatgpt_source import conversation_mapping
+        url = 'https://chatgpt.com/c/test?keep=query#keep-fragment'
+        self.page.route('https://chatgpt.com/c/test?keep=query', lambda route: route.fulfill(content_type='text/html', body='''
+            <div data-turn-key="answer"><div data-message-author-role="assistant" data-message-id="a4">Answer</div>
+            <button data-testid="copy-turn-action-button" onclick="navigator.clipboard.writeText('Copied')">Copy</button></div>'''))
+        self.page.route('https://chatgpt.com/api/auth/session', lambda route: route.fulfill(json={'accessToken': 'test-only-token'}))
+        def conversation(route):
+            if route.request.headers.get('authorization') == 'Bearer test-only-token':
+                route.fulfill(json={'mapping': conversation_mapping()})
+            else:
+                route.fulfill(status=404, json={})
+        self.page.route('https://chatgpt.com/backend-api/conversation/test', conversation)
+        self.page.goto(url)
+        source = {}
+        self.assertEqual(chatgpt._read_answer(self.page, 'answer', on_response_source=source.update), 'Copied')
+        self.assertEqual(source['response_position'], 4)
+        self.assertEqual(source['response_conversation_url'], url)
+        self.assertNotIn('test-only-token', str(source))
+        self.page.route('https://chatgpt.com/backend-api/conversation/test', lambda route: route.fulfill(status=503, json={}))
+        self.assertEqual(chatgpt._read_answer(self.page, 'answer', on_response_source=source.update), 'Copied')
+        self.assertIsNone(source['response_position'])
+        self.assertEqual(source['response_conversation_url'], url)
 
     def test_source_never_makes_a_conversation_url_from_an_unrelated_page(self):
         source = chatgpt._response_source(self.page.locator('[data-turn-key="answer"]'), 'answer')

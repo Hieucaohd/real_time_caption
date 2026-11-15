@@ -73,7 +73,7 @@ def main():
     fixture.service.store.add_message(fixture.cid, 'user', 'You', 'Giải thích khái niệm')
     mid = fixture.service.store.add_message(fixture.cid, 'bot', 'ChatGPT', ANSWER,
         response_conversation_url='https://chatgpt.com/g/project/c/source-conversation',
-        response_turn_id='source-turn', response_message_id='source-response')
+        response_turn_id='source-turn', response_message_id='source-response', response_position=2)
     fixture.service.research.store.import_answer(fixture.cid, mid)
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
@@ -97,18 +97,19 @@ def main():
             source = page.locator('.message.bot .response-source')
             source.locator('summary').click()
             expect(source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/g/project/c/source-conversation')
-            expect(source).to_contain_text('source-response')
-            expect(source).to_contain_text('source-turn')
+            expect(source).to_contain_text('Câu trả lời thứ 2')
+            expect(source).not_to_contain_text('Message ID')
+            expect(source).not_to_contain_text('Turn ID')
             source.get_by_role('button', name='Cập nhật nguồn', exact=True).click()
             source.get_by_label('Link cuộc hội thoại ChatGPT', exact=True).fill('https://evil.test/c/not-chatgpt')
             source.get_by_role('button', name='Lưu nguồn', exact=True).click()
             expect(source.get_by_role('alert')).to_contain_text('Nhập link cuộc hội thoại ChatGPT')
             source.get_by_label('Link cuộc hội thoại ChatGPT', exact=True).fill('https://chatgpt.com/g/project/c/source-conversation')
-            source.get_by_label('Message ID', exact=True).fill('manual-response')
-            source.get_by_label('Turn ID', exact=True).fill('manual-turn')
+            expect(source.locator('input')).to_have_count(2)
+            source.get_by_label('Số thứ tự câu trả lời', exact=True).fill('4')
             source.get_by_role('button', name='Lưu nguồn', exact=True).click()
             expect(source.locator('form')).to_have_count(0)
-            expect(source).to_contain_text('manual-response')
+            expect(source).to_contain_text('Câu trả lời thứ 4')
             source.locator('summary').click()
             expect(md.locator('.katex-display')).to_have_count(8)
             assert md.locator('.katex:not(.katex-display)').count() >= 10
@@ -141,13 +142,13 @@ def main():
             branch = page.locator('.research-answer .response-markdown')
             branch_source = page.locator('.research-reader .response-source')
             branch_source.locator('summary').click()
-            expect(branch_source).to_contain_text('manual-response')
+            expect(branch_source).to_contain_text('Câu trả lời thứ 4')
             expect(branch_source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/g/project/c/source-conversation')
             branch_source.get_by_role('button', name='Cập nhật nguồn', exact=True).click()
-            branch_source.get_by_label('Message ID', exact=True).fill('corrected-from-root')
+            branch_source.get_by_label('Số thứ tự câu trả lời', exact=True).fill('5')
             branch_source.get_by_role('button', name='Lưu nguồn', exact=True).click()
             expect(branch_source.locator('form')).to_have_count(0)
-            assert fixture.service.store.messages(fixture.cid)[-1].response_message_id == 'corrected-from-root'
+            assert fixture.service.store.messages(fixture.cid)[-1].response_position == 5
             branch_source.locator('summary').click()
             expect(branch.locator('.katex-display')).to_have_count(8)
             expect(branch.locator('.katex-error')).to_have_count(0)
@@ -175,15 +176,15 @@ def main():
             page.locator('.research-search-results button').first.click()
             expect(branch).to_have_text('A different answer')
             assert not page.evaluate("CSS.highlights.has('rtc-reading-mark')")
-            # Old answers can be filled in partially; polling must not replace the edit draft.
+            # Old answers can be filled in partially.
             branch_source.locator('summary').click()
             branch_source.get_by_role('button', name='Cập nhật nguồn', exact=True).click()
             branch_source.get_by_label('Link cuộc hội thoại ChatGPT', exact=True).fill('https://chatgpt.com/c/manual-child')
             branch_source.get_by_role('button', name='Lưu nguồn', exact=True).click()
             expect(branch_source.locator('form')).to_have_count(0)
             expect(branch_source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/c/manual-child')
-            assert fixture.service.research.store.get(fixture.cid, child['id'])['response_message_id'] == ''
-            assert fixture.service.store.messages(fixture.cid)[-1].response_message_id == 'corrected-from-root'
+            assert fixture.service.research.store.get(fixture.cid, child['id'])['response_position'] is None
+            assert fixture.service.store.messages(fixture.cid)[-1].response_position == 5
             page.locator('.research-breadcrumb').get_by_role('button', name='Gốc', exact=True).click()
             page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
             assert page.evaluate("[...CSS.highlights.get('rtc-reading-mark')][0].toString()") == saved_mark['text']
@@ -191,7 +192,7 @@ def main():
             page.locator('nav button').nth(2).click()
             page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
             branch_source.locator('summary').click()
-            expect(branch_source).to_contain_text('corrected-from-root')
+            expect(branch_source).to_contain_text('Câu trả lời thứ 5')
             branch_source.locator('summary').click()
             # The toolbar pencil replaces the previous mark; clear removes it from SQLite.
             branch.locator('li').first.evaluate('el=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)}')

@@ -25,7 +25,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
+
+from .chatgpt_source import CONVERSATION_MAPPING, response_position
 
 log = logging.getLogger(__name__)
 
@@ -571,9 +573,9 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
         time.sleep(0.4)
 
 
-def _response_source(turn, turn_id: str) -> dict[str, str]:
+def _response_source(turn, turn_id: str) -> dict:
     """Read the exact copied turn, never infer an absolute index from a virtualized DOM."""
-    source = dict(response_conversation_url='', response_turn_id=turn_id, response_message_id='')
+    source = dict(response_conversation_url='', response_turn_id=turn_id, response_message_id='', response_position=None)
     try:
         value = turn.evaluate('''turn => {
             const explicit = [...turn.querySelectorAll('[data-message-author-role="assistant"][data-message-id]')];
@@ -586,8 +588,11 @@ def _response_source(turn, turn_id: str) -> dict[str, str]:
         }''')
         url = urlsplit(value['url'])
         if url.scheme == 'https' and url.hostname in ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com') and re.search(r'/c/[^/]+/?$', url.path):
-            source['response_conversation_url'] = urlunsplit((url.scheme, url.netloc, url.path.rstrip('/'), '', ''))
+            source['response_conversation_url'] = value['url']
         source['response_message_id'] = value.get('message_id', '')
+        if source['response_conversation_url'] and source['response_message_id']:
+            mapping = turn.page.evaluate(CONVERSATION_MAPPING, url.path.rstrip('/').rsplit('/', 1)[-1])
+            source['response_position'] = response_position(mapping, source['response_message_id'])
     except Exception:
         # Keep the copied answer even if the page disappears; never attach another turn's URL.
         log.warning('Could not read ChatGPT response source', exc_info=True)
@@ -675,7 +680,7 @@ def ask(
     selected_tab: str | None = None,
     on_partial: Callable[[str], None] | None = None,
     on_response_tab: Callable[[str], None] | None = None,
-    on_response_source: Callable[[dict[str, str]], None] | None = None,
+    on_response_source: Callable[[dict], None] | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 

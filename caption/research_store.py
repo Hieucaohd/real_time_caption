@@ -74,6 +74,7 @@ class ResearchStore:
                                      ('response_conversation_url', "TEXT NOT NULL DEFAULT ''"),
                                      ('response_turn_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('response_message_id', "TEXT NOT NULL DEFAULT ''"),
+                                     ('response_position', 'INTEGER CHECK(response_position >= 1)'),
                                      ('reading_mark', 'TEXT')):
                 if name not in columns:
                     db.execute(f'ALTER TABLE research_nodes ADD COLUMN {name} {definition}')
@@ -213,10 +214,10 @@ class ResearchStore:
         with self.conversations._connect() as db:
             db.execute('''INSERT OR IGNORE INTO research_nodes
                 (id, conversation_id, root_id, source_message_id, title, question, answer, status, created_at, updated_at, response_tab_title,
-                 response_conversation_url, response_turn_id, response_message_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?)''',
+                 response_conversation_url, response_turn_id, response_message_id, response_position)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?)''',
                 (nid, cid, nid, mid, question.strip().splitlines()[0][:100], question, source.content, stamp, stamp, source.response_tab_title,
-                 source.response_conversation_url, source.response_turn_id, source.response_message_id))
+                 source.response_conversation_url, source.response_turn_id, source.response_message_id, source.response_position))
             return self.row(db.execute('SELECT * FROM research_nodes WHERE source_message_id=?', (mid,)).fetchone())
 
     def ancestry(self, cid, nid):
@@ -231,7 +232,7 @@ class ResearchStore:
         return list(reversed(chain))
 
     def update_response_source(self, cid, source, *, mid=None, nid=None):
-        fields = {'response_conversation_url', 'response_message_id', 'response_turn_id'}
+        fields = {'response_conversation_url', 'response_position'}
         if set(source) != fields or (mid is None) == (nid is None):
             raise ValueError('Invalid response source update')
         with self.conversations._connect() as db:
@@ -348,7 +349,7 @@ class ResearchStore:
 
     def update(self, cid, nid, **values):
         allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title', 'reading_mark',
-                   'response_conversation_url', 'response_turn_id', 'response_message_id'}
+                   'response_conversation_url', 'response_turn_id', 'response_message_id', 'response_position'}
         if not values or not values.keys() <= allowed:
             raise ValueError('Invalid node update')
         for key in ('config', 'request', 'reading_mark'):
