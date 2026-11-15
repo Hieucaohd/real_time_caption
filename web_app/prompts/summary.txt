@@ -1,2 +1,0 @@
-The attached file ({file_name}) is an English speech-to-text transcript from {source}.
-Summarize it in Vietnamese, newest information first. Include key decisions, names, numbers and open questions.

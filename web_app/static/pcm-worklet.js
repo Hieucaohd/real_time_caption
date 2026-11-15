@@ -1,1 +1,0 @@
-class PCMProcessor extends AudioWorkletProcessor{process(inputs){const ch=inputs[0]&&inputs[0][0];if(ch){const copy=ch.slice();this.port.postMessage(copy.buffer,[copy.buffer])}return true}}registerProcessor('pcm-processor',PCMProcessor);
