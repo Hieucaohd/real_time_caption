@@ -89,7 +89,11 @@ def main():
             # Exercise the button without replacing the user's system clipboard.
             context.add_init_script("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.__copiedCode = text}}})")
             page = context.new_page()
-            page.route('**/api/chrome-tabs', lambda route: route.fulfill(json=[]))
+            tab_events = []
+            def scan_tabs(route):
+                tab_events.append('scan')
+                route.fulfill(json=[])
+            page.route('**/api/chrome-tabs', scan_tabs)
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
@@ -236,6 +240,7 @@ def main():
             branch_requests = []
             def create_branch(route):
                 branch_requests.append(route.request.url)
+                tab_events.append('branch')
                 if len(branch_requests) == 1:
                     route.fulfill(status=400, json={'detail': 'Branch unavailable'})
                     return
@@ -249,6 +254,7 @@ def main():
             expect(dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True)).to_be_disabled()
             dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True).click()
             expect(dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-branch-tab')
+            assert tab_events[-2:] == ['branch', 'scan']
             expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
             expect(dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep this draft question')
             expect(dialog).to_contain_text('Đã mở nhánh ChatGPT trong tab mới')

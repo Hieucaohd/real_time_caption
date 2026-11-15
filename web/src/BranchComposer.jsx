@@ -92,10 +92,10 @@ export default function BranchComposer({
     setError("");
     try {
       const tab = await post(`/conversations/${cid}/research/${draft.parent.id}/chatgpt-branch`, {});
+      // Backend compares Chrome target IDs before/after the UI click and returns the verified branch.
+      await scanTabs().catch(() => {});
       setBranchTab(tab);
       setConfig((old) => ({ ...old, selected_tab: tab.key, new_chat: false }));
-      // Keep the returned tab usable even if scanning the other Chrome tabs fails.
-      await scanTabs().catch(() => {});
     } catch (e) {
       setError(e.message);
     } finally {
@@ -210,7 +210,7 @@ export default function BranchComposer({
               <span role="status">
                 {!hasSource ? "Hãy bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT của node cha."
                   : branching ? `Đang mở nhánh từ câu trả lời thứ ${draft.parent.response_position}…`
-                  : branchTab ? "Đã mở nhánh ChatGPT trong tab mới và chọn tab đó để gửi câu hỏi."
+                  : branchTab ? "Đã mở nhánh ChatGPT trong tab mới, refresh danh sách và chọn tab nhánh để gửi câu hỏi."
                   : `Mở tab ChatGPT mới, giữ ngữ cảnh đến câu trả lời thứ ${draft.parent.response_position} của node cha.`}
               </span>
             </div>

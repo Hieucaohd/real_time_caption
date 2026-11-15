@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import patch
 
 from caption import chatgpt, chatgpt_branch
 from caption.chatgpt_source import response_message_at_position
@@ -29,94 +29,132 @@ class BranchResolutionTests(unittest.TestCase):
             response_message_at_position(snapshot, 1)
 
 
-class BranchBrowserTests(unittest.TestCase):
-    def setUp(self):
-        self.browser = Mock(contexts=[Mock()])
-        self.page = MagicMock()
-        self.page.url = 'https://chatgpt.com/c/new-branch'
-        self.page.title.return_value = 'Branch: parent answer'
-        self.page.evaluate.return_value = {'mapping': conversation_mapping(), 'current_node': 'a4'}
-        response = self.page.expect_response.return_value.__enter__.return_value.value
-        response.ok = True
-        response.json.return_value = {'conversation': {'conversation_id': 'new-branch'}}
-        self.open = patch.object(chatgpt, '_open_background_tab', return_value=self.page).start()
-        self.visible = patch.object(chatgpt, '_visible').start()
-        self.addCleanup(patch.stopall)
+class TabComparisonTests(unittest.TestCase):
+    def test_ignores_source_existing_and_unrelated_new_tabs(self):
+        original, helper, unrelated, branch = object(), object(), object(), object()
+        before = {'old': {'page': original, 'url': 'https://chatgpt.com/c/source'}}
+        before_click = {**before, 'helper': {'page': helper, 'url': 'https://chatgpt.com/c/source'}}
+        after = {**before_click, 'noise': {'page': unrelated, 'url': 'https://chatgpt.com/c/other'},
+                 'branch': {'page': branch, 'url': 'https://chatgpt.com/g/project/c/created'}}
+        self.assertIs(chatgpt_branch._new_branch_tab(before, before_click, after, helper, 'created'), branch)
+        after.pop('branch')
+        after['old']['url'] = 'https://chatgpt.com/c/created'
+        self.assertIsNone(chatgpt_branch._new_branch_tab(before, before_click, after, helper, 'created'))
+        after['helper']['url'] = 'https://chatgpt.com/c/created'
+        self.assertIs(chatgpt_branch._new_branch_tab(before, before_click, after, helper, 'created'), helper)
 
-    def test_opens_native_branch_from_full_link_and_ordinal_in_fresh_tab(self):
-        source = 'https://chatgpt.com/g/g-p-project/c/source?keep=yes#fragment'
-        result = chatgpt_branch._branch_in_browser(self.browser, source, 2)
-        self.assertEqual(self.page.goto.call_args_list[0].args[0], source)
-        self.assertEqual(self.page.goto.call_args_list[1].args[0], 'https://chatgpt.com/branch/source/a2')
-        self.assertEqual(result['url'], 'https://chatgpt.com/c/new-branch')
-        self.assertTrue(result['key'].startswith(chatgpt.CHAT_TAB_PREFIX))
-        self.page.bring_to_front.assert_called_once()
-        self.page.close.assert_not_called()
-        self.open.assert_called_once_with(self.browser)
-
-    def test_bad_source_does_not_open_tab_or_guess_response(self):
-        for url in ('', 'https://evil.test/c/source', 'https://chatgpt.com/', 'https://user:pass@chatgpt.com/c/source'):
-            with self.assertRaises(ValueError):
-                chatgpt_branch._branch_in_browser(self.browser, url, 1)
-        self.open.assert_not_called()
-        with self.assertRaises(ValueError):
-            chatgpt_branch._branch_in_browser(self.browser, 'https://chatgpt.com/c/source', 50)
-        self.assertEqual(self.page.goto.call_count, 1)
-        self.page.close.assert_called_once()
-
-    def test_uncertain_result_keeps_tab_and_never_retries_creation(self):
-        self.page.wait_for_function.side_effect = TimeoutError('Not ready')
-        with self.assertRaises(chatgpt.ChatGPTError):
-            chatgpt_branch._branch_in_browser(self.browser, 'https://chatgpt.com/c/source', 2)
-        self.assertEqual(self.page.goto.call_count, 2)
-        self.page.close.assert_not_called()
-
-    def test_rejected_creation_cannot_be_mistaken_for_successful_navigation(self):
-        response = self.page.expect_response.return_value.__enter__.return_value.value
-        response.ok = False
-        with self.assertRaises(chatgpt.ChatGPTError):
-            chatgpt_branch._branch_in_browser(self.browser, 'https://chatgpt.com/c/source', 2)
-        self.page.bring_to_front.assert_not_called()
-        self.page.close.assert_not_called()
+    def test_duplicate_matching_new_tabs_are_not_guessed(self):
+        after = {str(i): {'page': object(), 'url': 'https://chatgpt.com/c/created'} for i in range(2)}
+        self.assertIsNone(chatgpt_branch._new_branch_tab({}, {}, after, object(), 'created'))
 
 
+SOURCE_HTML = '''<title>Source</title><form><div id="prompt-textarea" contenteditable="true"></div></form>
+<div id="scroll" style="height:300px;overflow:auto;position:relative" data-app-action-timeline-scroll>
+<div style="height:2100px;position:relative" id="contents"></div></div>
+<script>
+window.branchClicks=0;
+const host=document.querySelector('#scroll'),contents=document.querySelector('#contents');
+function render(){
+  const id=host.scrollTop>500?'a4':'a2';
+  contents.innerHTML=`<section data-turn-key="${id}" style="position:absolute;top:${id==='a4'?1800:0}px">
+    <div data-message-author-role="assistant" data-message-id="${id}">Answer ${id}</div>
+    <button aria-label="More actions" onclick="openMenu('${id}')">...</button></section>`;
+}
+host.addEventListener('scroll',render);host.scrollTop=1800;render();
+function openMenu(id){
+  document.querySelector('#menu')?.remove();
+  const menu=document.createElement('div');menu.id='menu';menu.setAttribute('role','menu');
+  if(window.directMenu){menu.innerHTML='<button role="menuitem" id="final">Branch in new chat</button>';}
+  else {menu.innerHTML='<button role="menuitem" id="parent">Branch conversation</button><button role="menuitem" id="final" hidden>Branch in new chat</button>';}
+  document.body.append(menu);
+  if(!window.directMenu){document.querySelector('#parent').onmouseenter=()=>document.querySelector('#final').hidden=false;}
+  document.querySelector('#final').onclick=()=>{
+    window.branchClicks++;
+    if(window.sameTab){branch(id);return;}
+    window.open('/c/unrelated','_blank');
+    window.open('/native-ui-branch?message='+id,'_blank');
+  };
+}
+async function branch(id){const r=await fetch('/backend-api/conversation/new_branch',{
+  method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:'source',message_id:id})});
+  if(r.ok){const data=await r.json();location.href='/g/project/c/'+data.conversation.conversation_id;}}
+</script>'''
 
-class NativeBranchRouteTests(unittest.TestCase):
-    def test_native_route_redirect_and_tab_selection_in_real_browser(self):
+
+class NativeBranchUITests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
         from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(channel='chrome', headless=True)
-            context = browser.new_context()
-            requests = []
-            composer = '<title>Branch from response</title><form><div id="prompt-textarea" contenteditable="true"></div></form>'
-            def serve(route):
-                path = route.request.url.removeprefix('https://chatgpt.com')
-                if path == '/backend-api/conversation/source':
-                    route.fulfill(json={'mapping': conversation_mapping(), 'current_node': 'a4'})
-                elif path == '/backend-api/conversation/new_branch':
-                    requests.append(route.request.post_data_json)
-                    route.fulfill(json={'conversation': {'conversation_id': 'new-branch'}})
-                elif path == '/branch/source/a2':
-                    route.fulfill(content_type='text/html', body='''<script>
-                        fetch('/backend-api/conversation/new_branch', {method:'POST',headers:{'Content-Type':'application/json'},
-                          body:JSON.stringify({conversation_id:'source',message_id:'a2'})})
-                        .then(r=>r.json()).then(r=>location.href='/g/project/c/'+r.conversation.conversation_id);
-                    </script>''')
-                elif path in ('/g/project/c/source', '/g/project/c/new-branch'):
-                    route.fulfill(content_type='text/html', body=composer)
-                else:
-                    route.abort()
-            context.route('**/*', serve)
-            original = context.new_page()
-            original.goto('https://chatgpt.com/g/project/c/source')
-            # CDP background tab creation is separately exercised by the app; use a fresh test tab here.
-            with patch.object(chatgpt, '_open_background_tab', side_effect=lambda _: context.new_page()):
-                result = chatgpt_branch._branch_in_browser(browser, original.url, 2)
-            self.assertEqual(requests, [{'conversation_id': 'source', 'message_id': 'a2'}])
-            self.assertEqual(original.url, 'https://chatgpt.com/g/project/c/source')
-            self.assertEqual(result['url'], 'https://chatgpt.com/g/project/c/new-branch')
-            selected, created = chatgpt._selected_chatgpt_tab(browser, result['key'])
-            self.assertFalse(created)
-            self.assertEqual(selected.url, result['url'])
-            self.assertEqual(len(context.pages), 2)
-            browser.close()
+        cls.playwright = sync_playwright().start()
+        cls.browser = cls.playwright.chromium.launch(channel='chrome', headless=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.playwright.stop()
+
+    def setUp(self):
+        self.context = self.browser.new_context()
+        self.requests, self.visits = [], []
+        self.reject = self.same_tab = self.direct_menu = False
+        self.context.route('**/*', self.serve)
+        self.original = self.context.new_page()
+        self.original.goto('https://chatgpt.com/g/project/c/source')
+        self.open_patch = patch.object(chatgpt, '_open_background_tab', side_effect=lambda _: self.context.new_page())
+        self.open_patch.start()
+
+    def tearDown(self):
+        self.open_patch.stop()
+        self.context.close()
+
+    def serve(self, route):
+        path = route.request.url.removeprefix('https://chatgpt.com')
+        if path == '/backend-api/conversation/source':
+            route.fulfill(json={'mapping': conversation_mapping(), 'current_node': 'a4'})
+        elif path == '/backend-api/conversation/new_branch':
+            self.requests.append(route.request.post_data_json)
+            route.fulfill(status=403 if self.reject else 200, json={'conversation': {'conversation_id': 'created'}})
+        elif path.startswith('/native-ui-branch?'):
+            self.visits.append(path)
+            route.fulfill(content_type='text/html', body=SOURCE_HTML + '<script>branch(new URL(location).searchParams.get("message"));</script>')
+        elif path == '/g/project/c/source':
+            route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};</script>')
+        elif path in ('/g/project/c/created', '/c/unrelated'):
+            self.visits.append(path)
+            route.fulfill(content_type='text/html', body='<title>Duplicate title</title><form><div id="prompt-textarea" contenteditable="true"></div></form>')
+        else:
+            route.abort()
+
+    def test_scroll_click_submenu_and_compare_popup_tabs(self):
+        result = chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2)
+        self.assertEqual(self.requests, [{'conversation_id': 'source', 'message_id': 'a2'}])
+        self.assertEqual(self.original.url, 'https://chatgpt.com/g/project/c/source')
+        self.assertEqual(result['url'], 'https://chatgpt.com/g/project/c/created')
+        selected, created = chatgpt._selected_chatgpt_tab(self.browser, result['key'])
+        self.assertFalse(created)
+        self.assertEqual(selected.url, result['url'])
+        self.assertEqual(len(self.context.pages), 4)  # Original, helper, unrelated popup, real branch.
+        helper = next(p for p in self.context.pages if p != self.original and p.url == self.original.url)
+        self.assertEqual(helper.evaluate('window.branchClicks'), 1)
+        self.assertIn('/native-ui-branch?message=a2', self.visits)
+
+    def test_direct_menu_same_tab_navigation_is_still_new_relative_to_original_tabs(self):
+        self.same_tab = self.direct_menu = True
+        result = chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2)
+        self.assertEqual(result['url'], 'https://chatgpt.com/g/project/c/created')
+        self.assertEqual(len(self.context.pages), 2)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_rejected_click_is_not_success_and_is_never_retried(self):
+        self.reject = True
+        with self.assertRaises(chatgpt.ChatGPTError):
+            chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.original.url, 'https://chatgpt.com/g/project/c/source')
+        self.assertGreater(len(self.context.pages), 1)  # Keep tabs available for inspection.
+
+    def test_invalid_ordinal_does_not_click_any_response(self):
+        with self.assertRaises(ValueError):
+            chatgpt_branch._branch_in_browser(self.browser, self.original.url, 99)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(len(self.context.pages), 1)
