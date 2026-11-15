@@ -1,0 +1,351 @@
+/* Response metrics measured from the user's ChatGPT tab (2026-11-15).
+   Keep this scoped: the workspace controls remain compact and green. */
+.response-markdown {
+  --response-text: #0d0d0d;
+  --response-muted: #5d5d5d;
+  --response-border: #e5e5e5;
+  font-family:
+    -apple-system-body,
+    ui-sans-serif,
+    -apple-system,
+    system-ui,
+    "Segoe UI",
+    Helvetica,
+    "Apple Color Emoji",
+    Arial,
+    sans-serif,
+    "Segoe UI Emoji",
+    "Segoe UI Symbol";
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 400;
+  color: var(--response-text);
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+  max-width: 768px;
+  margin-inline: auto;
+  min-width: 0;
+}
+.response-markdown p {
+  margin: 16px 0 0;
+}
+.response-markdown > :first-child {
+  margin-top: 0;
+}
+.response-markdown > :last-child {
+  margin-bottom: 0;
+}
+.response-markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+  margin: 24px 0 0;
+}
+.response-markdown h1 {
+  font-size: 20px;
+  line-height: 28px;
+}
+.response-markdown h2 {
+  font-size: 18px;
+  line-height: 28px;
+}
+.response-markdown :is(h3, h4, h5, h6) {
+  font-size: 16px;
+  line-height: 26px;
+}
+.response-markdown :is(h1, h2, h3, h4, h5, h6) + p {
+  margin-top: 8px;
+}
+.response-markdown strong {
+  font-weight: 600;
+}
+.response-markdown :is(ul, ol) {
+  margin: 8px 0 0;
+  padding-inline-start: 32px;
+  list-style-position: outside;
+}
+.response-markdown ul {
+  list-style-type: disc;
+}
+.response-markdown ul ul {
+  list-style-type: circle;
+}
+.response-markdown ul ul ul {
+  list-style-type: square;
+}
+.response-markdown ol {
+  list-style-type: decimal;
+}
+.response-markdown li {
+  padding-inline-start: 4px;
+  margin: 0;
+}
+.response-markdown li::marker {
+  font-weight: 600;
+  color: inherit;
+}
+.response-markdown li > p {
+  margin: 0;
+}
+.response-markdown li > p + p {
+  margin-top: 16px;
+}
+.response-markdown li > :is(ul, ol) {
+  margin-block: 0;
+}
+.response-markdown li > :last-child {
+  margin-bottom: 0;
+}
+.response-markdown .contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+.response-markdown .task-list-item {
+  padding-left: 0;
+}
+.response-markdown .task-list-item input {
+  margin-right: 8px;
+  accent-color: #0d0d0d;
+}
+.response-markdown blockquote {
+  position: relative;
+  margin: 16px 0;
+  padding: 4px 0 4px 24px;
+  color: inherit;
+  font-style: normal;
+}
+.response-markdown blockquote::before {
+  content: "";
+  position: absolute;
+  inset: 4px auto 4px 0;
+  width: 4px;
+  border-radius: 2px;
+  background: #d9d9d9;
+}
+.response-markdown blockquote > :first-child {
+  margin-top: 0;
+}
+.response-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--response-border);
+  margin: 28px 0;
+}
+.response-markdown hr + * {
+  margin-top: 0;
+}
+.response-markdown a {
+  color: #2964aa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.response-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+.response-markdown code,
+.response-markdown pre {
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+.response-markdown :not(pre) > code {
+  font-size: 14px;
+  line-height: inherit;
+  padding: 1px 5px;
+  background: #f4f4f4;
+  border-radius: 4px;
+  font-weight: 500;
+  box-decoration-break: clone;
+}
+.response-code-block {
+  margin: 16px 0;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  background: #f7f7f8;
+  overflow: hidden;
+}
+.response-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  font:
+    12px/20px ui-sans-serif,
+    system-ui,
+    sans-serif;
+  color: var(--response-muted);
+  user-select: none;
+}
+.response-code-header button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  padding: 3px 5px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.response-code-header button:hover {
+  background: #e9e9e9;
+}
+.response-markdown pre {
+  display: block;
+  margin: 0;
+  padding: 0 20px 16px;
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+  max-height: 65vh;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+.response-markdown pre > code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+.response-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+.response-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+.response-markdown :is(th, td) {
+  border: 0;
+  padding: 8px;
+  min-width: 100px;
+  vertical-align: top;
+}
+.response-markdown th {
+  font-weight: 600;
+  background: transparent;
+}
+.response-markdown :is(th, td):first-child {
+  padding-left: 0;
+}
+.response-markdown :is(th, td):last-child {
+  padding-right: 0;
+}
+.response-markdown tr {
+  border-bottom: 1px solid var(--response-border);
+}
+.response-markdown tbody tr:last-child {
+  border-bottom: 0;
+}
+.response-markdown :is(th, td) > :first-child {
+  margin-top: 0;
+}
+.response-markdown .katex {
+  font-size: 1.21em;
+}
+.response-markdown .katex-display {
+  display: block;
+  margin: 16px 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  line-height: normal;
+  text-align: center;
+}
+.response-markdown .katex-error {
+  color: #9c2a2a;
+  white-space: pre-wrap;
+}
+.response-markdown .footnotes {
+  margin-top: 24px;
+  font-size: 14px;
+  color: var(--response-muted);
+}
+.response-markdown .hljs-keyword,
+.response-markdown .hljs-selector-tag,
+.response-markdown .hljs-built_in {
+  color: #a626a4;
+}
+.response-markdown .hljs-string,
+.response-markdown .hljs-attr,
+.response-markdown .hljs-addition {
+  color: #22863a;
+}
+.response-markdown .hljs-number,
+.response-markdown .hljs-literal,
+.response-markdown .hljs-symbol {
+  color: #a05a00;
+}
+.response-markdown .hljs-title,
+.response-markdown .hljs-section {
+  color: #005cc5;
+}
+.response-markdown .hljs-comment,
+.response-markdown .hljs-quote {
+  color: #6a737d;
+}
+.response-markdown .hljs-variable,
+.response-markdown .hljs-template-variable,
+.response-markdown .hljs-deletion {
+  color: #b31d28;
+}
+.response-markdown .hljs-meta {
+  color: #735c0f;
+}
+.response-markdown .hljs-emphasis {
+  font-style: italic;
+}
+.response-markdown .hljs-strong {
+  font-weight: 600;
+}
+.compact-workspace .chat-scroll .message.bot {
+  background: white;
+  border: 0;
+  border-radius: 0;
+  max-width: 804px;
+  margin-inline: auto;
+  padding: 16px 18px;
+}
+.compact-workspace .chat-scroll .message.user {
+  background: #f4f4f4;
+  border: 0;
+  border-radius: 24px;
+  width: fit-content;
+  max-width: min(80%, 768px);
+  margin-left: auto;
+  margin-right: max(0px, calc((100% - 804px) / 2));
+}
+.compact-workspace .chat-scroll .message-meta {
+  color: #6e6e6e;
+}
+.compact-workspace .chat-scroll .user-text {
+  font-size: 16px;
+  line-height: 26px;
+}
+.compact-workspace .message.bot .answer-actions {
+  border: 0;
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .compact-workspace .chat-scroll .message.bot {
+    padding: 12px 2px;
+  }
+  .response-markdown :is(ul, ol) {
+    padding-left: 26px;
+  }
+}

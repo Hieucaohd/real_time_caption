@@ -294,11 +294,6 @@
   user-select: text;
   min-height: 60px;
 }
-.research-answer .markdown {
-  font-size: 13px;
-  line-height: 1.85;
-  overflow-wrap: anywhere;
-}
 .research-answer ::selection {
   background: #d9d6ff;
   color: #30294d;

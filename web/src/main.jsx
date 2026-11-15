@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import Md from "./MarkdownResponse";
 import ResearchTab from "./ResearchTab";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
@@ -42,6 +39,7 @@ import {
 import "katex/dist/katex.min.css";
 import "./style.css";
 import "./reading-layout.css";
+import "./response-markdown.css";
 
 async function api(path, options = {}) {
   const headers = { "X-RTC-Client": "web", ...options.headers };
@@ -79,18 +77,6 @@ function Button({ children, icon: Icon, className = "", ...props }) {
     </button>
   );
 }
-const Md = React.memo(function Md({ text }) {
-  return (
-    <div className="markdown">
-      <Markdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
-      >
-        {text || ""}
-      </Markdown>
-    </div>
-  );
-});
 function Field({ label, children }) {
   return (
     <label className="field">

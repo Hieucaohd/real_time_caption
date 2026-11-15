@@ -30,6 +30,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 Giao diện ưu tiên nội dung: thanh tiêu đề/Live Captions thu gọn, **Tùy chọn Chat** mặc định đóng (bấm để mở), ô nhập tự giãn theo nội dung. Nút **Tập trung đọc** ẩn danh sách hội thoại, điều khiển và ô soạn; **Thoát tập trung** khôi phục giao diện cùng bản nháp. Trong nghiên cứu, câu trả lời chiếm phần rộng hơn; **Mở rộng câu trả lời / Hiện đồ thị** chuyển giữa đọc toàn chiều rộng và xem cây. Các nút này không thay đổi dữ liệu hay bố cục node đã lưu.
 
+Câu trả lời web dùng chung `MarkdownResponse` trong Chat, Summary và nghiên cứu: `react-markdown`, `remark-gfm`, `remark-math`/KaTeX và `rehype-highlight`. Kiểu chữ, dòng, tiêu đề và vùng đọc bám theo thông số đo từ tab ChatGPT ngày 15/11/2026 (nội dung 16px/26px, rộng tối đa 768px). Công thức `$$...$$` một dòng vẫn hiển thị dạng khối; code có tô màu và nút copy riêng, bảng/cuộn công thức không làm tràn khung. Markdown gốc trong database không thay đổi. Đây là bản dựng lại giao diện Markdown sáng, không nhúng toàn bộ giao diện ChatGPT: citation tương tác, Canvas và các widget riêng không có trong dữ liệu Copy nên không thể khôi phục chỉ từ Markdown.
+
 1. Trong **Chat**, bấm **Nghiên cứu theo nhánh** dưới một câu trả lời. Node gốc giữ nguyên câu hỏi và câu trả lời tại thời điểm chuyển. Bấm lại cùng câu trả lời sẽ mở lại cây đã có.
 2. Trong hộp **Tạo nhánh con**, chọn tab ChatGPT và dùng **Refresh Chrome tabs** để lấy lại danh sách tab Chrome 9222. Mặc định gửi vào cuộc hội thoại đang mở ở tab đã chọn, giống Chat; chỉ mở chat mới khi bạn chủ động bật **New ChatGPT chat**.
 3. Bấm node để đọc bên phải. Bôi đen nội dung trong câu trả lời, chuột phải, chọn **Tạo nhánh từ đoạn đã chọn**. Hoặc bấm **Tạo nhánh con** để viết câu hỏi tự do.
@@ -80,6 +82,7 @@ npm --prefix web test
 # Kiểm thử chuột/phím bằng Chrome headless, dùng database tạm, không gửi ChatGPT:
 .venv\Scripts\python.exe -X utf8 tests/check_research_graph_browser.py
 .venv\Scripts\python.exe -X utf8 tests/check_branch_composer_browser.py
+.venv\Scripts\python.exe -X utf8 tests/check_markdown_browser.py
 ```
 
 Backend: `web_api/server.py`, `web_api/service.py`. Frontend: `web/src/main.jsx`, `web/src/style.css`; React được bundle bằng esbuild, không cần Node server khi sử dụng.
