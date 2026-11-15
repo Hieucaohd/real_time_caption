@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,9 +34,14 @@ import {
   Square,
   ChevronRight,
   GitBranch,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import "katex/dist/katex.min.css";
 import "./style.css";
+import "./reading-layout.css";
 
 async function api(path, options = {}) {
   const headers = { "X-RTC-Client": "web", ...options.headers };
@@ -140,6 +145,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false),
     [promptKind, setPromptKind] = useState(null);
   const [researchFocus, setResearchFocus] = useState(null);
+  const [sidebarHidden, setSidebarHidden] = useState(false),
+    [readingFocus, setReadingFocus] = useState(false);
   const [chromeTabs, setChromeTabs] = useState([]),
     [loadingTabs, setLoadingTabs] = useState(false);
   const [message, setMessage] = useState(""),
@@ -160,6 +167,13 @@ function App() {
     chatEnd = useRef(null),
     fileInput = useRef(null),
     chatScroll = useRef(null);
+  const messageInput = useRef(null);
+  useLayoutEffect(() => {
+    const area = messageInput.current;
+    if (!area) return;
+    area.style.height = "0px";
+    area.style.height = Math.min(140, Math.max(36, area.scrollHeight)) + "px";
+  }, [message, tab, readingFocus, sidebarHidden]);
   const jobSeen = useRef(new Set());
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
@@ -575,7 +589,13 @@ function App() {
       </div>
     );
   return (
-    <div className="shell">
+    <div
+      className={
+        "shell compact-workspace " +
+        (sidebarHidden ? "sidebar-hidden " : "") +
+        (readingFocus ? "focus-reading" : "")
+      }
+    >
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">
@@ -633,61 +653,90 @@ function App() {
         </div>
       </aside>
       <main>
-        <header>
-          <div>
-            <div className="eyebrow">
-              WORKSPACE <span>/</span> {tabs.find((t) => t[0] === tab)?.[2]}
-            </div>
-            <h1>{current?.title || "Bắt đầu cuộc hội thoại mới"}</h1>
-          </div>
-          <div className="header-actions">
+        <div className="workspace-top">
+          <header>
             <Button
-              icon={Pencil}
-              title="Rename conversation"
-              onClick={rename}
-              disabled={!cid}
-            />
-            <Button
-              icon={FolderOpen}
-              title="Open conversation folder"
-              onClick={() =>
-                action(() => post("/conversations/" + cid + "/open-folder"))
+              icon={
+                sidebarHidden || readingFocus ? PanelLeftOpen : PanelLeftClose
               }
-              disabled={!cid}
+              title={
+                sidebarHidden || readingFocus
+                  ? "Hiện danh sách hội thoại"
+                  : "Ẩn danh sách hội thoại"
+              }
+              aria-label="Ẩn/hiện danh sách hội thoại"
+              aria-expanded={!sidebarHidden && !readingFocus}
+              onClick={() => {
+                if (readingFocus) {
+                  setReadingFocus(false);
+                  setSidebarHidden(false);
+                } else setSidebarHidden((v) => !v);
+              }}
             />
+            <div className="conversation-title">
+              <h1 title={current?.title}>
+                {current?.title || "Bắt đầu cuộc hội thoại mới"}
+              </h1>
+            </div>
+            <div className="header-actions">
+              <Button
+                icon={readingFocus ? Minimize2 : Maximize2}
+                className="reading-focus-toggle"
+                aria-pressed={readingFocus}
+                title={readingFocus ? "Thoát tập trung" : "Tập trung đọc"}
+                onClick={() => setReadingFocus((v) => !v)}
+              >
+                {readingFocus ? "Thoát tập trung" : "Tập trung đọc"}
+              </Button>
+              <Button
+                icon={Pencil}
+                title="Rename conversation"
+                onClick={rename}
+                disabled={!cid}
+              />
+              <Button
+                icon={FolderOpen}
+                title="Open conversation folder"
+                onClick={() =>
+                  action(() => post("/conversations/" + cid + "/open-folder"))
+                }
+                disabled={!cid}
+              />
+              <Button
+                icon={PanelTop}
+                title="Caption overlay"
+                onClick={() => action(() => post("/overlay"))}
+              >
+                Caption overlay
+              </Button>
+            </div>
+          </header>
+          <div className="capture-bar">
+            <div className={"source-icon " + (active ? "recording" : "")}>
+              <AudioLines size={23} />
+            </div>
+            <div>
+              <strong>Windows Live Captions</strong>
+              <small title={boot.capture.status}>{boot.capture.status}</small>
+            </div>
+            <span className="source-tag">Win + Ctrl + L</span>
             <Button
-              icon={PanelTop}
-              onClick={() => action(() => post("/overlay"))}
+              className={active ? "stop" : "primary"}
+              icon={active ? Pause : Play}
+              disabled={!cid}
+              onClick={() =>
+                action(() =>
+                  post(
+                    active
+                      ? "/capture/pause"
+                      : "/conversations/" + cid + "/capture",
+                  ),
+                )
+              }
             >
-              Caption overlay
+              {active ? "Pause" : "Start / Continue"}
             </Button>
           </div>
-        </header>
-        <div className="capture-bar">
-          <div className={"source-icon " + (active ? "recording" : "")}>
-            <AudioLines size={23} />
-          </div>
-          <div>
-            <strong>Windows Live Captions</strong>
-            <small>{boot.capture.status}</small>
-          </div>
-          <span className="source-tag">Win + Ctrl + L</span>
-          <Button
-            className={active ? "stop" : "primary"}
-            icon={active ? Pause : Play}
-            disabled={!cid}
-            onClick={() =>
-              action(() =>
-                post(
-                  active
-                    ? "/capture/pause"
-                    : "/conversations/" + cid + "/capture",
-                ),
-              )
-            }
-          >
-            {active ? "Pause" : "Start / Continue"}
-          </Button>
         </div>
         <nav>
           {tabs.map(([key, Icon, label]) => (
@@ -753,6 +802,7 @@ function App() {
                 loadingTabs={loadingTabs}
                 focus={researchFocus}
                 goChat={() => setTab("chat")}
+                readingFocus={readingFocus}
               />
             )}
             {tab === "transcript" && (
@@ -822,7 +872,34 @@ function App() {
             )}
             {tab === "chat" && (
               <>
-                {options("chat")}
+                <details className="chat-settings">
+                  <summary>
+                    <Settings2 size={14} />
+                    <strong>Tùy chọn Chat</strong>
+                    <span
+                      title={
+                        chromeTabs.find(
+                          (t) => t.key === settings.chatgpt_selected_tab,
+                        )?.title
+                      }
+                    >
+                      {chromeTabs.find(
+                        (t) => t.key === settings.chatgpt_selected_tab,
+                      )?.title ||
+                        (settings.chatgpt_selected_tab
+                          ? "Tab ChatGPT đã lưu"
+                          : "Chọn tab ChatGPT")}
+                    </span>
+                    <span
+                      title={settings.chat_prompt || boot.prompts.chat?.at(-1)}
+                    >
+                      {settings.chat_prompt || boot.prompts.chat?.at(-1)}
+                    </span>
+                    {newChat && <b className="new-chat-indicator">Chat mới</b>}
+                    <ChevronRight size={14} className="settings-chevron" />
+                  </summary>
+                  {options("chat")}
+                </details>
                 <div className="chat-scroll scroll" ref={chatScroll}>
                   {!messages.filter((m) => m.kind === "chat").length && (
                     <Empty
@@ -862,7 +939,7 @@ function App() {
                     ))}
                   <div ref={chatEnd} />
                 </div>
-                <div className="composer">
+                <div className="composer chat-composer">
                   <div className="composer-files">
                     {files.map((f) => (
                       <span key={f.path}>
@@ -880,6 +957,9 @@ function App() {
                     ))}
                   </div>
                   <textarea
+                    ref={messageInput}
+                    rows={1}
+                    aria-label="Câu hỏi Chat"
                     placeholder="Nhập câu hỏi… Enter để gửi, Shift + Enter xuống dòng"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}

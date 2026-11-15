@@ -38,6 +38,7 @@ def main():
             page.route('**/api/chrome-tabs', lambda route: route.fulfill(json=tabs))
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
+            page.locator('.chat-settings > summary').click()
             chat_prompts = page.get_by_label('chat Prompt', exact=True).locator('option').all_text_contents()
             expect(page.get_by_label('chat Power', exact=True)).to_have_value('2')
             page.get_by_label('Đính kèm transcript', exact=True).uncheck()

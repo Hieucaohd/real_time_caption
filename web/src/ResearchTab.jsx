@@ -9,6 +9,8 @@ import {
   Copy,
   Search,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
@@ -57,6 +59,7 @@ export default function ResearchTab({
   loadingTabs,
   focus,
   goChat,
+  readingFocus = false,
 }) {
   const storageKey = "rtc-research-" + cid;
   const [nodes, setNodes] = useState([]),
@@ -68,6 +71,7 @@ export default function ResearchTab({
     [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [graphExpanded, setGraphExpanded] = useState(false);
+  const [readerExpanded, setReaderExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
     [draft, setDraft] = useState(null);
   const answer = useRef(null),
@@ -229,6 +233,19 @@ export default function ResearchTab({
             </span>
           </div>
         </div>
+        {!readingFocus && roots.length > 0 && (
+          <button
+            className="reader-expand"
+            aria-pressed={readerExpanded}
+            onClick={() => {
+              setReaderExpanded((v) => !v);
+              setGraphExpanded(false);
+            }}
+          >
+            {readerExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {readerExpanded ? "Hiện đồ thị" : "Mở rộng câu trả lời"}
+          </button>
+        )}
       </div>
       {error && (
         <div role="alert" className="alert">
@@ -256,7 +273,16 @@ export default function ResearchTab({
           </button>
         </div>
       ) : (
-        <div className={"research-body " + (graphExpanded ? "full-graph" : "")}>
+        <div
+          className={
+            "research-body " +
+            (readerExpanded || readingFocus
+              ? "full-reader"
+              : graphExpanded
+                ? "full-graph"
+                : "")
+          }
+        >
           <div className="research-graph">
             <div className="research-map-toolbar">
               <select
