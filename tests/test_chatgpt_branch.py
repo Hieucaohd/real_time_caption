@@ -135,7 +135,7 @@ class NativeBranchUITests(unittest.TestCase):
             route.fulfill(content_type='text/html', body=SOURCE_HTML + '<script>branch(new URL(location).searchParams.get("message"));</script>')
         elif path == '/g/project/c/source':
             route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};window.localBranch={str(self.local_branch).lower()};window.discardBranchBody={str(self.discard_body).lower()};</script>')
-        elif path in ('/g/project/c/created', '/g/project/c/local-chatgpt%3Adraft-id', '/c/unrelated'):
+        elif path in ('/', '/g/project/c/created', '/g/project/c/local-chatgpt%3Adraft-id', '/c/unrelated'):
             self.visits.append(path)
             route.fulfill(content_type='text/html', body='<title>Duplicate title</title><form><div id="prompt-textarea" contenteditable="true"></div></form>')
         else:
@@ -189,3 +189,13 @@ class NativeBranchUITests(unittest.TestCase):
             chatgpt_branch._branch_in_browser(self.browser, self.original.url, 99)
         self.assertEqual(self.requests, [])
         self.assertEqual(len(self.context.pages), 1)
+
+    def test_open_fresh_chatgpt_tab_keeps_original_and_is_selectable(self):
+        tab = chatgpt._open_new_chatgpt_tab(self.browser)
+        self.assertEqual(tab.url, 'https://chatgpt.com/')
+        self.assertEqual(self.original.url, 'https://chatgpt.com/g/project/c/source')
+        selected, created = chatgpt._selected_chatgpt_tab(self.browser, tab.key)
+        self.assertFalse(created)
+        self.assertEqual(selected.url, tab.url)
+        self.assertEqual(len(self.context.pages), 2)
+        self.assertEqual(self.requests, [])

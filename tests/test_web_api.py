@@ -31,6 +31,20 @@ class FakeReader:
 
 
 class WebApiTests(unittest.TestCase):
+    def test_open_chatgpt_tab_requires_client_header_and_returns_selectable_key(self):
+        from caption import chatgpt
+        tab = chatgpt.ChromeChatGPTTab(key='fresh-tab', title='ChatGPT', label='ChatGPT', url='https://chatgpt.com/', focused=True)
+        with patch('web_api.server.chatgpt.open_new_chatgpt_tab', return_value=tab) as open_tab:
+            self.assertEqual(self.client.post('/api/chrome-tabs').status_code, 403)
+            open_tab.assert_not_called()
+            result = self.post('/api/chrome-tabs')
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json()['key'], tab.key)
+            self.assertEqual(result.json()['url'], tab.url)
+            open_tab.assert_called_once_with()
+        with patch('web_api.server.chatgpt.open_new_chatgpt_tab', side_effect=chatgpt.ChatGPTError('Chrome unavailable')):
+            self.assertEqual(self.post('/api/chrome-tabs').status_code, 400)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

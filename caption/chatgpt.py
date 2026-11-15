@@ -349,6 +349,23 @@ def _open_background_tab(browser):
         return context.new_page()
 
 
+def _open_new_chatgpt_tab(browser):
+    if not browser.contexts:
+        raise ChatGPTError('Chrome chưa có cửa sổ để mở tab ChatGPT.')
+    page = _open_background_tab(browser)
+    try:
+        page.goto(CHATGPT_URL, wait_until='domcontentloaded', timeout=30_000)
+        with _TAB_SCAN_LOCK:
+            key = page.evaluate('([prefix, proposed]) => { if (!window.name.startsWith(prefix)) window.name = proposed; return window.name; }',
+                                [CHAT_TAB_PREFIX, CHAT_TAB_PREFIX + uuid.uuid4().hex])
+        page.bring_to_front()
+        title = page.title().strip() or 'ChatGPT'
+        return ChromeChatGPTTab(key=key, label=f'{title} — {key.removeprefix(CHAT_TAB_PREFIX)[:8]}',
+                               title=title, url=page.url, focused=True)
+    except Exception as exc:
+        raise ChatGPTError('Tab mới đã mở nhưng chưa tải xong ChatGPT. Kiểm tra tab đó rồi Refresh danh sách tab.') from exc
+
+
 def _js_args() -> dict:
     return {"turn": TURN, "attrs": TURN_ID_ATTRS, "copy": REPLY_COPY_BUTTON}
 
@@ -664,6 +681,18 @@ def _shared_request(function):
         with ProcessLock(CACHE_DIR / 'chatgpt-request.lock'):
             return function(*args, **kwargs)
     return run
+
+
+@_shared_request
+def open_new_chatgpt_tab():
+    """Open a fresh ordinary ChatGPT tab in the same Chrome used by the app."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+        except Exception as exc:
+            raise ChatGPTError('Không kết nối được Chrome 9222. Hãy chạy launch_chrome.bat.') from exc
+        return _open_new_chatgpt_tab(browser)
 
 
 @_shared_request

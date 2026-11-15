@@ -91,6 +91,10 @@ def main():
             page = context.new_page()
             tab_events = []
             def scan_tabs(route):
+                if route.request.method == 'POST':
+                    tab_events.append('new-tab')
+                    route.fulfill(json={'key': 'fresh-empty-tab', 'title': 'ChatGPT', 'url': 'https://chatgpt.com/'})
+                    return
                 tab_events.append('scan')
                 route.fulfill(json=[])
             page.route('**/api/chrome-tabs', scan_tabs)
@@ -193,6 +197,13 @@ def main():
             missing_source_dialog = page.locator('.branch-composer')
             expect(missing_source_dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True)).to_be_disabled()
             expect(missing_source_dialog).to_contain_text('Hãy bổ sung link và số thứ tự câu trả lời')
+            missing_source_dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Keep draft while opening tab')
+            missing_source_dialog.get_by_label('New ChatGPT chat', exact=True).check()
+            missing_source_dialog.get_by_role('button', name='Mở tab ChatGPT mới', exact=True).click()
+            expect(missing_source_dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-empty-tab')
+            expect(missing_source_dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(missing_source_dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep draft while opening tab')
+            assert tab_events[-2:] == ['new-tab', 'scan']
             expect(missing_source_dialog.get_by_label('Đính kèm ngữ cảnh tổ tiên', exact=True)).not_to_be_checked()
             missing_source_dialog.get_by_label('Đính kèm ngữ cảnh tổ tiên', exact=True).check()
             missing_source_dialog.get_by_label('Lấy ngữ cảnh ngược tới', exact=True).select_option('2')

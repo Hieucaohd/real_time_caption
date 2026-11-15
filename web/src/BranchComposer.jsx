@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, GitBranch, Paperclip, Save, Send, X } from "lucide-react";
+import { Camera, GitBranch, Paperclip, Plus, Save, Send, X } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 
@@ -28,11 +28,13 @@ export default function BranchComposer({
   const [uploads, setUploads] = useState(0);
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [branching, setBranching] = useState(false);
-  const [branchTab, setBranchTab] = useState(null);
+  const [tabAction, setTabAction] = useState("");
+  const branching = !!tabAction;
+  const [openedTab, setOpenedTab] = useState(null);
+  const [tabNotice, setTabNotice] = useState("");
   const branchingRef = useRef(false);
   const hasSource = !!draft.parent.response_conversation_url && draft.parent.response_position > 0;
-  const availableTabs = branchTab && !tabs.some((tab) => tab.key === branchTab.key) ? [branchTab, ...tabs] : tabs;
+  const availableTabs = openedTab && !tabs.some((tab) => tab.key === openedTab.key) ? [openedTab, ...tabs] : tabs;
   const [savedConfig, setSavedConfig] = useState("");
   const savingRef = useRef(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -88,24 +90,26 @@ export default function BranchComposer({
     }
   }
 
-  async function createChatGPTBranch() {
-    if (!hasSource || branchingRef.current || sendingRef.current || savingRef.current) return;
+  async function openChatGPTTab(kind) {
+    if ((kind === "branch" && !hasSource) || branchingRef.current || sendingRef.current || savingRef.current) return;
     branchingRef.current = true;
-    setBranching(true);
-    setBranchTab(null);
+    setTabAction(kind);
+    setOpenedTab(null);
+    setTabNotice("");
     setConfig((old) => ({ ...old, selected_tab: "", new_chat: false }));
     setError("");
     try {
-      const tab = await post(`/conversations/${cid}/research/${draft.parent.id}/chatgpt-branch`, {});
-      // Backend compares Chrome target IDs before/after the UI click and returns the verified branch.
+      const tab = await post(kind === "branch" ? `/conversations/${cid}/research/${draft.parent.id}/chatgpt-branch` : "/chrome-tabs", {});
       await scanTabs().catch(() => {});
-      setBranchTab(tab);
+      setOpenedTab(tab);
       setConfig((old) => ({ ...old, selected_tab: tab.key, new_chat: false }));
+      setTabNotice(kind === "branch" ? "Đã mở nhánh ChatGPT trong tab mới, refresh danh sách và chọn tab nhánh để gửi câu hỏi."
+        : "Đã mở ChatGPT trong tab mới, refresh danh sách và chọn tab đó để gửi câu hỏi.");
     } catch (e) {
       setError(e.message);
     } finally {
       branchingRef.current = false;
-      setBranching(false);
+      setTabAction("");
     }
   }
 
@@ -209,14 +213,17 @@ export default function BranchComposer({
           <div className="modal-body">
             <p className="muted">Node cha: {draft.parent.title}</p>
             <div className="branch-save-settings">
-              <button type="button" onClick={createChatGPTBranch} disabled={!hasSource || sending || saving || branching}>
-                <GitBranch size={15} />{branching ? "Đang tạo nhánh ChatGPT…" : "Tạo nhánh ChatGPT"}
+              <button type="button" onClick={() => openChatGPTTab("new")} disabled={sending || saving || branching}>
+                <Plus size={15} />{tabAction === "new" ? "Đang mở tab ChatGPT…" : "Mở tab ChatGPT mới"}
+              </button>
+              <button type="button" onClick={() => openChatGPTTab("branch")} disabled={!hasSource || sending || saving || branching}>
+                <GitBranch size={15} />{tabAction === "branch" ? "Đang tạo nhánh ChatGPT…" : "Tạo nhánh ChatGPT"}
               </button>
               <span role="status">
-                {!hasSource ? "Hãy bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT của node cha."
+                {tabAction === "new" ? "Đang mở ChatGPT trên Chrome 9222…"
+                  : tabNotice || (!hasSource ? "Hãy bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT của node cha để tạo nhánh ChatGPT."
                   : branching ? `Đang mở nhánh từ câu trả lời thứ ${draft.parent.response_position}…`
-                  : branchTab ? "Đã mở nhánh ChatGPT trong tab mới, refresh danh sách và chọn tab nhánh để gửi câu hỏi."
-                  : `Mở tab ChatGPT mới, giữ ngữ cảnh đến câu trả lời thứ ${draft.parent.response_position} của node cha.`}
+                  : `Tạo nhánh ChatGPT để giữ ngữ cảnh đến câu trả lời thứ ${draft.parent.response_position} của node cha.`)}
               </span>
             </div>
             <ChatOptions

@@ -250,6 +250,10 @@ def create_app(service=None):
     def tabs():
         return [asdict(tab) for tab in chatgpt.list_chrome_chatgpt_tabs()]
 
+    @app.post('/api/chrome-tabs')
+    def open_chatgpt_tab():
+        return asdict(chatgpt.open_new_chatgpt_tab())
+
     def prompt_dir(kind):
         if kind not in ('chat', 'summary'):
             raise ValueError('Unknown prompt type.')
