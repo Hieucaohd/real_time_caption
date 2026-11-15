@@ -12,7 +12,8 @@ from caption.overlay import CaptionOverlay
 from caption.settings import Settings
 
 
-def main():
+def main(url=None, parent_pid=None):
+    url = url or sys.argv[1]
     root = tk.Tk()
     root.withdraw()
     settings = Settings.load()
@@ -23,8 +24,13 @@ def main():
 
     def poll():
         while not stop.wait(.3):
+            if parent_pid:
+                from caption.shared_access import process_alive
+                if not process_alive(parent_pid):
+                    stop.set()
+                    break
             try:
-                with urllib.request.urlopen(sys.argv[1].rstrip('/') + '/api/capture/state', timeout=2) as response:
+                with urllib.request.urlopen(url.rstrip('/') + '/api/capture/state', timeout=2) as response:
                     data = json.load(response)
                 if not events.full():
                     events.put(data)
@@ -35,7 +41,8 @@ def main():
     def wait_close():
         sys.stdin.read()
         stop.set()
-    threading.Thread(target=wait_close, daemon=True).start()
+    if sys.stdin is not None:
+        threading.Thread(target=wait_close, daemon=True).start()
     last, partial, checked = -1, '', 0
     def tick():
         nonlocal last, partial, checked

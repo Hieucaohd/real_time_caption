@@ -13,6 +13,18 @@ Bản web chạy trên chính máy Windows có native app. Chỉ **Windows Live 
 
 Port 9222 dành cho Chrome automation; giao diện/API dùng port 8765. Server chỉ bind `127.0.0.1`, không cung cấp truy cập từ máy khác trên LAN.
 
+## Đóng gói thành EXE
+
+Bấm đúp **`build_web_exe.bat`** tại thư mục dự án. Script cài dependency cần thiết, chạy `npm ci` + build React, đóng gói và tự kiểm tra file EXE. Máy build cần Python và Node.js/npm; máy chạy bản đóng gói chỉ cần Windows và Google Chrome.
+
+Kết quả: **`dist\RealTimeCaptionWeb.exe`**, dạng [PyInstaller onefile](https://pyinstaller.org/en/stable/runtime-information.html). Bấm vào EXE để khởi động FastAPI và mở app trong Chrome 9222. File JS/CSS, font, prompt mặc định và thư viện Python nằm trong EXE; không cần mang theo `.venv`, `node_modules` hay `web/dist`.
+
+Dữ liệu thay đổi (`conversations.sqlite3`, `transcripts`, `settings.json`, `prompts`, `chrome-profile`) nằm cạnh EXE, không nằm trong thư mục giải nén tạm. Để dùng chung với native, đặt EXE cùng thư mục dữ liệu của native hoặc tạo shortcut với `--data-dir "D:\thu-muc-du-lieu-native"`. Hai bản dùng đúng cùng database, không sao chép database khi build. Khi thư mục EXE không ghi được, dùng `%LOCALAPPDATA%\RealTimeCaption` như native.
+
+Nếu cổng 8765 đã phục vụ một thư mục dữ liệu khác, dùng `--port 8766` hoặc chọn đúng thư mục qua `--data-dir`. Đóng tab không dừng server; mở EXE lần nữa sẽ dùng lại server. Khi thay EXE, dừng các tiến trình `RealTimeCaptionWeb.exe` trong Task Manager trước.
+
+Log build: `build\web-exe\build.log`; báo cáo kiểm tra: `build\web-exe\selftest.json`. Log runtime: `caption-web.log` trong thư mục dữ liệu. Bản chuẩn không kèm Whisper/CUDA; VinAI offline là tùy chọn: cài `requirements-translation.txt`, rồi chạy `build_web_exe.bat --with-translation` và mang theo model đã tải. Mặc định không đóng gói database, API key, lịch sử chat hay phiên đăng nhập Chrome.
+
 ## Chức năng
 
 - **Transcript:** Start/Pause/Continue, chữ tạm, lịch sử, tìm/chọn/đổi tên conversation, mở folder, copy, clear view, tải toàn bộ hoặc N dòng cuối, auto-scroll.

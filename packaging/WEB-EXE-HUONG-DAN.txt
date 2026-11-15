@@ -1,0 +1,31 @@
+REAL-TIME CAPTION WEB
+
+1. Copy RealTimeCaptionWeb.exe to a writable folder on Windows.
+2. Double-click it. The app starts a local server and opens Chrome on port 9222.
+3. Log in to ChatGPT in that Chrome window. No Python or Node.js installation is needed.
+
+Google Chrome must be installed. Transcript capture uses Windows Live Captions.
+The standard build includes online translation and Word/PDF export. Optional VinAI
+offline translation requires a build with --with-translation and its model files.
+
+DATA AND UPGRADES
+conversations.sqlite3, transcripts, settings.json, prompts and chrome-profile stay
+outside the EXE, next to it. Replacing the EXE does not replace these files.
+Do not run it directly from Downloads if you plan to delete that folder later.
+
+SHARING WITH THE NATIVE APP
+Put the web EXE next to RealTimeCaption.exe, in the same data folder.
+For another folder, use a shortcut or command line:
+  RealTimeCaptionWeb.exe --data-dir "D:\path\to\native-app-data"
+This selects the existing data; it does not copy or upload it.
+An unwritable EXE folder falls back to %LOCALAPPDATA%\RealTimeCaption, as native does.
+
+The server stays running after its browser tab is closed. Opening the EXE again
+reuses the server and the existing Chrome login. To stop it before replacing it,
+end the RealTimeCaptionWeb.exe processes in Task Manager.
+
+If another app/data folder uses port 8765:
+  RealTimeCaptionWeb.exe --port 8766
+Chrome debugging still uses port 9222.
+
+Errors are saved in caption-web.log in the data folder.

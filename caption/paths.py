@@ -30,6 +30,9 @@ def _writable(folder: Path) -> bool:
 
 
 def _data_dir() -> Path:
+    # Optional explicit shared location for native and packaged web launchers.
+    if override := os.environ.get("RTC_DATA_DIR"):
+        return Path(override).expanduser().resolve()
     if not FROZEN:
         return BUNDLE_DIR
     exe_dir = Path(sys.executable).resolve().parent

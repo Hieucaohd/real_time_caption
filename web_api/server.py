@@ -28,7 +28,7 @@ from .service import Service
 from .server_math import browser_markdown
 from .research_routes import router as research_router
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
 SettingsPatch = create_model('SettingsPatch', __config__=ConfigDict(extra='forbid', strict=True),
     **{f.name: (type(f.default) | None, None) for f in fields(Settings)})
@@ -349,8 +349,10 @@ def create_app(service=None):
             if s.overlay_process and s.overlay_process.poll() is None:
                 s.hide_overlay()
                 return {'visible': False}
-            s.overlay_process = subprocess.Popen([sys.executable, '-m', 'web_api.overlay', str(request.base_url)],
-                                                cwd=ROOT, stdin=subprocess.PIPE,
+            command = ([sys.executable, '--overlay', str(request.base_url), '--overlay-parent', str(os.getpid())]
+                       if paths.FROZEN else [sys.executable, '-m', 'web_api.overlay', str(request.base_url)])
+            s.overlay_process = subprocess.Popen(command,
+                                                cwd=paths.DATA_DIR if paths.FROZEN else ROOT, stdin=subprocess.PIPE,
                                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         return {'visible': True}
 

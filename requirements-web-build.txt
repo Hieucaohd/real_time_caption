@@ -1,0 +1,2 @@
+# Tools used by build_web_exe.bat; runtime dependencies are in requirements-web.txt.
+pyinstaller>=6.10,<7
