@@ -179,7 +179,7 @@ class ConversationStore:
         return result
 
     def rename(self, conversation_id: str, title: str) -> Conversation:
-        with capture_lock(self.db_path), ProcessLock(self.db_path.parent / 'cache' / 'chatgpt-request.lock'), ProcessLock(self.db_path.parent / 'cache' / 'web-job.lock'):
+        with capture_lock(self.db_path), ProcessLock(self.db_path.parent / 'cache' / 'chatgpt-request.lock'), ProcessLock(self.db_path.parent / 'cache' / 'web-job.lock'), ProcessLock(self.db_path.parent / 'cache' / 'research-prepare.lock'):
             return self._rename(conversation_id, title)
 
     def _rename(self, conversation_id: str, title: str) -> Conversation:

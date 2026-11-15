@@ -39,6 +39,12 @@ class Settings:
     chatgpt_selected_tab: str = ""  # invisible window.name key assigned to the chosen Chrome tab
     summary_chatgpt_selected_tab: str = ""  # independently selected Chrome tab for summaries
     chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
+    research_selected_tab: str = ""
+    research_power: int = -1
+    research_attach_transcript: bool = False
+    research_max_lines: int = 300
+    research_screenshot: bool = False
+    research_instructions: str = ""
     voca_api_key: str = ""  # personal key from Voca → Cài đặt → Ứng dụng kết nối (kept only in settings.json)
     voca_collection_id: str = ""  # "" = the app's default collection in Voca
     overlay_width: int = 0  # 0 = pick from screen size

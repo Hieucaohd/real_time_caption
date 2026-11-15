@@ -25,6 +25,8 @@ from caption.translation import ENGINES, LANGUAGES, Config, TranslationError
 from caption.translation_batch import batch_options
 from caption.transcript_export import last_lines
 from .service import Service
+from .server_math import browser_markdown
+from .research_routes import router as research_router
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / 'web' / 'dist'
@@ -70,6 +72,8 @@ def create_app(service=None):
         app.state.service.close()
 
     app = FastAPI(title='Real-time Caption', lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    app.include_router(research_router)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -264,13 +268,19 @@ def create_app(service=None):
 
     @app.post('/api/jobs/{jid}/cancel')
     def cancel(jid: str, request: Request):
-        svc(request).job_cancel[jid].set()
+        s = svc(request)
+        job = s.jobs[jid]
+        if job['kind'] == 'research':
+            return s.research.cancel(job['conversation_id'], job['node_id'])
+        s.job_cancel[jid].set()
         return {'ok': True}
 
     @app.post('/api/jobs/{jid}/retry')
     def retry(jid: str, request: Request):
         s = svc(request)
         job = s.jobs[jid]
+        if job['kind'] == 'research':
+            return s.research.retry(job['conversation_id'], job['node_id'])
         if job['status'] not in ('error', 'cancelled'):
             raise ValueError('Only failed or cancelled requests can be retried.')
         return s.create_job(job['conversation_id'], job['kind'], job['_retry'])
@@ -354,20 +364,3 @@ def create_app(service=None):
         return FileResponse(DIST / 'index.html')
 
     return app
-
-
-def browser_markdown(text):
-    from caption.markdown_html import _prepare_math, _FENCE, _INLINE_CODE
-    # Match native handling of ChatGPT Copy's escaped delimiters, protecting code.
-    prepared = _prepare_math(text)
-    def inline(part):
-        out, pos = [], 0
-        for code in _INLINE_CODE.finditer(part):
-            out.append(re.sub(r'(?<!\\)\\\((.+?)\\\)', lambda m: '$' + m[1] + '$', part[pos:code.start()], flags=re.S))
-            out.append(code[0]); pos = code.end()
-        out.append(re.sub(r'(?<!\\)\\\((.+?)\\\)', lambda m: '$' + m[1] + '$', part[pos:], flags=re.S))
-        return ''.join(out)
-    out, pos = [], 0
-    for fence in _FENCE.finditer(prepared):
-        out.append(inline(prepared[pos:fence.start()])); out.append(fence[0]); pos = fence.end()
-    return ''.join(out) + inline(prepared[pos:])

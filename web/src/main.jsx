@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import ResearchTab from "./ResearchTab";
 import {
   AudioLines,
   Plus,
@@ -30,6 +31,7 @@ import {
   ArrowUp,
   Square,
   ChevronRight,
+  GitBranch,
 } from "lucide-react";
 import "katex/dist/katex.min.css";
 import "./style.css";
@@ -58,6 +60,7 @@ const post = (path, body = {}) => api(path, { method: "POST", body });
 const tabs = [
   ["transcript", FileText, "Transcript"],
   ["chat", MessageSquare, "Chat"],
+  ["research", GitBranch, "Nghiên cứu theo nhánh"],
   ["summary", BookOpen, "Summary"],
   ["translation", Languages, "Translation"],
   ["vocab", Plus, "New words"],
@@ -134,6 +137,7 @@ function App() {
     [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false),
     [promptKind, setPromptKind] = useState(null);
+  const [researchFocus, setResearchFocus] = useState(null);
   const [chromeTabs, setChromeTabs] = useState([]),
     [loadingTabs, setLoadingTabs] = useState(false);
   const [message, setMessage] = useState(""),
@@ -164,6 +168,7 @@ function App() {
   const jobs = (boot?.jobs || []).filter(
     (j) =>
       j.conversation_id === cid &&
+      j.kind !== "research" &&
       (j.kind === tab ||
         (tab === "translation" && j.kind.startsWith("translation-")) ||
         (tab === "vocab" && j.kind === "voca-save")),
@@ -181,6 +186,7 @@ function App() {
     setHistory([]);
     setHiddenTranscript(false);
     setVocabResult([]);
+    setResearchFocus(null);
   }
   async function refresh() {
     const data = await api("/bootstrap");
@@ -232,7 +238,7 @@ function App() {
   }, [detail?.transcript, boot?.capture?.partial, tab]);
   useEffect(() => {
     if (tab === "chat") chatEnd.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, busyJob?.partial, tab]);
+  }, [messages.length, busyJob?.kind === "chat" ? busyJob.partial : "", tab]);
   useEffect(() => {
     if (!lineId) return;
     api("/translation/" + lineId + "/history")
@@ -364,6 +370,23 @@ function App() {
   function answerActions(m) {
     return (
       <div className="answer-actions">
+        {m.kind === "chat" && !m.header.startsWith("Error") && (
+          <Button
+            icon={GitBranch}
+            onClick={() =>
+              action(async () => {
+                const node = await post(
+                  "/conversations/" + cid + "/research/import",
+                  { message_id: m.id },
+                );
+                setResearchFocus({ id: node.id, nonce: Date.now() });
+                setTab("research");
+              })
+            }
+          >
+            Nghiên cứu theo nhánh
+          </Button>
+        )}
         <Button icon={Copy} onClick={() => copy(m.content)}>
           Copy
         </Button>
@@ -689,6 +712,21 @@ function App() {
             </button>
           ))}
         </nav>
+        {busyJob?.kind === "research" && tab !== "research" && (
+          <div className="research-notice">
+            Đang trả lời một nhánh nghiên cứu.{" "}
+            <button
+              onClick={() => {
+                if (cid !== busyJob.conversation_id)
+                  choose(busyJob.conversation_id);
+                setResearchFocus({ id: busyJob.node_id, nonce: Date.now() });
+                setTab("research");
+              }}
+            >
+              Xem tiến độ / hủy
+            </button>
+          </div>
+        )}
         {(error || boot.capture.error) && (
           <div role="alert" className="alert">
             {error || boot.capture.error}
@@ -710,6 +748,22 @@ function App() {
           />
         ) : (
           <div className="workspace">
+            {tab === "research" && (
+              <ResearchTab
+                key={cid}
+                cid={cid}
+                api={api}
+                post={post}
+                Md={Md}
+                settings={settings}
+                changeSettings={changeSettings}
+                chromeTabs={chromeTabs}
+                scanTabs={scanTabs}
+                loadingTabs={loadingTabs}
+                focus={researchFocus}
+                goChat={() => setTab("chat")}
+              />
+            )}
             {tab === "transcript" && (
               <>
                 <div className="panel-toolbar">

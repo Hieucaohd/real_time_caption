@@ -47,6 +47,8 @@ class Service:
         self._stop = threading.Event()
         self._events = threading.Thread(target=self.drain, name='web-translation-events', daemon=True)
         self._events.start()
+        from .research import Research
+        self.research = Research(self)
 
     def schedule(self, ms, callback):
         def run():
@@ -332,6 +334,7 @@ class Service:
         return [asdict(w) for w in values]
 
     def close(self):
+        self.research.close()
         self.pause()
         reader = self.reader
         if reader:

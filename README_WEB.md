@@ -17,6 +17,7 @@ Port 9222 dành cho Chrome automation; giao diện/API dùng port 8765. Server c
 
 - **Transcript:** Start/Pause/Continue, chữ tạm, lịch sử, tìm/chọn/đổi tên conversation, mở folder, copy, clear view, tải toàn bộ hoặc N dòng cuối, auto-scroll.
 - **Chat:** chọn tab ChatGPT, prompt có phiên bản, Power, giới hạn transcript, đính kèm transcript/lịch sử, tự chụp màn hình, chọn màn hình/cửa sổ để chụp, upload file/ảnh và Ctrl+V ảnh. Kết quả hỗ trợ Markdown, bảng, code, công thức, copy và tải MD/DOCX/PDF. Có streaming preview, Cancel và Retry.
+- **Nghiên cứu theo nhánh:** chuyển một câu trả lời Chat thành cây hỏi–đáp; bôi đen/chuột phải để hỏi sâu hơn, tạo nhiều nhánh độc lập, thu gọn, tìm node, zoom, đọc Markdown/công thức và đánh dấu đã hiểu.
 - **Summary:** tab Chrome và cài đặt riêng, chọn prompt/version, bật/tắt transcript, tạo chat mới, xem lịch sử và xuất kết quả.
 - **Translation:** Azure, Google API, Gemini, Google Translate web, VinAI offline; tự dịch câu đã chốt, tùy chọn dịch tạm, nhóm câu, dịch phần còn thiếu hoặc câu được chọn, Stop/Retry, lịch sử theo engine, kiểm tra cấu hình và tải model offline. VinAI cần `requirements-translation.txt`, giống native.
 - **New words:** tìm ngữ cảnh trong transcript, dịch bằng ChatGPT, chọn Power, lưu vào Voca và chọn collection. Lịch sử thẻ từ được lưu chung trong SQLite và hiển thị ở hai giao diện.
@@ -25,13 +26,27 @@ Port 9222 dành cho Chrome automation; giao diện/API dùng port 8765. Server c
 
 Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chrome nếu cửa sổ đang ở phía trước là tab Real-time Caption. Khi đã đính kèm ảnh, ảnh đó được ưu tiên. Nút Screenshot dùng bộ chọn màn hình/cửa sổ của Chrome để bạn chọn nội dung muốn gửi.
 
+## Nghiên cứu theo nhánh
+
+1. Trong **Chat**, bấm **Nghiên cứu theo nhánh** dưới một câu trả lời. Node gốc giữ nguyên câu hỏi và câu trả lời tại thời điểm chuyển. Bấm lại cùng câu trả lời sẽ mở lại cây đã có.
+2. Chọn tab ChatGPT bằng thanh trên của tab nghiên cứu; dùng nút làm mới để lấy các tab Chrome 9222. Nên dùng một tab riêng vì mỗi node sẽ bắt đầu một cuộc chat mới trong tab này.
+3. Bấm node để đọc bên phải. Bôi đen nội dung trong câu trả lời, chuột phải, chọn **Tạo nhánh từ đoạn đã chọn**. Hoặc bấm **Tạo nhánh con** để viết câu hỏi tự do.
+4. Muốn hỏi đồng thời về bốn khái niệm, bật **Tạo nhiều nhánh**, nhập bốn câu hỏi trên bốn dòng rồi bấm **Xếp hàng 4 nhánh**. App tạo ngay bốn node; bạn vẫn có thể tạo thêm nhánh trong lúc ChatGPT đang trả lời.
+5. Mỗi câu hỏi nhận đúng đường đi từ gốc đến node cha, không kèm câu hỏi/câu trả lời của nhánh anh em. App mở chat mới cho từng câu hỏi để tránh trộn ngữ cảnh. Các yêu cầu **xử lý lần lượt** trên tab Chrome đã chọn, không phát sinh bốn yêu cầu đồng thời vào cùng một tab.
+6. Power và tab Chrome nằm trên thanh chung. Nút tùy chỉnh lưu mặc định riêng cho nghiên cứu: hướng dẫn cách giải thích, transcript, số dòng và tự chụp màn hình. Hộp tạo nhánh cho phép đổi riêng các lựa chọn này, upload file, dán ảnh hoặc chọn ảnh chụp. Mặc định không đính kèm transcript/ảnh; ngữ cảnh tổ tiên luôn được gửi.
+7. File, transcript, hướng dẫn và Power được chụp lại khi xếp hàng; tự chụp màn hình cũng chạy ngay lúc đó, không chụp một màn hình khác sau thời gian chờ. Retry dùng lại yêu cầu này; nút thử lại cho phép dùng tab Chrome đang được chọn nếu tab cũ đã đóng.
+
+Kéo nền để di chuyển cây; dùng +/−, vừa khung và thu gọn nhánh để điều hướng. Mỗi node có trạng thái chờ/đang trả lời/lỗi và checkbox **Đã hiểu**. Có thể đổi tên node mà không đổi câu hỏi. Tìm kiếm tìm theo câu hỏi hoặc đoạn trích.
+
+Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`; giao diện cây hiện có ở bản web. Đóng tab không hủy hàng đợi. Sau restart, các node chưa bắt đầu tiếp tục chạy; node bị ngắt khi đang gửi phải **Thử lại** thủ công để tránh gửi trùng. Hủy một node không hủy nhánh khác. Lỗi không tự gửi lại. Khi native app đang dùng ChatGPT, hàng đợi nghiên cứu chờ khóa được nhả.
+
 ## Dữ liệu và đồng bộ
 
 Web sử dụng trực tiếp `conversations.sqlite3`, `transcripts/conversations/`, `prompts/` và `settings.json` từ `caption.paths`. Không có database hoặc bản sao transcript riêng cho web. File đính kèm nằm trong conversation; snapshots gửi ChatGPT nằm trong `cache/web-uploads/` để Retry dùng lại đúng nội dung đã chuẩn bị.
 
 Hai app có thể cùng mở. Web cập nhật dữ liệu mỗi giây; desktop cập nhật dữ liệu bên ngoài khoảng mỗi hai giây. Khởi động lại native app sau khi cập nhật code để nhận đồng bộ và khóa liên tiến trình mới. Mỗi thời điểm chỉ một giao diện được ghi transcript; pause ở giao diện đang ghi trước khi chuyển sang giao diện kia. Rename bị chặn trong lúc capture/ChatGPT đang sử dụng file. ChatGPT request cũng được khóa giữa desktop và web để tránh thao tác cùng tab đồng thời.
 
-Settings chỉ ghi những trường thay đổi kể từ lúc tải, dưới khóa file và bằng thay thế nguyên tử. Mỗi tác vụ dịch có PID chủ sở hữu để mở thêm giao diện không hủy nhầm tác vụ còn chạy. Lịch sử đã lưu tồn tại sau restart; trạng thái Cancel/Retry của các tác vụ web hiện tại nằm trong bộ nhớ server.
+Settings chỉ ghi những trường thay đổi kể từ lúc tải, dưới khóa file và bằng thay thế nguyên tử. Mỗi tác vụ dịch có PID chủ sở hữu để mở thêm giao diện không hủy nhầm tác vụ còn chạy. Lịch sử đã lưu tồn tại sau restart; trạng thái Cancel/Retry của Chat/Summary web nằm trong bộ nhớ server. Riêng nghiên cứu lưu cả trạng thái/yêu cầu vào SQLite, cùng các file snapshot trong `cache/research/`; giữ thư mục này để tiếp tục hàng đợi và Retry sau restart.
 
 ## Phát triển và kiểm tra
 
