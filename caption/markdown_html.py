@@ -104,20 +104,33 @@ _BRACKET_MATH = re.compile(
     re.S,
 )
 _COPIED_TEX_TOKEN = re.compile(
-    r"\\(?:text[a-z]*|mbox|operatorname\*?)\s*\{|\\[{}]|[{}]|\\_"
+    r"(?P<delimiter>\\(?:left|right|middle|[Bb]igg?[lrm]?)\s*)\\{2}(?P<brace>[{}|])"
+    r"|\\{2}(?P<spacing>[,;:!])"
+    r"|\\{2}|\\(?:text[a-z]*|mbox|operatorname\*?)\s*\{|\\[{}]|[{}]|\\[_<*]"
 )
 
 
 def _unescape_copied_tex(tex: str) -> str:
-    r"""Undo copied Markdown's ``\_`` inside math, not literal text groups.
+    r"""Undo known Copy escaping artifacts inside math, not literal text groups.
 
     Only called for the double-escaped delimiters produced by ChatGPT's Copy
-    action. TeX commands, escaped symbols and ``\\`` array rows stay intact.
+    action. Sized braces and spacing can gain a slash; ``<``, ``*`` and
+    subscripts can be escaped as Markdown. Never decode all punctuation:
+    ``\>`` is valid TeX spacing,
+    ``\{`` is a literal brace, and ``\\`` separates array rows (even before
+    a group). Consume row breaks atomically so they cannot escape that group.
     """
     text_groups: list[bool] = []
 
     def replace(match: re.Match) -> str:
         token = match.group(0)
+        in_text = bool(text_groups and text_groups[-1])
+        if match.group('delimiter'):
+            return token if in_text else match.group('delimiter') + '\\' + match.group('brace')
+        if match.group('spacing'):
+            return token if in_text else '\\' + match.group('spacing')
+        if token == r"\\":
+            return token
         if token.startswith("\\") and token.endswith("{") and token != r"\{":
             text_groups.append(True)
         elif token == "{":
@@ -125,8 +138,8 @@ def _unescape_copied_tex(tex: str) -> str:
         elif token == "}":
             if text_groups:
                 text_groups.pop()
-        elif token == r"\_" and not (text_groups and text_groups[-1]):
-            return "_"
+        elif token in (r"\_", r"\<", r"\*") and not in_text:
+            return token[1:]
         return token
 
     return _COPIED_TEX_TOKEN.sub(replace, tex)

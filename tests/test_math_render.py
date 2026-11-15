@@ -84,6 +84,31 @@ class CopiedMathTests(unittest.TestCase):
         _, _, display = self.render(r"\[" + tex + r"\]")
         display.assert_called_once_with(tex)
 
+    def test_copied_set_delimiters_and_comparison(self):
+        tex = r"\boxed{T_qS=\left\\{\gamma'(0):\begin{array}{l}\gamma:(-\varepsilon,\varepsilon)\to S,\\\ \gamma\text{ is }C^1,\quad\gamma(0)=q\end{array}\right\\}}"
+        expected = tex.replace(r'\left\\{', r'\left\{').replace(r'\right\\}', r'\right\}')
+        _, _, display = self.render(r'\\[' + tex + r'\\]')
+        display.assert_called_once_with(expected)
+        _, inline, _ = self.render(r'\\(-0.5\<t<0.5\\)')
+        inline.assert_called_once_with('-0.5<t<0.5')
+
+    def test_copied_fixes_preserve_rows_groups_literal_text_and_spacing(self):
+        tex = r'\begin{array}{l}x\\{y\_1}\\\hline z\end{array} + \text{a\_b {c\_d} \<} + a\>b + \{x\} + \bigl\\{x\_1\bigr\\}'
+        expected = r'\begin{array}{l}x\\{y_1}\\\hline z\end{array} + \text{a\_b {c\_d} \<} + a\>b + \{x\} + \bigl\{x_1\bigr\}'
+        prepared = markdown_html._prepare_math(r'\\[' + tex + r'\\]')
+        self.assertEqual(prepared, '$$' + expected + '$$')
+        self.assertEqual(markdown_html._prepare_math(prepared), prepared)
+        # Regular math and code must never be guessed/repaired as copied TeX.
+        for source in (r'\[' + tex + r'\]', '$$' + tex + '$$', '`' + tex + '`'):
+            self.assertIn(tex, markdown_html._prepare_math(source))
+
+    def test_copied_riemann_sum_stars_and_differential_spacing(self):
+        tex = r'\int_a^b f(x)\\,dx=\lim\_{n\to\infty}\sum\_{i=1}^n f(x_i^\*)\Delta x'
+        _, _, display = self.render(r'\\[' + tex + r'\\]')
+        display.assert_called_once_with(r'\int_a^b f(x)\,dx=\lim_{n\to\infty}\sum_{i=1}^n f(x_i^*)\Delta x')
+        code = '`' + r'\\[' + tex + r'\\]' + '`'
+        self.assertEqual(markdown_html._prepare_math(code), code)
+
     def test_does_not_convert_fenced_or_inline_code(self):
         markdown = (
             "```latex\n" + r"\\[x\_1\\]" + "\n```\n"

@@ -58,6 +58,12 @@ $$do_not_render_as_math$$
 \[\boxed{\frac{1+\frac{1}{2}}{\sqrt{x^2+1}}}\]
 
 $$\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$$
+
+\\[ \boxed{ T_qS= \left\\{ \gamma'(0): \begin{array}{l} \gamma:(-\varepsilon,\varepsilon)\to S,\\\ \gamma\text{ is }C^1,\quad \gamma(0)=q \end{array} \right\\} } \\]
+
+\\[ -0.5\<t<0.5 \\]
+
+\\[ \int_a^b f(x)\\,dx=\lim\_{n\to\infty}\sum\_{i=1}^n f(x_i^\*)\Delta x \\]
 """
 
 
@@ -85,9 +91,12 @@ def main():
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
             md = page.locator('.message.bot .response-markdown')
-            expect(md.locator('.katex-display')).to_have_count(5)
+            expect(md.locator('.katex-display')).to_have_count(8)
             assert md.locator('.katex:not(.katex-display)').count() >= 10
             expect(md.locator('.katex-error')).to_have_count(0)
+            expect(md.locator('.katex [style*="color"]')).to_have_count(0)
+            expect(md.locator('annotation').filter(has_text='-0.5<t<0.5')).to_have_count(1)
+            assert fixture.service.store.messages(fixture.cid)[-1].content == ANSWER
             assert md.locator('.katex .mop').filter(has_text='lim').count() > 0
             assert md.locator('.katex .msupsub').count() > 0
             expect(md.locator('ol > li > ul > li')).to_have_count(2)
@@ -111,8 +120,9 @@ def main():
             page.screenshot(path='cache/markdown-chat.png')
             page.locator('nav button').nth(2).click()
             branch = page.locator('.research-answer .response-markdown')
-            expect(branch.locator('.katex-display')).to_have_count(5)
+            expect(branch.locator('.katex-display')).to_have_count(8)
             expect(branch.locator('.katex-error')).to_have_count(0)
+            expect(branch.locator('.katex [style*="color"]')).to_have_count(0)
             assert branch.evaluate('el=>getComputedStyle(el).fontSize') == '16px'
             assert branch.evaluate('el=>getComputedStyle(el).lineHeight') == '26px'
             assert branch.locator('h2').evaluate('el=>getComputedStyle(el).fontSize') == '18px'
