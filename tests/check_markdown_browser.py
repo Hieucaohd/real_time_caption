@@ -185,6 +185,11 @@ def main():
             expect(branch_source.locator('a')).to_have_attribute('href', 'https://chatgpt.com/c/manual-child')
             assert fixture.service.research.store.get(fixture.cid, child['id'])['response_position'] is None
             assert fixture.service.store.messages(fixture.cid)[-1].response_position == 5
+            page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            missing_source_dialog = page.locator('.branch-composer')
+            expect(missing_source_dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True)).to_be_disabled()
+            expect(missing_source_dialog).to_contain_text('Hãy bổ sung link và số thứ tự câu trả lời')
+            missing_source_dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
             page.locator('.research-breadcrumb').get_by_role('button', name='Gốc', exact=True).click()
             page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
             assert page.evaluate("[...CSS.highlights.get('rtc-reading-mark')][0].toString()") == saved_mark['text']
@@ -227,7 +232,37 @@ def main():
             dialog = page.locator('.branch-composer')
             assert dialog.evaluate('el=>getComputedStyle(el).backgroundColor') == 'rgb(25, 30, 27)'
             assert dialog.locator('textarea').evaluate('el=>getComputedStyle(el).color') == 'rgb(230, 238, 232)'
-            dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            # Creating the external branch selects its returned tab even before a scan finds it.
+            branch_requests = []
+            def create_branch(route):
+                branch_requests.append(route.request.url)
+                if len(branch_requests) == 1:
+                    route.fulfill(status=400, json={'detail': 'Branch unavailable'})
+                    return
+                route.fulfill(json={'key': 'fresh-branch-tab', 'title': 'Branch from parent', 'url': 'https://chatgpt.com/c/fresh-branch'})
+            page.route('**/api/conversations/*/research/*/chatgpt-branch', create_branch)
+            dialog.get_by_label('New ChatGPT chat', exact=True).check()
+            dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Keep this draft question')
+            dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True).click()
+            expect(dialog.get_by_role('alert')).to_contain_text('Branch unavailable')
+            expect(dialog.get_by_label('research ChatGPT tab')).to_have_value('')
+            expect(dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True)).to_be_disabled()
+            dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True).click()
+            expect(dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-branch-tab')
+            expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep this draft question')
+            expect(dialog).to_contain_text('Đã mở nhánh ChatGPT trong tab mới')
+            assert len(branch_requests) == 2 and all(root['id'] in url for url in branch_requests)
+            assert fixture.service.research.store.get(fixture.cid, root['id'])['response_position'] == 5
+            dialog.get_by_label('Auto screenshot', exact=True).uncheck()
+            dialog.get_by_label('Đính kèm transcript', exact=True).uncheck()
+            with page.expect_response('**/research/*/children') as queued_response:
+                dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True).click()
+            assert queued_response.value.status == 200, queued_response.value.text()
+            expect(dialog).to_have_count(0)
+            queued = next(n for n in fixture.service.research.store.list(fixture.cid) if n['question'] == 'Keep this draft question')
+            assert queued['config']['selected_tab'] == 'fresh-branch-tab'
+            assert queued['config']['new_chat'] is False
             page.locator('nav button').nth(1).click()
             assert md.evaluate('el=>getComputedStyle(el).color') == 'rgb(236, 236, 236)'
             assert page.locator('.message.bot').evaluate('el=>getComputedStyle(el).backgroundColor') == 'rgba(0, 0, 0, 0)'

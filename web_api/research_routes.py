@@ -149,6 +149,11 @@ def children(cid: str, nid: str, body: ChildrenInput, request: Request):
     return research(request, cid).children(cid, nid, body.model_dump(exclude_none=True))
 
 
+@router.post('/{nid}/chatgpt-branch')
+def create_chatgpt_branch(cid: str, nid: str, request: Request):
+    return research(request, cid).create_chatgpt_branch(cid, nid)
+
+
 @router.patch('/{nid}')
 def update(cid: str, nid: str, body: NodePatch, request: Request):
     store = research(request, cid).store

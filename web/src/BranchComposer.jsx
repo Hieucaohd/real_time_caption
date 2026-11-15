@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, Paperclip, Save, Send, X } from "lucide-react";
+import { Camera, GitBranch, Paperclip, Save, Send, X } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 
@@ -23,6 +23,11 @@ export default function BranchComposer({
   const [uploads, setUploads] = useState(0);
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [branching, setBranching] = useState(false);
+  const [branchTab, setBranchTab] = useState(null);
+  const branchingRef = useRef(false);
+  const hasSource = !!draft.parent.response_conversation_url && draft.parent.response_position > 0;
+  const availableTabs = branchTab && !tabs.some((tab) => tab.key === branchTab.key) ? [branchTab, ...tabs] : tabs;
   const [savedConfig, setSavedConfig] = useState("");
   const savingRef = useRef(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -43,6 +48,7 @@ export default function BranchComposer({
     !!config.selected_tab &&
     !sending &&
     !saving &&
+    !branching &&
     !uploads;
   useEffect(() => {
     area.current?.focus();
@@ -61,7 +67,7 @@ export default function BranchComposer({
   }, []);
 
   async function saveSettings() {
-    if (savingRef.current || sendingRef.current) return;
+    if (savingRef.current || sendingRef.current || branchingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setError("");
@@ -74,6 +80,27 @@ export default function BranchComposer({
     } finally {
       savingRef.current = false;
       setSaving(false);
+    }
+  }
+
+  async function createChatGPTBranch() {
+    if (!hasSource || branchingRef.current || sendingRef.current || savingRef.current) return;
+    branchingRef.current = true;
+    setBranching(true);
+    setBranchTab(null);
+    setConfig((old) => ({ ...old, selected_tab: "", new_chat: false }));
+    setError("");
+    try {
+      const tab = await post(`/conversations/${cid}/research/${draft.parent.id}/chatgpt-branch`, {});
+      setBranchTab(tab);
+      setConfig((old) => ({ ...old, selected_tab: tab.key, new_chat: false }));
+      // Keep the returned tab usable even if scanning the other Chrome tabs fails.
+      await scanTabs().catch(() => {});
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      branchingRef.current = false;
+      setBranching(false);
     }
   }
 
@@ -126,7 +153,7 @@ export default function BranchComposer({
   }
   async function submit(e) {
     e?.preventDefault();
-    if (!canSend || sendingRef.current || savingRef.current || uploadsRef.current || editingPrompt)
+    if (!canSend || sendingRef.current || savingRef.current || branchingRef.current || uploadsRef.current || editingPrompt)
       return;
     sendingRef.current = true;
     setSending(true);
@@ -168,7 +195,7 @@ export default function BranchComposer({
             <button
               type="button"
               aria-label="Đóng tạo nhánh"
-              disabled={sending || saving || !!uploads}
+              disabled={sending || saving || branching || !!uploads}
               onClick={close}
             >
               <X size={18} />
@@ -176,10 +203,21 @@ export default function BranchComposer({
           </div>
           <div className="modal-body">
             <p className="muted">Node cha: {draft.parent.title}</p>
+            <div className="branch-save-settings">
+              <button type="button" onClick={createChatGPTBranch} disabled={!hasSource || sending || saving || branching}>
+                <GitBranch size={15} />{branching ? "Đang tạo nhánh ChatGPT…" : "Tạo nhánh ChatGPT"}
+              </button>
+              <span role="status">
+                {!hasSource ? "Hãy bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT của node cha."
+                  : branching ? `Đang mở nhánh từ câu trả lời thứ ${draft.parent.response_position}…`
+                  : branchTab ? "Đã mở nhánh ChatGPT trong tab mới và chọn tab đó để gửi câu hỏi."
+                  : `Mở tab ChatGPT mới, giữ ngữ cảnh đến câu trả lời thứ ${draft.parent.response_position} của node cha.`}
+              </span>
+            </div>
             <ChatOptions
               value={config}
               onChange={(patch) => setConfig((old) => ({ ...old, ...patch }))}
-              tabs={tabs}
+              tabs={availableTabs}
               scanTabs={async () => {
                 setError("");
                 const failure = await scanTabs();
@@ -189,10 +227,10 @@ export default function BranchComposer({
               prompts={prompts}
               editPrompt={() => setEditingPrompt(true)}
               scope="research"
-              disabled={sending || saving}
+              disabled={sending || saving || branching}
             />
             <div className="branch-save-settings">
-              <button type="button" onClick={saveSettings} disabled={sending || saving}>
+              <button type="button" onClick={saveSettings} disabled={sending || saving || branching}>
                 <Save size={15} />
                 {saving ? "Đang lưu…" : "Lưu cài đặt"}
               </button>

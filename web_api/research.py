@@ -80,6 +80,23 @@ class Research:
                     request=dict(prompt=prompt, attachments=attachments)))
             return self.store.add_children(cid, parent, prepared)
 
+    def create_chatgpt_branch(self, cid, nid):
+        from caption.chatgpt_branch import create_branch, source_conversation_id
+        with self.service.lock:
+            node = self.store.get(cid, nid)
+            if node['status'] != 'done':
+                raise ValueError('Chờ câu trả lời của node cha hoàn tất trước khi tạo nhánh ChatGPT.')
+            url, position = node['response_conversation_url'], node['response_position']
+            source_conversation_id(url, position)
+            if self.service.busy:
+                raise BusyError('ChatGPT đang xử lý yêu cầu khác. Hãy đợi xong rồi tạo nhánh.')
+            self.service.busy = True
+        try:
+            return create_branch(url, position)
+        finally:
+            with self.service.lock:
+                self.service.busy = False
+
     def cancel(self, cid, nid):
         with self.service.lock:
             node = self.store.get(cid, nid)

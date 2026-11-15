@@ -183,6 +183,40 @@ class ResearchManagementTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.cid, self.root_node['id'])['response_conversation_url'], '')
         self.assertEqual(self.service.store.messages(self.cid)[-1].response_conversation_url, '')
 
+    def test_create_chatgpt_branch_uses_saved_source_without_changing_parent(self):
+        url = 'https://chatgpt.com/g/project/c/original?keep=yes'
+        self.store.update_response_source(self.cid, {'response_conversation_url': url, 'response_position': 3}, nid=self.root_node['id'])
+        before = self.store.get(self.cid, self.root_node['id'])
+        tab = {'key': 'branch-tab', 'title': 'Branch', 'label': 'Branch', 'url': 'https://chatgpt.com/c/new', 'focused': True}
+        def create(link, position):
+            self.assertTrue(self.service.busy)
+            self.assertEqual((link, position), (url, 3))
+            return tab
+        with patch('caption.chatgpt_branch.create_branch', side_effect=create) as branch:
+            result = self.post(self.base + '/' + self.root_node['id'] + '/chatgpt-branch')
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json(), tab)
+            branch.assert_called_once()
+        self.assertFalse(self.service.busy)
+        self.assertEqual(self.store.get(self.cid, self.root_node['id']), before)
+        self.assertEqual(len(self.store.list(self.cid)), 1)
+
+    def test_chatgpt_branch_validation_busy_scope_and_failure_release(self):
+        endpoint = self.base + '/' + self.root_node['id'] + '/chatgpt-branch'
+        with patch('caption.chatgpt_branch.create_branch') as branch:
+            self.assertEqual(self.post(endpoint).status_code, 400)
+            other = self.post('/api/conversations', {'title': 'Other'}).json()['id']
+            self.assertEqual(self.post(endpoint.replace(self.cid, other)).status_code, 404)
+            self.assertEqual(self.client.post(endpoint).status_code, 403)
+            self.store.update_response_source(self.cid, {'response_conversation_url': 'https://chatgpt.com/c/source', 'response_position': 1}, nid=self.root_node['id'])
+            self.service.busy = True
+            self.assertEqual(self.post(endpoint).status_code, 409)
+            branch.assert_not_called()
+            self.service.busy = False
+            branch.side_effect = ValueError('History unavailable')
+            self.assertEqual(self.post(endpoint).status_code, 400)
+            self.assertFalse(self.service.busy)
+
 
 if __name__ == '__main__':
     unittest.main()
