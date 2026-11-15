@@ -1151,3 +1151,15 @@ footer {
     display: none;
   }
 }
+.chat-options {
+  margin: 0;
+  min-width: 0;
+  border: 0;
+}
+.chat-options .inline select {
+  min-width: 0;
+  flex: 1;
+}
+.chat-options .inline button {
+  flex-shrink: 0;
+}

@@ -7,15 +7,12 @@ import {
   Check,
   ChevronRight,
   Copy,
-  Settings2,
-  Send,
-  Paperclip,
-  Camera,
   Search,
   LoaderCircle,
 } from "lucide-react";
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
+import BranchComposer from "./BranchComposer";
 
 const labels = {
   done: "Đã trả lời",
@@ -25,8 +22,6 @@ const labels = {
   cancelled: "Đã hủy",
   interrupted: "Bị gián đoạn",
 };
-const defaultInstructions =
-  "Giải thích bằng tiếng Việt, từ trực giác đến chi tiết. Định nghĩa các thuật ngữ mới, đưa ví dụ cụ thể và giữ công thức toán khi cần. Tập trung vào câu hỏi hiện tại.";
 const statusOf = (n) => (n.understood ? "Đã hiểu" : labels[n.status]);
 function readSaved(key, fallback) {
   try {
@@ -48,48 +43,15 @@ function pathTo(nodes, id) {
   return path;
 }
 
-function TabSelect({ value, onChange, tabs }) {
-  return (
-    <select
-      aria-label="Research ChatGPT tab"
-      value={value || ""}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="">Chọn tab ChatGPT…</option>
-      {tabs.map((t) => (
-        <option key={t.key} value={t.key}>
-          {t.title}
-        </option>
-      ))}
-      {value && !tabs.some((t) => t.key === value) && (
-        <option value={value}>Tab đã lưu — làm mới để xem tên</option>
-      )}
-    </select>
-  );
-}
-function Power({ value, onChange }) {
-  return (
-    <select
-      aria-label="Research Power"
-      value={value}
-      onChange={(e) => onChange(+e.target.value)}
-    >
-      {["Giữ nguyên", "Instant", "Medium", "High"].map((v, i) => (
-        <option key={v} value={i - 1}>
-          {v}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 export default function ResearchTab({
   cid,
   api,
   post,
   Md,
   settings,
-  changeSettings,
+  prompts,
+  refreshPrompts,
+  chatAttach,
   chromeTabs,
   scanTabs,
   loadingTabs,
@@ -107,10 +69,7 @@ export default function ResearchTab({
   const [query, setQuery] = useState("");
   const [graphExpanded, setGraphExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
-    [draft, setDraft] = useState(null),
-    [defaultsOpen, setDefaultsOpen] = useState(false);
-  const [defaults, setDefaults] = useState(null),
-    [savingDefaults, setSavingDefaults] = useState(false);
+    [draft, setDraft] = useState(null);
   const answer = useRef(null),
     contextButton = useRef(null),
     focusSeen = useRef(null);
@@ -120,15 +79,16 @@ export default function ResearchTab({
   const rootId = selectedMeta?.root_id || roots.at(-1)?.id;
   const treeNodes = nodes.filter((n) => n.root_id === rootId);
   const trail = pathTo(nodes, selected);
-  const currentTab =
-    settings.research_selected_tab || settings.chatgpt_selected_tab || "";
+  const currentTab = settings.chatgpt_selected_tab || "";
   const currentDefaults = () => ({
     selected_tab: currentTab,
-    power: settings.research_power ?? -1,
-    attach_transcript: !!settings.research_attach_transcript,
-    max_lines: settings.research_max_lines ?? 300,
-    screenshot: !!settings.research_screenshot,
-    instructions: settings.research_instructions || defaultInstructions,
+    prompt: settings.chat_prompt || prompts.at(-1) || "",
+    power: settings.chat_chatgpt_power ?? -1,
+    attach_transcript: !!chatAttach,
+    attach_history: !!settings.chat_attach_history,
+    max_lines: settings.chat_max_lines ?? 300,
+    screenshot: !!settings.chat_screenshot,
+    new_chat: false,
   });
 
   function select(id, all = nodes) {
@@ -226,7 +186,7 @@ export default function ResearchTab({
     setDraft({
       parent: detail,
       excerpt,
-      question: excerpt ? "Giải thích giúp tôi đoạn này: " + excerpt : "",
+      question: excerpt,
       config: currentDefaults(),
     });
   }
@@ -249,21 +209,6 @@ export default function ResearchTab({
       excerpt,
     });
   }
-  async function saveDefaults() {
-    setSavingDefaults(true);
-    try {
-      await changeSettings(
-        Object.fromEntries(
-          Object.entries(defaults).map(([k, v]) => ["research_" + k, v]),
-        ),
-      );
-      setDefaultsOpen(false);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingDefaults(false);
-    }
-  }
   const reading = detail?.id === selected ? detail : null;
 
   return (
@@ -284,101 +229,7 @@ export default function ResearchTab({
             </span>
           </div>
         </div>
-        <div className="research-controls">
-          <TabSelect
-            value={currentTab}
-            tabs={chromeTabs}
-            onChange={(v) =>
-              action(() => changeSettings({ research_selected_tab: v }))
-            }
-          />
-          <button
-            title="Làm mới tab ChatGPT"
-            onClick={scanTabs}
-            disabled={loadingTabs}
-          >
-            <RefreshCw size={15} />
-          </button>
-          <Power
-            value={settings.research_power ?? -1}
-            onChange={(v) =>
-              action(() => changeSettings({ research_power: v }))
-            }
-          />
-          <button
-            title="Tùy chỉnh nghiên cứu"
-            onClick={() => {
-              setDefaults(currentDefaults());
-              setDefaultsOpen((v) => !v);
-            }}
-          >
-            <Settings2 size={16} />
-          </button>
-        </div>
       </div>
-      {defaultsOpen && (
-        <div className="research-defaults">
-          <strong>Mặc định cho nhánh mới</strong>
-          <p>
-            Mỗi nhánh dùng một cuộc chat mới, với ngữ cảnh từ gốc đến node cha.
-            Nên chọn tab ChatGPT riêng cho nghiên cứu.
-          </p>
-          <div className="inline">
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={defaults.attach_transcript}
-                onChange={(e) =>
-                  setDefaults({
-                    ...defaults,
-                    attach_transcript: e.target.checked,
-                  })
-                }
-              />
-              Đính kèm transcript
-            </label>
-            <label>
-              Số dòng{" "}
-              <input
-                aria-label="Default research transcript lines"
-                type="number"
-                min="0"
-                value={defaults.max_lines}
-                onChange={(e) =>
-                  setDefaults({ ...defaults, max_lines: +e.target.value })
-                }
-              />
-            </label>
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={defaults.screenshot}
-                onChange={(e) =>
-                  setDefaults({ ...defaults, screenshot: e.target.checked })
-                }
-              />
-              Chụp màn hình lúc xếp hàng
-            </label>
-          </div>
-          <label className="field">
-            <span>Yêu cầu cách giải thích</span>
-            <textarea
-              rows="3"
-              value={defaults.instructions}
-              onChange={(e) =>
-                setDefaults({ ...defaults, instructions: e.target.value })
-              }
-            />
-          </label>
-          <button
-            className="primary"
-            onClick={saveDefaults}
-            disabled={savingDefaults}
-          >
-            Lưu mặc định
-          </button>
-        </div>
-      )}
       {error && (
         <div role="alert" className="alert">
           {error}
@@ -589,8 +440,13 @@ export default function ResearchTab({
                           : "Không tự chụp màn hình"}
                       </p>
                       <p>
-                        Ngữ cảnh: {trail.length - 1} node tổ tiên, không gồm
-                        nhánh anh em.
+                        Prompt:{" "}
+                        {reading.config.prompt ||
+                          "Yêu cầu đã lưu từ phiên bản cũ"}{" "}
+                        ·{" "}
+                        {reading.config.new_chat
+                          ? "Tạo cuộc chat mới"
+                          : "Tiếp tục tab ChatGPT đã chọn"}
                       </p>
                     </details>
                   )}
@@ -627,15 +483,11 @@ export default function ResearchTab({
                     <button
                       className="primary"
                       onClick={() =>
-                        action(() =>
-                          post(base + "/" + reading.id + "/retry", {
-                            selected_tab: currentTab || undefined,
-                          }),
-                        )
+                        action(() => post(base + "/" + reading.id + "/retry"))
                       }
                     >
                       <RefreshCw size={14} />
-                      Thử lại với tab đã chọn
+                      Thử lại với tab đã lưu
                     </button>
                   )}
                 </div>
@@ -667,298 +519,21 @@ export default function ResearchTab({
           key={draft.parent.id}
           draft={draft}
           tabs={chromeTabs}
+          scanTabs={scanTabs}
+          loadingTabs={loadingTabs}
+          prompts={prompts}
+          refreshPrompts={refreshPrompts}
           api={api}
           post={post}
           cid={cid}
           close={() => setDraft(null)}
           created={async (children) => {
             setDraft(null);
-            setNotice(`Đã xếp hàng ${children.length} nhánh độc lập`);
+            setNotice(`Đã xếp hàng ${children.length} nhánh`);
             await refresh();
           }}
         />
       )}
     </section>
-  );
-}
-
-function BranchComposer({ draft, tabs, api, post, cid, close, created }) {
-  const [question, setQuestion] = useState(draft.question),
-    [excerpt, setExcerpt] = useState(draft.excerpt),
-    [config, setConfig] = useState(draft.config);
-  const [batch, setBatch] = useState(false),
-    [files, setFiles] = useState([]),
-    [uploading, setUploading] = useState(false),
-    [sending, setSending] = useState(false),
-    [error, setError] = useState("");
-  const input = useRef(null),
-    area = useRef(null);
-  const questions = batch
-    ? question
-        .split("\n")
-        .map((q) => q.trim())
-        .filter(Boolean)
-    : [question.trim()].filter(Boolean);
-  useEffect(() => {
-    area.current?.focus();
-  }, []);
-  const set = (key, value) => setConfig((old) => ({ ...old, [key]: value }));
-  async function upload(items) {
-    setUploading(true);
-    try {
-      for (const file of items) {
-        const body = new FormData();
-        body.append("file", file);
-        const result = await post("/conversations/" + cid + "/files", body);
-        setFiles((old) => [...old, result]);
-      }
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setUploading(false);
-    }
-  }
-  async function screenshot() {
-    let stream;
-    setUploading(true);
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      await video.play();
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d").drawImage(video, 0, 0);
-      const blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
-      );
-      await upload([
-        new File([blob], "research-screen.png", { type: "image/png" }),
-      ]);
-    } catch (e) {
-      if (e.name !== "NotAllowedError") setError(e.message);
-    } finally {
-      stream?.getTracks().forEach((t) => t.stop());
-      setUploading(false);
-    }
-  }
-  async function submit(e) {
-    e.preventDefault();
-    setSending(true);
-    setError("");
-    try {
-      const result = await post(
-        "/conversations/" + cid + "/research/" + draft.parent.id + "/children",
-        { questions, excerpt, config, files: files.map((f) => f.path) },
-      );
-      await created(result);
-    } catch (e) {
-      setError(e.message);
-      setSending(false);
-    }
-  }
-  return (
-    <div className="modal-backdrop">
-      <form
-        className="modal branch-composer"
-        onSubmit={submit}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="branch-title"
-      >
-        <div className="modal-head">
-          <div>
-            <span className="eyebrow">ĐÀO SÂU TỪ NODE ĐANG ĐỌC</span>
-            <h2 id="branch-title">Tạo nhánh con</h2>
-          </div>
-          <button
-            type="button"
-            aria-label="Đóng tạo nhánh"
-            disabled={sending}
-            onClick={close}
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <p className="muted">Node cha: {draft.parent.title}</p>
-          {excerpt && (
-            <label className="field">
-              <span>Đoạn đang tìm hiểu</span>
-              <textarea
-                aria-label="Đoạn trích"
-                value={excerpt}
-                onChange={(e) => setExcerpt(e.target.value)}
-                rows="3"
-                maxLength="20000"
-              />
-            </label>
-          )}
-          <label className="field">
-            <span>
-              {batch
-                ? "Mỗi dòng là một câu hỏi → một nhánh độc lập"
-                : "Câu hỏi của nhánh mới"}
-            </span>
-            <textarea
-              ref={area}
-              aria-label="Câu hỏi nhánh"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              rows="4"
-              placeholder="Khái niệm này là gì? Cho tôi một ví dụ đơn giản…"
-              onPaste={(e) => {
-                const images = [...e.clipboardData.files].filter((f) =>
-                  f.type.startsWith("image/"),
-                );
-                if (images.length) {
-                  e.preventDefault();
-                  upload(images);
-                }
-              }}
-            />
-          </label>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={batch}
-              onChange={(e) => setBatch(e.target.checked)}
-            />
-            Tạo nhiều nhánh: mỗi dòng là một câu hỏi
-          </label>
-          <div className="branch-options">
-            <label className="field">
-              <span>Tab ChatGPT</span>
-              <TabSelect
-                tabs={tabs}
-                value={config.selected_tab}
-                onChange={(v) => set("selected_tab", v)}
-              />
-            </label>
-            <label className="field">
-              <span>Power</span>
-              <Power value={config.power} onChange={(v) => set("power", v)} />
-            </label>
-          </div>
-          <details>
-            <summary>Tùy chỉnh riêng và đính kèm</summary>
-            <div className="branch-attachments">
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.attach_transcript}
-                  onChange={(e) => set("attach_transcript", e.target.checked)}
-                />
-                Đính kèm transcript
-              </label>
-              <label className="field">
-                <span>Số dòng transcript (0 = tất cả)</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={config.max_lines}
-                  onChange={(e) => set("max_lines", +e.target.value)}
-                />
-              </label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.screenshot}
-                  onChange={(e) => set("screenshot", e.target.checked)}
-                />
-                Chụp màn hình ngay khi xếp hàng
-              </label>
-              <label className="field">
-                <span>Yêu cầu cách giải thích</span>
-                <textarea
-                  value={config.instructions}
-                  onChange={(e) => set("instructions", e.target.value)}
-                  rows="3"
-                  maxLength="20000"
-                />
-              </label>
-              <div className="inline">
-                <button
-                  type="button"
-                  disabled={uploading || sending}
-                  onClick={() => input.current.click()}
-                >
-                  <Paperclip size={14} />
-                  Đính kèm file
-                </button>
-                <button
-                  type="button"
-                  disabled={uploading || sending}
-                  onClick={screenshot}
-                >
-                  <Camera size={14} />
-                  Chọn ảnh chụp
-                </button>
-                <input
-                  type="file"
-                  multiple
-                  hidden
-                  ref={input}
-                  onChange={(e) => {
-                    upload([...e.target.files]);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-              <div className="composer-files">
-                {files.map((f) => (
-                  <span key={f.path}>
-                    {f.name}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFiles((old) => old.filter((x) => x.path !== f.path))
-                      }
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          </details>
-          <p className="branch-explanation">
-            Mỗi nhánh có một cuộc chat mới. App gửi câu hỏi cùng đường dẫn ngữ
-            cảnh từ gốc; các nhánh được xử lý lần lượt trong tab đã chọn. Tùy
-            chỉnh và file được giữ nguyên khi xếp hàng.
-          </p>
-          {error && (
-            <p role="alert" className="alert">
-              {error}
-            </p>
-          )}
-        </div>
-        <div className="modal-foot">
-          <span>{questions.length} nhánh · tối đa 20 mỗi lần</span>
-          <button
-            type="submit"
-            className="primary"
-            disabled={
-              !questions.length ||
-              questions.length > 20 ||
-              !config.selected_tab ||
-              sending ||
-              uploading
-            }
-          >
-            <Send size={15} />
-            {sending
-              ? "Đang xếp hàng…"
-              : uploading
-                ? "Đang tải file…"
-                : `Xếp hàng ${questions.length} nhánh`}
-          </button>
-        </div>
-      </form>
-    </div>
   );
 }

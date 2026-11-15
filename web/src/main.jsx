@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import ResearchTab from "./ResearchTab";
+import ChatOptions from "./ChatOptions";
+import PromptModal from "./PromptModal";
 import {
   AudioLines,
   Plus,
@@ -287,6 +289,7 @@ function App() {
       setChromeTabs(await api("/chrome-tabs"));
     } catch (e) {
       setError(e.message);
+      return e.message;
     } finally {
       setLoadingTabs(false);
     }
@@ -399,26 +402,59 @@ function App() {
     );
   }
   function options(kind) {
-    const isSummary = kind === "summary";
+    if (kind === "chat")
+      return (
+        <ChatOptions
+          value={{
+            selected_tab: settings.chatgpt_selected_tab,
+            prompt: settings.chat_prompt,
+            power: settings.chat_chatgpt_power,
+            max_lines: settings.chat_max_lines,
+            attach_transcript: attach,
+            attach_history: settings.chat_attach_history,
+            screenshot: settings.chat_screenshot,
+            new_chat: newChat,
+          }}
+          onChange={(patch) => {
+            if ("attach_transcript" in patch)
+              setAttach(patch.attach_transcript);
+            else if ("new_chat" in patch) setNewChat(patch.new_chat);
+            else {
+              const keys = {
+                selected_tab: "chatgpt_selected_tab",
+                prompt: "chat_prompt",
+                power: "chat_chatgpt_power",
+                max_lines: "chat_max_lines",
+                attach_history: "chat_attach_history",
+                screenshot: "chat_screenshot",
+              };
+              action(() =>
+                changeSettings(
+                  Object.fromEntries(
+                    Object.entries(patch).map(([k, v]) => [keys[k], v]),
+                  ),
+                ),
+              );
+            }
+          }}
+          tabs={chromeTabs}
+          scanTabs={scanTabs}
+          loadingTabs={loadingTabs}
+          prompts={boot.prompts.chat || []}
+          editPrompt={() => setPromptKind("chat")}
+        />
+      );
     return (
       <div className="options">
         <Field label="ChatGPT tab">
           <div className="inline">
             <select
               aria-label={kind + " ChatGPT tab"}
-              value={
-                settings[
-                  isSummary
-                    ? "summary_chatgpt_selected_tab"
-                    : "chatgpt_selected_tab"
-                ] || ""
-              }
+              value={settings["summary_chatgpt_selected_tab"] || ""}
               onChange={(e) =>
                 action(() =>
                   changeSettings({
-                    [isSummary
-                      ? "summary_chatgpt_selected_tab"
-                      : "chatgpt_selected_tab"]: e.target.value,
+                    ["summary_chatgpt_selected_tab"]: e.target.value,
                   }),
                 )
               }
@@ -430,28 +466,10 @@ function App() {
                 </option>
               ))}
               {!chromeTabs.some(
-                (t) =>
-                  t.key ===
-                  settings[
-                    isSummary
-                      ? "summary_chatgpt_selected_tab"
-                      : "chatgpt_selected_tab"
-                  ],
+                (t) => t.key === settings["summary_chatgpt_selected_tab"],
               ) &&
-                settings[
-                  isSummary
-                    ? "summary_chatgpt_selected_tab"
-                    : "chatgpt_selected_tab"
-                ] && (
-                  <option
-                    value={
-                      settings[
-                        isSummary
-                          ? "summary_chatgpt_selected_tab"
-                          : "chatgpt_selected_tab"
-                      ]
-                    }
-                  >
+                settings["summary_chatgpt_selected_tab"] && (
+                  <option value={settings["summary_chatgpt_selected_tab"]}>
                     Tab đã lưu — Refresh để xem
                   </option>
                 )}
@@ -517,51 +535,22 @@ function App() {
             }
           />
         </Field>
-        {isSummary ? (
-          <>
-            <Toggle
-              label="Đính kèm transcript"
-              checked={settings.summary_attach_transcript}
-              onChange={(v) =>
-                action(() => changeSettings({ summary_attach_transcript: v }))
-              }
-            />
-            <Toggle
-              label="New ChatGPT chat"
-              checked={settings.summary_new_chat}
-              onChange={(v) =>
-                action(() => changeSettings({ summary_new_chat: v }))
-              }
-            />
-          </>
-        ) : (
-          <>
-            <Toggle
-              label="Đính kèm transcript"
-              checked={attach}
-              onChange={setAttach}
-            />
-            <Toggle
-              label="Đính kèm lịch sử chat"
-              checked={settings.chat_attach_history}
-              onChange={(v) =>
-                action(() => changeSettings({ chat_attach_history: v }))
-              }
-            />
-            <Toggle
-              label="Auto screenshot"
-              checked={settings.chat_screenshot}
-              onChange={(v) =>
-                action(() => changeSettings({ chat_screenshot: v }))
-              }
-            />
-            <Toggle
-              label="New ChatGPT chat"
-              checked={newChat}
-              onChange={setNewChat}
-            />
-          </>
-        )}
+        <>
+          <Toggle
+            label="Đính kèm transcript"
+            checked={settings.summary_attach_transcript}
+            onChange={(v) =>
+              action(() => changeSettings({ summary_attach_transcript: v }))
+            }
+          />
+          <Toggle
+            label="New ChatGPT chat"
+            checked={settings.summary_new_chat}
+            onChange={(v) =>
+              action(() => changeSettings({ summary_new_chat: v }))
+            }
+          />
+        </>
       </div>
     );
   }
@@ -756,7 +745,9 @@ function App() {
                 post={post}
                 Md={Md}
                 settings={settings}
-                changeSettings={changeSettings}
+                prompts={boot.prompts.chat || []}
+                refreshPrompts={refresh}
+                chatAttach={attach}
                 chromeTabs={chromeTabs}
                 scanTabs={scanTabs}
                 loadingTabs={loadingTabs}
@@ -1347,6 +1338,8 @@ function App() {
       )}
       {promptKind && (
         <PromptModal
+          api={api}
+          post={post}
           kind={promptKind}
           selected={settings[promptKind + "_prompt"]}
           close={() => setPromptKind(null)}
@@ -1566,70 +1559,6 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             }
           >
             Save settings
-          </Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function PromptModal({ kind, selected, close, done }) {
-  const [text, setText] = useState(""),
-    [name, setName] = useState(""),
-    [loaded, setLoaded] = useState(""),
-    [error, setError] = useState("");
-  useEffect(() => {
-    api("/prompts/" + kind + "?name=" + encodeURIComponent(selected || ""))
-      .then((p) => {
-        setText(p.text);
-        setName(p.name || "");
-        setLoaded(p.name || "");
-      })
-      .catch((e) => setError(e.message));
-  }, [kind]);
-  async function save(overwrite) {
-    try {
-      const value = await post("/prompts/" + kind, {
-        name: overwrite ? loaded : name,
-        text,
-        overwrite,
-      });
-      done(value.name);
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-  return (
-    <div className="modal-backdrop">
-      <section className="modal">
-        <div className="modal-head">
-          <h2>Edit {kind} prompt</h2>
-          <Button icon={X} onClick={close} />
-        </div>
-        <div className="modal-body">
-          <Field label="Tên phiên bản mới">
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-          <textarea
-            className="prompt-editor"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <p className="muted">
-            {"{message} · {file_name} · {source} · {started} · {now}"}
-          </p>
-          {error && <p className="alert">{error}</p>}
-        </div>
-        <div className="modal-foot">
-          <Button disabled={!loaded || !text.trim()} onClick={() => save(true)}>
-            Update current version
-          </Button>
-          <Button
-            className="primary"
-            disabled={!text.trim()}
-            onClick={() => save(false)}
-          >
-            Save new version
           </Button>
         </div>
       </section>

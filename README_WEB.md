@@ -29,11 +29,12 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 ## Nghiên cứu theo nhánh
 
 1. Trong **Chat**, bấm **Nghiên cứu theo nhánh** dưới một câu trả lời. Node gốc giữ nguyên câu hỏi và câu trả lời tại thời điểm chuyển. Bấm lại cùng câu trả lời sẽ mở lại cây đã có.
-2. Chọn tab ChatGPT bằng thanh trên của tab nghiên cứu; dùng nút làm mới để lấy các tab Chrome 9222. Nên dùng một tab riêng vì mỗi node sẽ bắt đầu một cuộc chat mới trong tab này.
+2. Trong hộp **Tạo nhánh con**, chọn tab ChatGPT và dùng **Refresh Chrome tabs** để lấy lại danh sách tab Chrome 9222. Mặc định gửi vào cuộc hội thoại đang mở ở tab đã chọn, giống Chat; chỉ mở chat mới khi bạn chủ động bật **New ChatGPT chat**.
 3. Bấm node để đọc bên phải. Bôi đen nội dung trong câu trả lời, chuột phải, chọn **Tạo nhánh từ đoạn đã chọn**. Hoặc bấm **Tạo nhánh con** để viết câu hỏi tự do.
 4. Muốn hỏi đồng thời về bốn khái niệm, bật **Tạo nhiều nhánh**, nhập bốn câu hỏi trên bốn dòng rồi bấm **Xếp hàng 4 nhánh**. App tạo ngay bốn node; bạn vẫn có thể tạo thêm nhánh trong lúc ChatGPT đang trả lời.
-5. Mỗi câu hỏi nhận đúng đường đi từ gốc đến node cha, không kèm câu hỏi/câu trả lời của nhánh anh em. App mở chat mới cho từng câu hỏi để tránh trộn ngữ cảnh. Các yêu cầu **xử lý lần lượt** trên tab Chrome đã chọn, không phát sinh bốn yêu cầu đồng thời vào cùng một tab.
-6. Power và tab Chrome nằm trên thanh chung. Nút tùy chỉnh lưu mặc định riêng cho nghiên cứu: hướng dẫn cách giải thích, transcript, số dòng và tự chụp màn hình. Hộp tạo nhánh cho phép đổi riêng các lựa chọn này, upload file, dán ảnh hoặc chọn ảnh chụp. Mặc định không đính kèm transcript/ảnh; ngữ cảnh tổ tiên luôn được gửi.
+5. Các yêu cầu **xử lý lần lượt** trên tab Chrome đã chọn. Khi tiếp tục cùng cuộc hội thoại, ChatGPT giữ lịch sử của cuộc hội thoại đó. Quan hệ cha–con dùng để tổ chức cây; app không tự ghép ngữ cảnh tổ tiên hay hướng dẫn nghiên cứu vào prompt. Đoạn được bôi đen điền vào ô câu hỏi để bạn sửa trước khi gửi.
+6. Tùy chọn dùng chung component với Chat: tab Chrome + refresh, mẫu prompt + sửa/lưu phiên bản, Power, số dòng transcript, đính kèm transcript/lịch sử chat, Auto screenshot và New ChatGPT chat. Danh sách mẫu lấy từ `prompts/chat`; mẫu sửa ở một nơi dùng được ở cả hai. Nhánh mới lấy mặc định từ Chat, riêng New ChatGPT chat luôn tắt ban đầu. Các thay đổi trong hộp tạo nhánh áp dụng cho lần gửi đó, được lưu cùng node trong SQLite. Không còn prompt nghiên cứu dựng sẵn.
+7. Có thể dán ảnh trực tiếp vào ô câu hỏi, chọn file hoặc bấm **Screenshot**, và bỏ file trước khi gửi. Auto screenshot không chụp thêm khi đã có ảnh đính kèm. Enter gửi một câu hỏi; Shift+Enter xuống dòng. Khi bật nhiều nhánh, Enter xuống dòng để nhập câu hỏi kế tiếp.
 7. File, transcript, hướng dẫn và Power được chụp lại khi xếp hàng; tự chụp màn hình cũng chạy ngay lúc đó, không chụp một màn hình khác sau thời gian chờ. Retry dùng lại yêu cầu này; nút thử lại cho phép dùng tab Chrome đang được chọn nếu tab cũ đã đóng.
 
 Đồ thị hỗ trợ kéo/thả và điều hướng theo các thao tác quen thuộc của [draw.io](https://www.drawio.com/docs/reference/shortcuts/modifier-shortcuts-in-diagrams/):
@@ -51,7 +52,7 @@ Tọa độ, khung nhìn/zoom, trạng thái thu gọn và các tùy chọn thao
 
 Mỗi node có trạng thái chờ/đang trả lời/lỗi và checkbox **Đã hiểu**. Có thể đổi tên node mà không đổi câu hỏi. Tìm kiếm tìm theo câu hỏi hoặc đoạn trích.
 
-Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`: câu hỏi, câu trả lời, đoạn trích, quan hệ cha–con, tùy chỉnh từng node, yêu cầu đã chuẩn bị, trạng thái, tên node và dấu “Đã hiểu”. Nội dung đang stream và tiến độ được ghi vào database theo mỗi cập nhật nhận được, để còn đọc được phần đã nhận khi server bị ngắt. File/ảnh, bản chụp transcript và ngữ cảnh dài được lưu dạng BLOB trong `research_assets`, liên kết qua `research_node_assets`; các file cache chỉ là bản tạm để upload và tự dựng lại từ database. Node và file đính kèm được ghi trong cùng một transaction; các nhánh dùng cùng file không lưu lặp nội dung file.
+Cây và hàng đợi được lưu trong bảng `research_nodes` của `conversations.sqlite3`: câu hỏi, câu trả lời, đoạn trích, quan hệ cha–con, tùy chỉnh từng node, yêu cầu đã chuẩn bị, trạng thái, tên node và dấu “Đã hiểu”. Nội dung đang stream và tiến độ được ghi vào database theo mỗi cập nhật nhận được, để còn đọc được phần đã nhận khi server bị ngắt. Prompt đã điền được lưu tại thời điểm xếp hàng; sửa mẫu sau đó không thay đổi yêu cầu hay lần thử lại. File/ảnh, bản chụp transcript và lịch sử chat được lưu dạng BLOB trong `research_assets`, liên kết qua `research_node_assets`; các file cache chỉ là bản tạm để upload và tự dựng lại từ database. Node và file đính kèm được ghi trong cùng một transaction; các nhánh dùng cùng file không lưu lặp nội dung file.
 
 Giao diện cây hiện có ở bản web. Đóng tab không hủy hàng đợi. Sau restart, các node chưa bắt đầu tiếp tục chạy; node bị ngắt khi đang gửi phải **Thử lại** thủ công để tránh gửi trùng. Hủy một node không hủy nhánh khác. Lỗi không tự gửi lại. Khi native app đang dùng ChatGPT, hàng đợi nghiên cứu chờ khóa được nhả. Khi nâng cấp, snapshot của nhánh cũ được nhập vào database nếu file cũ còn tồn tại.
 
@@ -76,6 +77,7 @@ cd ..
 npm --prefix web test
 # Kiểm thử chuột/phím bằng Chrome headless, dùng database tạm, không gửi ChatGPT:
 .venv\Scripts\python.exe -X utf8 tests/check_research_graph_browser.py
+.venv\Scripts\python.exe -X utf8 tests/check_branch_composer_browser.py
 ```
 
 Backend: `web_api/server.py`, `web_api/service.py`. Frontend: `web/src/main.jsx`, `web/src/style.css`; React được bundle bằng esbuild, không cần Node server khi sử dụng.

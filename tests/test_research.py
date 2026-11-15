@@ -50,13 +50,13 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(self.client.get(f'/api/conversations/{other}/research/{again["id"]}').status_code, 404)
         self.assertNotIn('request', again)
 
-    def test_four_siblings_queue_while_first_runs_and_keep_context_independent(self):
+    def test_four_siblings_queue_and_continue_selected_conversation_with_chat_prompt(self):
         started, release = threading.Event(), threading.Event()
         prompts, concurrent = [], []
         def answer(prompt, attachments, on_status, **kwargs):
             concurrent.append(1)
             self.assertEqual(len(concurrent), 1)
-            self.assertTrue(kwargs['new_chat'])
+            self.assertFalse(kwargs['new_chat'])
             self.assertEqual(kwargs['selected_tab'], 'research-tab')
             self.assertEqual(kwargs['power'], 2)
             prompts.append(prompt)
@@ -64,7 +64,7 @@ class ResearchTests(unittest.TestCase):
             started.set()
             release.wait(4)
             concurrent.pop()
-            return 'Answer to ' + prompt.split('Current question:\n')[-1]
+            return 'Answer to ' + prompt
         with patch('web_api.research.chatgpt.ask', side_effect=answer):
             first = self.child(questions=['Branch question A'])
             self.assertTrue(started.wait(3))
@@ -77,20 +77,20 @@ class ResearchTests(unittest.TestCase):
             self.wait_nodes(first + rest)
         self.assertEqual(len(prompts), 4)
         for index, prompt in enumerate(prompts):
-            self.assertIn('Original question', prompt)
+            self.assertEqual(prompt, 'Question: Branch question ' + 'ABCD'[index])
             for sibling in 'ABCD':
                 self.assertEqual('Branch question '+sibling in prompt, sibling == 'ABCD'[index])
         self.assertEqual(len(self.service.store.messages(self.cid)), 2)
 
-    def test_grandchild_contains_only_ancestor_answers(self):
+    def test_grandchild_does_not_inject_ancestor_prompt_or_instructions(self):
         with patch('web_api.research.chatgpt.ask', side_effect=['Alpha answer unique', 'Sibling answer hidden', 'Deeper answer'] ) as ask:
             nodes = self.child(questions=['Alpha detail', 'Beta detail'])
             self.wait_nodes(nodes)
             child = self.child(parent=nodes[0]['id'], questions=['Deeper alpha'], excerpt='Alpha answer unique')
             self.wait_nodes(child)
             prompt = ask.call_args.args[0]
-            self.assertIn('Alpha answer unique', prompt)
-            self.assertIn('Original question', prompt)
+            self.assertEqual(prompt, 'Question: Deeper alpha')
+            self.assertFalse(ask.call_args.kwargs['new_chat'])
             self.assertNotIn('Sibling answer hidden', prompt)
             self.assertNotIn('Beta detail', prompt)
             self.assertEqual(self.store.get(self.cid, child[0]['id'])['root_id'], self.root_node['id'])
@@ -177,16 +177,65 @@ class ResearchTests(unittest.TestCase):
             request=self.store.get(self.cid,node['id'],private=True)['request']
             self.assertTrue(request['attachments'][0].endswith('screen.png'))
 
-    def test_large_ancestor_context_is_attached_without_truncation(self):
-        from pathlib import Path
+    def test_ancestor_context_is_not_automatically_attached(self):
         self.service.busy=True
         text='Full context. '*6000+'END_OF_ROOT'
         self.store.update(self.cid,self.root_node['id'],answer=text)
         node=self.child()[0]
         request=self.store.get(self.cid,node['id'],private=True)['request']
-        self.assertLess(len(request['prompt']),3000)
-        context=json.loads(Path(request['attachments'][0]).read_text(encoding='utf-8'))
-        self.assertEqual(context[0]['answer'],text)
+        self.assertEqual(request['prompt'], 'Question: Explain alpha')
+        self.assertEqual(request['attachments'], [])
+
+    def test_shared_chat_defaults_and_prompt_are_frozen_in_database(self):
+        from caption import prompt_versions
+        self.service.busy = True
+        version = prompt_versions.save_new_version('Custom {message}', 'shared', prompt_versions.CHAT_DIR)
+        settings = Settings.load()
+        settings.chat_prompt = version
+        settings.chatgpt_selected_tab = 'chat-default-tab'
+        settings.chat_chatgpt_power = 1
+        settings.chat_max_lines = 42
+        settings.research_instructions = 'Old instructions must be ignored'
+        settings.save()
+        node = self.child(config={})[0]
+        saved = self.store.get(self.cid, node['id'], private=True)
+        self.assertEqual(saved['config']['prompt'], version)
+        self.assertEqual(saved['config']['selected_tab'], 'chat-default-tab')
+        self.assertEqual(saved['config']['power'], 1)
+        self.assertEqual(saved['config']['max_lines'], 42)
+        self.assertEqual(saved['request']['prompt'], 'Custom Explain alpha')
+        prompt_versions.update_version(version, 'Changed {message}', prompt_versions.CHAT_DIR)
+        with patch('web_api.research.chatgpt.ask', return_value='Saved') as ask:
+            self.service.busy = False
+            self.wait_nodes([node])
+            self.assertEqual(ask.call_args.args[0], 'Custom Explain alpha')
+            self.assertFalse(ask.call_args.kwargs['new_chat'])
+
+    def test_new_chat_only_when_explicitly_enabled_and_retry_keeps_choice(self):
+        with patch('web_api.research.chatgpt.ask', side_effect=RuntimeError('Failed')) as ask:
+            node = self.child(config={'selected_tab': 'tab', 'new_chat': True})[0]
+            self.wait_nodes([node], 'error')
+            self.assertTrue(ask.call_args.kwargs['new_chat'])
+        with patch('web_api.research.chatgpt.ask', return_value='Retried') as ask:
+            self.post(self.base + '/' + node['id'] + '/retry')
+            self.wait_nodes([node])
+            self.assertTrue(ask.call_args.kwargs['new_chat'])
+
+    def test_pasted_image_skips_auto_screenshot_and_history_is_snapshotted(self):
+        from pathlib import Path
+        self.service.busy = True
+        image = self.client.post(f'/api/conversations/{self.cid}/files', headers=self.headers,
+            files={'file': ('pasted.png', b'pasted image', 'image/png')}).json()
+        with patch('web_api.screen.capture') as capture:
+            node = self.child(files=[image['path']], config={
+                'selected_tab': 'tab', 'screenshot': True, 'attach_history': True})[0]
+            capture.assert_not_called()
+        request = self.store.get(self.cid, node['id'], private=True)['request']
+        self.assertEqual(len(request['attachments']), 2)
+        self.assertEqual(Path(request['attachments'][0]).read_bytes(), b'pasted image')
+        self.assertIn('Original question', Path(request['attachments'][1]).read_text(encoding='utf-8'))
+        with self.service.store._connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM research_node_assets WHERE node_id=?', (node['id'],)).fetchone()[0], 2)
 
     def test_database_restores_attachments_after_cache_files_are_lost(self):
         from pathlib import Path

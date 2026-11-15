@@ -20,7 +20,9 @@ class BranchConfig(BaseModel):
     attach_transcript: bool | None = None
     max_lines: int | None = Field(default=None, ge=0, le=1_000_000)
     screenshot: bool | None = None
-    instructions: str | None = Field(default=None, max_length=20_000)
+    prompt: str | None = Field(default=None, max_length=500)
+    attach_history: bool | None = None
+    new_chat: bool | None = None
 
 
 class ChildrenInput(BaseModel):

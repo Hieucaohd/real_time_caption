@@ -28,35 +28,6 @@
   font-size: 11px;
   color: #7a8780;
 }
-.research-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.research-controls select:first-child {
-  width: 205px;
-}
-.research-defaults {
-  padding: 16px 20px;
-  background: #eff6f2;
-  border-bottom: 1px solid #dce8df;
-  max-height: 290px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-.research-defaults p {
-  color: #597164;
-  margin: 8px 0 12px;
-}
-.research-defaults input[type="number"] {
-  width: 85px;
-}
-.research-defaults .field {
-  margin: 12px 0;
-}
-.research-defaults .inline {
-  flex-wrap: wrap;
-}
 .research-body {
   display: grid;
   grid-template-columns: minmax(300px, 1.12fr) minmax(380px, 1fr);
@@ -433,8 +404,8 @@
   font-size: 12px;
   color: #28714f;
 }
-.branch-composer {
-  width: min(680px, 95vw);
+.modal.branch-composer {
+  width: min(900px, 95vw);
 }
 .branch-composer .modal-body {
   display: flex;
@@ -450,22 +421,29 @@
 .branch-composer .field span {
   margin-bottom: 5px;
 }
-.branch-options {
+.branch-composer .chat-options {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 0 14px;
+}
+.branch-composer .chat-options .field {
+  min-width: 0;
+}
+.branch-composer .composer {
+  padding: 12px;
+  border: 1px solid #dce5de;
+  border-radius: 8px;
+}
+@media (max-width: 600px) {
+  .branch-composer .chat-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .branch-composer summary {
   cursor: pointer;
   padding: 8px 0;
   font-weight: 550;
   color: #567864;
-}
-.branch-attachments {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 10px 0;
 }
 .branch-explanation {
   background: #f1f5f2;
@@ -518,8 +496,5 @@
   }
   .research-toolbar {
     padding: 12px;
-  }
-  .research-controls {
-    flex-wrap: wrap;
   }
 }
