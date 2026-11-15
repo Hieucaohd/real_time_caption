@@ -377,7 +377,8 @@ export default function BranchComposer({
               {config.new_chat
                 ? "Bạn đã bật tạo cuộc chat mới cho mỗi câu hỏi."
                 : "Gửi vào cuộc hội thoại đang mở trong tab ChatGPT đã chọn."}{" "}
-              Dùng mẫu prompt của Chat; các câu hỏi được gửi lần lượt. Ngữ cảnh
+              Dùng mẫu prompt của Chat. Các node dùng tab ChatGPT khác nhau chạy song song;
+              cùng một tab thì gửi lần lượt. Ngữ cảnh
               tổ tiên {ancestorDepth !== 0 ? `được đính kèm từ ${selectedAncestors.length} cặp câu hỏi – câu trả lời đã chọn.` : "chưa được đính kèm."}
             </p>
             {error && (

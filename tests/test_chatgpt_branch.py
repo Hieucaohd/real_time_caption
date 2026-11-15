@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from caption import chatgpt, chatgpt_branch
@@ -199,3 +201,28 @@ class NativeBranchUITests(unittest.TestCase):
         self.assertEqual(selected.url, tab.url)
         self.assertEqual(len(self.context.pages), 2)
         self.assertEqual(self.requests, [])
+
+    def test_request_lock_is_per_real_target_and_released_after_failure(self):
+        from caption import paths
+        from caption.shared_access import BusyError
+        first = chatgpt.CHAT_TAB_PREFIX + 'first'
+        self.original.evaluate('key => window.name = key', first)
+        second = chatgpt._open_new_chatgpt_tab(self.browser)
+        with tempfile.TemporaryDirectory() as folder, patch.object(paths, 'CACHE_DIR', Path(folder)):
+            with self.assertRaisesRegex(RuntimeError, 'failed request'):
+                with chatgpt._request_page(self.browser, first, False, ''):
+                    # A different tab is available while the first tab waits for its response.
+                    with chatgpt._request_page(self.browser, second.key, False, '') as (other, created):
+                        self.assertFalse(created)
+                        self.assertNotEqual(other, self.original)
+                    with self.assertRaises(BusyError):
+                        with chatgpt._request_page(self.browser, first, False, ''):
+                            self.fail('Same tab must not be shared')
+                    # Current-tab and selected-tab modes must contend on the same CDP ID.
+                    with patch.object(chatgpt, '_current_chatgpt_tab', return_value=(self.original, False)):
+                        with self.assertRaises(BusyError):
+                            with chatgpt._request_page(self.browser, None, True, ''):
+                                self.fail('Alias bypassed target reservation')
+                    raise RuntimeError('failed request')
+            with chatgpt._request_page(self.browser, first, False, '') as (reopened, _):
+                self.assertEqual(reopened, self.original)

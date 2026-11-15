@@ -43,6 +43,25 @@ class StreamingTests(unittest.TestCase):
         page.evaluate.assert_not_called()
         partial.assert_not_called()
 
+    def test_cancel_during_previous_answer_does_not_stop_someone_elses_generation(self):
+        event = threading.Event()
+        event.set()
+        stop = Mock()
+        with patch.object(chatgpt, '_visible', return_value=stop):
+            with self.assertRaises(chatgpt.ChatGPTCancelled):
+                chatgpt._wait_not_answering(Mock(), Mock(), event)
+        stop.click.assert_not_called()
+
+    def test_cancel_during_upload_or_wait_for_send_never_sends(self):
+        event = threading.Event()
+        event.set()
+        form = Mock()
+        with self.assertRaises(chatgpt.ChatGPTCancelled):
+            chatgpt._wait_attachments_visible(form, [], 1, event)
+        with self.assertRaises(chatgpt.ChatGPTCancelled):
+            chatgpt._wait_send_enabled(form, 1, event)
+        form.locator.return_value.filter.return_value.first.click.assert_not_called()
+
     def test_ui_queue_coalesces_updates_and_only_renders_on_ui_drain(self):
         callbacks, display = queue.Queue(), Mock()
         preview = StreamPreview(callbacks, display)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import shutil
 import threading
+import time
 import uuid
 
 from caption import chatgpt, paths, prompt_versions
@@ -19,6 +20,8 @@ class Research:
         self.service = service
         self.store = ResearchStore(service.store)
         self.stop = threading.Event()
+        self.active = {}  # node ID -> (selected tab, worker); guarded by service.lock
+        self.retry_after = {}
         self.thread = threading.Thread(target=self.work, daemon=True, name='branch-research')
         self.thread.start()
 
@@ -123,11 +126,18 @@ class Research:
                     self.service.update_job(job, status='cancelled')
                 return self.store.update(cid, nid, status='cancelled', detail='Đã hủy trước khi gửi.')
             if node['status'] == 'working':
-                self.service.job_cancel['research-' + nid].set()
+                cancel = self.service.job_cancel.get('research-' + nid)
+                if not cancel:
+                    raise BusyError('Node đang chạy ở tiến trình khác. Hủy tại cửa sổ đang xử lý node đó.')
+                cancel.set()
+                self.service.update_job(self.service.jobs['research-' + nid], status='cancelled', detail='Đã hủy chờ phản hồi.')
+                return self.store.update(cid, nid, status='cancelled', detail='Đã hủy chờ phản hồi.')
             return self.store.get(cid, nid)
 
     def retry(self, cid, nid, selected_tab=None):
         with self.service.lock:
+            if nid in self.active:
+                raise BusyError('Đang dừng yêu cầu cũ của node. Thử lại sau giây lát.')
             node = self.store.get(cid, nid, private=True)
             if node['status'] not in ('error', 'cancelled', 'interrupted'):
                 raise ValueError('Only failed, cancelled or interrupted branches can be retried.')
@@ -153,17 +163,21 @@ class Research:
         while not self.stop.wait(.25):
             try:
                 with self.service.lock:
-                    if self.service.busy or self.service.closed:
+                    if self.service.busy or self.service.closed or self.stop.is_set() or len(self.active) >= 20:
                         continue
-                    node = self.store.next_queued()
+                    self.retry_after = {tab: until for tab, until in self.retry_after.items() if until > time.monotonic()}
+                    excluded = {tab for tab, _ in self.active.values()} | self.retry_after.keys()
+                    node = self.store.next_queued(excluded)
                     if not node or not self.store.claim(node['conversation_id'], node['id']):
                         continue
-                    self.service.busy = True
                     job = dict(id='research-' + node['id'], node_id=node['id'], conversation_id=node['conversation_id'],
                                kind='research', status='working', detail='Preparing…', partial='', error='', result=None)
                     self.service.jobs[job['id']] = job
                     self.service.job_cancel[job['id']] = threading.Event()
-                self.run(node, job)
+                    worker = threading.Thread(target=self.run, args=(node, job), daemon=True,
+                                              name='research-' + node['id'])
+                    self.active[node['id']] = (node['config']['selected_tab'], worker)
+                    worker.start()
             except Exception:
                 log.exception('Research queue failed')
 
@@ -184,42 +198,46 @@ class Research:
                     self.store.progress(cid, nid, **values)
                     self.service.update_job(job, **values)
         try:
-            with ProcessLock(paths.CACHE_DIR / 'web-job.lock'):
-                if cancel.is_set() or self.stop.is_set():
+            if cancel.is_set() or self.stop.is_set():
+                raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
+            attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
+            response_tab = {}
+            response_source = {}
+            result = chatgpt.ask(request['prompt'], attachments,
+                lambda text: progress(detail=text),
+                new_chat=config.get('new_chat', False), selected_tab=config['selected_tab'], tab_name='rtc-research',
+                power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
+                on_partial=lambda text: progress(partial=text),
+                on_response_tab=lambda title: response_tab.update(title=title),
+                on_response_source=response_source.update)
+            with self.service.lock:
+                if cancel.is_set():
                     raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
-                # Avoid restoring large uploads repeatedly while native ChatGPT is busy.
-                # ask() still acquires its own lock before touching Chrome.
-                with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'):
-                    pass
-                attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
-                response_tab = {}
-                response_source = {}
-                result = chatgpt.ask(request['prompt'], attachments,
-                    lambda text: progress(detail=text),
-                    new_chat=config.get('new_chat', False), selected_tab=config['selected_tab'], tab_name='rtc-research',
-                    power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
-                    on_partial=lambda text: progress(partial=text),
-                    on_response_tab=lambda title: response_tab.update(title=title),
-                    on_response_source=response_source.update)
-                with self.service.lock:
-                    if cancel.is_set():
-                        raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
-                    saved = finish(status='done', answer=result, partial='', detail='Completed',
-                                   response_tab_title=response_tab.get('title', ''), **response_source)
-                    self.service.update_job(job, status='done' if saved else 'cancelled', partial='',
-                                            detail='Completed' if saved else 'Node đã bị xóa.')
+                saved = finish(status='done', answer=result, partial='', detail='Completed',
+                               response_tab_title=response_tab.get('title', ''), **response_source)
+                self.service.update_job(job, status='done' if saved else 'cancelled', partial='',
+                                        detail='Completed' if saved else 'Node đã bị xóa.')
+                self.active.pop(nid, None)
         except BusyError:
-            # The native UI owns Chrome. Nothing has been sent; leave this queued.
-            status = 'cancelled' if cancel.is_set() else 'queued'
-            finish(status=status, detail='Đang chờ thao tác ChatGPT khác hoàn tất.')
-            self.service.update_job(job, status='cancelled' if status == 'cancelled' else 'waiting')
+            # This tab is busy in another worker/process. Nothing has been sent.
+            with self.service.lock:
+                status = 'cancelled' if cancel.is_set() or self.stop.is_set() else 'queued'
+                self.retry_after[config['selected_tab']] = time.monotonic() + 1
+                detail = 'Đã hủy chờ phản hồi.' if status == 'cancelled' else 'Đang chờ tab ChatGPT đã chọn sẵn sàng.'
+                finish(status=status, detail=detail)
+                self.service.update_job(job, status='cancelled' if status == 'cancelled' else 'waiting', detail=detail)
+                self.active.pop(nid, None)
         except Exception as exc:
-            status = 'cancelled' if cancel.is_set() or self.stop.is_set() else 'error'
-            finish(status=status, detail=str(exc), partial=job['partial'])
-            self.service.update_job(job, status=status, error=str(exc))
+            with self.service.lock:
+                status = 'cancelled' if cancel.is_set() or self.stop.is_set() else 'error'
+                detail = 'Đã hủy chờ phản hồi.' if status == 'cancelled' else str(exc)
+                finish(status=status, detail=detail, partial=job['partial'])
+                self.service.update_job(job, status=status, error=str(exc), detail=detail)
+                self.active.pop(nid, None)
         finally:
             with self.service.lock:
-                self.service.busy = False
+                if self.active.get(nid, (None, None))[1] is threading.current_thread():
+                    self.active.pop(nid, None)
 
     def close(self):
         self.stop.set()
@@ -228,3 +246,8 @@ class Research:
                 if jid.startswith('research-'):
                     cancel.set()
         self.thread.join(timeout=6)
+        with self.service.lock:
+            workers = [worker for _, worker in self.active.values()]
+        deadline = time.monotonic() + 6
+        for worker in workers:
+            worker.join(timeout=max(0, deadline - time.monotonic()))

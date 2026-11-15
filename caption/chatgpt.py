@@ -20,6 +20,7 @@ import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from functools import wraps
 from dataclasses import dataclass
 from datetime import datetime
@@ -406,14 +407,27 @@ def _css_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _wait_not_answering(page, on_status: Callable[[str], None]) -> None:
+def _check_cancel(cancel_event):
+    if cancel_event and cancel_event.is_set():
+        raise ChatGPTCancelled(CANCELLED_MESSAGE)
+
+
+def _wait_not_answering(page, on_status: Callable[[str], None], cancel_event=None) -> None:
     """When continuing a conversation, let ChatGPT finish its previous answer first."""
     stop = _visible(page, STOP_BUTTON)
     try:
         if stop.count() == 0 or not stop.is_visible():
             return
         on_status("Waiting for ChatGPT to finish its previous answer…")
-        stop.wait_for(state="hidden", timeout=ANSWER_TIMEOUT_S * 1000)
+        deadline = time.monotonic() + ANSWER_TIMEOUT_S
+        while stop.count() and stop.is_visible():
+            # The previous generation is not this request's answer: never stop it here.
+            _check_cancel(cancel_event)
+            if time.monotonic() >= deadline:
+                raise ChatGPTError('Previous answer is still running.')
+            time.sleep(.25)
+    except ChatGPTCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise ChatGPTError("ChatGPT is still answering the previous message. Try again when it finishes.") from exc
 
@@ -471,12 +485,13 @@ def _clear_attachments(form) -> int:
     return removed
 
 
-def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float) -> None:
+def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, cancel_event=None) -> None:
     """Do not send until every selected file appears in the visible composer's chips."""
     expected = {path.name for path in attachments}
     deadline = time.monotonic() + timeout_s
     remove_buttons = form.locator("button[aria-label^='Remove ']")
     while time.monotonic() < deadline:
+        _check_cancel(cancel_event)
         try:
             labels = remove_buttons.evaluate_all(
                 "buttons => buttons.map(button => button.getAttribute('aria-label') || '')"
@@ -493,11 +508,12 @@ def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float) -
     )
 
 
-def _wait_send_enabled(scope, timeout_s: float):
+def _wait_send_enabled(scope, timeout_s: float, cancel_event=None):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
     button = _visible(scope, SEND_BUTTON)
     while time.monotonic() < deadline:
+        _check_cancel(cancel_event)
         try:
             if button.is_visible() and button.is_enabled():
                 return button
@@ -695,7 +711,35 @@ def open_new_chatgpt_tab():
         return _open_new_chatgpt_tab(browser)
 
 
-@_shared_request
+@contextmanager
+def _request_page(browser, selected_tab, use_current_tab, tab_name):
+    """Reserve the real Chrome target across native/web workers, not all of Chrome."""
+    from .paths import CACHE_DIR
+    from .shared_access import ProcessLock
+    # Selection/creation must be atomic; release the global lock before waiting for an answer.
+    with ProcessLock(CACHE_DIR / 'chatgpt-request.lock'):
+        if selected_tab:
+            page, created = _selected_chatgpt_tab(browser, selected_tab)
+        elif use_current_tab:
+            page, created = _current_chatgpt_tab(browser)
+        else:
+            page, created = _dedicated_tab(browser, tab_name)
+        session = page.context.new_cdp_session(page)
+        try:
+            target = session.send('Target.getTargetInfo')['targetInfo']['targetId']
+        finally:
+            session.detach()
+        # Hash the CDP ID so the lock filename can never contain path components.
+        import hashlib
+        key = hashlib.sha256(target.encode()).hexdigest()
+        lock = ProcessLock(CACHE_DIR / 'chatgpt-tabs' / (key + '.lock'))
+        lock.acquire()
+    try:
+        yield page, created
+    finally:
+        lock.release()
+
+
 def ask(
     prompt: str,
     file_path: Path | list[Path] | None = None,
@@ -735,89 +779,86 @@ def ask(
                 "Start Chrome with launch_chrome.bat (remote debugging on port 9222) and try again."
             ) from exc
 
-        # Everything runs in the background: Chrome is never brought to the front.
-        if selected_tab:
-            page, created = _selected_chatgpt_tab(browser, selected_tab)
-        elif use_current_tab:
-            page, created = _current_chatgpt_tab(browser)
-        else:
-            page, created = _dedicated_tab(browser, tab_name)
-        if new_chat or created:
-            on_status("Opening a new ChatGPT chat…")
-            page.goto(CHATGPT_URL, wait_until="domcontentloaded")
-            if selected_tab:
-                page.evaluate("key => window.name = key", selected_tab)
-            elif not use_current_tab:
-                page.evaluate(f"window.name = {tab_name!r}")
-        else:
-            on_status("Continuing the current ChatGPT chat…")
+        with _request_page(browser, selected_tab, use_current_tab, tab_name) as (page, created):
+            _check_cancel(cancel_event)
+            if new_chat or created:
+                on_status("Opening a new ChatGPT chat…")
+                page.goto(CHATGPT_URL, wait_until="domcontentloaded")
+                if selected_tab:
+                    page.evaluate("key => window.name = key", selected_tab)
+                elif not use_current_tab:
+                    page.evaluate(f"window.name = {tab_name!r}")
+            else:
+                on_status("Continuing the current ChatGPT chat…")
 
-        composer = _visible(page, COMPOSER)
-        try:
-            composer.wait_for(state="visible", timeout=30_000)
-        except Exception as exc:  # noqa: BLE001
-            raise ChatGPTError(
-                "ChatGPT's message box did not appear. Is this Chrome profile logged in to ChatGPT?"
-            ) from exc
-        composer_form = _composer_form(composer)
-        if not (new_chat or created):
-            _wait_not_answering(page, on_status)
-        if power is not None:
-            on_status("Setting ChatGPT power…")
-            on_status(f"Power set to {_set_power(page, power)}")
+            composer = _visible(page, COMPOSER)
+            try:
+                composer.wait_for(state="visible", timeout=30_000)
+            except Exception as exc:  # noqa: BLE001
+                raise ChatGPTError(
+                    "ChatGPT's message box did not appear. Is this Chrome profile logged in to ChatGPT?"
+                ) from exc
+            composer_form = _composer_form(composer)
+            _check_cancel(cancel_event)
+            if not (new_chat or created):
+                _wait_not_answering(page, on_status, cancel_event)
+            if power is not None:
+                on_status("Setting ChatGPT power…")
+                on_status(f"Power set to {_set_power(page, power)}")
 
-        attachments = [file_path] if isinstance(file_path, Path) else list(file_path or [])
-        if _clear_attachments(composer_form):
-            log.info("Removed leftover attachments from the ChatGPT composer")
-        if attachments:
-            on_status(f"Uploading {', '.join(p.name for p in attachments)}…")
-            file_input = composer_form.locator(FILE_INPUT).first
-            if file_input.count() == 0:
-                raise ChatGPTError("Could not find ChatGPT's file upload input (the page layout may have changed).")
-            file_input.set_input_files([str(p) for p in attachments])
-            _wait_attachments_visible(composer_form, attachments, UPLOAD_TIMEOUT_S)
+            attachments = [file_path] if isinstance(file_path, Path) else list(file_path or [])
+            if _clear_attachments(composer_form):
+                log.info("Removed leftover attachments from the ChatGPT composer")
+            if attachments:
+                on_status(f"Uploading {', '.join(p.name for p in attachments)}…")
+                file_input = composer_form.locator(FILE_INPUT).first
+                if file_input.count() == 0:
+                    raise ChatGPTError("Could not find ChatGPT's file upload input (the page layout may have changed).")
+                file_input.set_input_files([str(p) for p in attachments])
+                _wait_attachments_visible(composer_form, attachments, UPLOAD_TIMEOUT_S, cancel_event)
 
-        composer.click()
-        composer.fill(prompt)
-        send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S)
-        if dry_run:
-            on_status("Dry run: message prepared, not sent")
-            return ""
+            composer.click()
+            composer.fill(prompt)
+            send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S, cancel_event)
+            if dry_run:
+                on_status("Dry run: message prepared, not sent")
+                return ""
 
-        turns_before = _turn_ids(page)
-        answered_before = _answered_turn_ids(page)
-        send.click()
-        try:
-            page.wait_for_function(
-                "(a) => {" + _TURN_ID_JS + """
-                   const before = new Set(a.before);
-                   return [...document.querySelectorAll(a.turn)].some((t) =>
-                     a.attrs.some((x) => t.getAttribute(x) && !before.has(t.getAttribute(x))));
-                 }""",
-                arg={**_js_args(), "before": turns_before},
-                timeout=SENT_TIMEOUT_S * 1000,
+            turns_before = _turn_ids(page)
+            answered_before = _answered_turn_ids(page)
+            _check_cancel(cancel_event)
+            send.click()
+            try:
+                page.wait_for_function(
+                    "(a) => {" + _TURN_ID_JS + """
+                       const before = new Set(a.before);
+                       return [...document.querySelectorAll(a.turn)].some((t) =>
+                         a.attrs.some((x) => t.getAttribute(x) && !before.has(t.getAttribute(x))));
+                     }""",
+                    arg={**_js_args(), "before": turns_before},
+                    timeout=SENT_TIMEOUT_S * 1000,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
+            log.info(
+                "Sent message to ChatGPT (%s, attachments %s)",
+                "selected Chrome tab" if selected_tab else (
+                    "current Chrome tab" if use_current_tab else f"tab {tab_name}"
+                ),
+                [p.name for p in attachments],
             )
-        except Exception as exc:  # noqa: BLE001
-            raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
-        log.info(
-            "Sent message to ChatGPT (%s, attachments %s)",
-            "selected Chrome tab" if selected_tab else (
-                "current Chrome tab" if use_current_tab else f"tab {tab_name}"
-            ),
-            [p.name for p in attachments],
-        )
 
-        on_status("Waiting for ChatGPT's answer…")
-        try:
-            turn_id = _wait_new_answer(
-                page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
-            )
-        except ChatGPTCancelled:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise ChatGPTError(
-                f"ChatGPT did not finish answering within {ANSWER_TIMEOUT_S // 60} minutes. See the Chrome tab."
-            ) from exc
-        _wait_stable(page, turn_id, 60, cancel_event)
-        on_status("Reading the answer…")
-        return _read_answer(page, turn_id, on_response_tab, on_response_source)
+            on_status("Waiting for ChatGPT's answer…")
+            try:
+                turn_id = _wait_new_answer(
+                    page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
+                )
+            except ChatGPTCancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise ChatGPTError(
+                    f"ChatGPT did not finish answering within {ANSWER_TIMEOUT_S // 60} minutes. See the Chrome tab."
+                ) from exc
+            _wait_stable(page, turn_id, 60, cancel_event)
+            on_status("Reading the answer…")
+            return _read_answer(page, turn_id, on_response_tab, on_response_source)

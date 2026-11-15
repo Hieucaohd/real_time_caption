@@ -514,7 +514,7 @@ export default function ResearchTab({
                     ) : reading.partial ? (
                       <>
                         <small className="muted">
-                          Câu trả lời đang được tạo
+                          {reading.status === "working" ? "Câu trả lời đang được tạo" : "Nội dung đã nhận trước khi dừng"}
                         </small>
                         <pre className="research-stream">{reading.partial}</pre>
                       </>
@@ -607,7 +607,8 @@ export default function ResearchTab({
                         action(() => post(base + "/" + reading.id + "/cancel"))
                       }
                     >
-                      Hủy nhánh này
+                      <X size={15} />
+                      {reading.status === "working" ? "Hủy chờ phản hồi" : "Hủy xếp hàng"}
                     </button>
                   ) : (
                     <button

@@ -339,10 +339,13 @@ class ResearchStore:
                        + " WHERE id=? AND conversation_id=? AND status='working'",
                        (*values.values(), nid, cid))
 
-    def next_queued(self):
+    def next_queued(self, excluded_tabs=()):
         with self.conversations._connect() as db:
-            row = db.execute("SELECT * FROM research_nodes WHERE status='queued' ORDER BY created_at, rowid LIMIT 1").fetchone()
-            return self.row(row, private=True) if row else None
+            for row in db.execute("SELECT * FROM research_nodes WHERE status='queued' ORDER BY created_at, rowid"):
+                node = self.row(row, private=True)
+                if node['config'].get('selected_tab') not in excluded_tabs:
+                    return node
+        return None
 
     def claim(self, cid, nid):
         with self.conversations._connect() as db:

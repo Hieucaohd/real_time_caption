@@ -99,7 +99,7 @@ def main():
             assert store.defaults() == {}
             page.unroute('**/api/research/defaults')
             dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
-            expect(dialog.get_by_role('status')).to_contain_text('Đã lưu vào database')
+            expect(dialog.get_by_role('status').filter(has_text='Đã lưu vào database')).to_be_visible()
             expect(question).to_have_value('Keep this draft')
             expect(dialog.locator('.composer-files')).to_contain_text('pasted.png')
             assert len(store.list(fixture.cid)) == 1
@@ -121,6 +121,25 @@ def main():
             assert node['config']['selected_tab'] == 'new-tab'
             assert node['config']['power'] == 2
             assert len(node['request']['attachments']) == 1
+            # Per-node cancel works for both queued and active nodes; partial text persists.
+            page.get_by_label('Tìm node', exact=True).fill('Explain limits')
+            page.locator('.research-search-results button').first.click()
+            page.get_by_label('Tìm node', exact=True).fill('')
+            page.get_by_role('button', name='Hủy xếp hàng', exact=True).click()
+            expect(page.get_by_role('button', name='Hủy xếp hàng', exact=True)).to_have_count(0)
+            assert store.get(fixture.cid, node['id'])['status'] == 'cancelled'
+            jid = 'research-' + node['id']
+            with fixture.service.lock:
+                fixture.service.job_cancel[jid] = threading.Event()
+                fixture.service.jobs[jid] = dict(id=jid, kind='research', node_id=node['id'],
+                    conversation_id=fixture.cid, status='working', partial='Saved partial answer', detail='Waiting')
+                store.update(fixture.cid, node['id'], status='working', partial='Saved partial answer')
+            page.get_by_role('button', name='Hủy chờ phản hồi', exact=True).click()
+            expect(page.get_by_role('button', name='Hủy chờ phản hồi', exact=True)).to_have_count(0)
+            expect(page.locator('.research-stream')).to_have_text('Saved partial answer')
+            expect(page.locator('.research-answer')).to_contain_text('Nội dung đã nhận trước khi dừng')
+            assert fixture.service.job_cancel[jid].is_set()
+            assert store.get(fixture.cid, node['id'])['status'] == 'cancelled'
             with fixture.service.store._connect() as db:
                 assert db.execute('SELECT count(*) FROM research_node_assets WHERE node_id=?', (node['id'],)).fetchone()[0] == 1
             page.locator('nav button').nth(1).click()
@@ -128,7 +147,9 @@ def main():
             expect(page.get_by_label('chat ChatGPT tab', exact=True)).to_have_value('existing')
             # Batch mode leaves Enter for a new question instead of submitting.
             page.locator('nav button').nth(2).click()
-            page.locator(f'[data-node-id="{root["id"]}"] .research-node').click()
+            page.get_by_label('Tìm node', exact=True).fill('Question')
+            page.locator('.research-search-results button').first.click()
+            page.get_by_label('Tìm node', exact=True).fill('')
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             dialog.get_by_label('Tạo nhiều nhánh: mỗi dòng là một câu hỏi', exact=True).check()
             question.fill('First'); question.press('Enter'); question.type('Second')
@@ -140,7 +161,9 @@ def main():
             # A full reload restores DB defaults, without carrying over the old draft/assets.
             page.reload()
             page.locator('nav button').nth(2).click()
-            page.locator(f'[data-node-id="{root["id"]}"] .research-node').click()
+            page.get_by_label('Tìm node', exact=True).fill('Question')
+            page.locator('.research-search-results button').first.click()
+            page.get_by_label('Tìm node', exact=True).fill('')
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
             expect(page.get_by_label('research Prompt', exact=True)).to_have_value('v2 - Composer test')
