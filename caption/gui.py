@@ -7,6 +7,7 @@ import math
 import os
 import queue
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from datetime import datetime
@@ -61,6 +62,8 @@ class App:
         self._stopping = False
         self._line_open = False  # transcript's current line already has text
         self._closing = False
+        self._shared_checked = 0.0
+        self._shared_signature = None
 
         root.title("Real-time Caption")
         # Tk sizes are in physical pixels once the process is DPI-aware, so scale them.
@@ -580,6 +583,7 @@ class App:
             self.device_var.set(conversation.source)
         self._show_saved_transcript()
         self.chat.load_conversation()
+        self.vocab.load_conversation()
         self.translation.load_conversation()
         self._refresh_summary_history(select_latest=True)
         self._set_running(self.transcriber is not None)
@@ -872,7 +876,6 @@ class App:
         self._capture_file = None
         self._stopping = False
         if self.current_conversation:
-            self.store.set_status(self.current_conversation.id, "paused")
             refreshed = self.store.get(self.current_conversation.id)
             if refreshed:
                 self.current_conversation = refreshed
@@ -1153,7 +1156,58 @@ class App:
         if self.capture:
             self.capture.level *= 0.6  # decay when no new audio arrives (silent loopback)
         self.overlay.tick()
+        if time.monotonic() - self._shared_checked > 2:
+            self._shared_checked = time.monotonic()
+            try:
+                self._sync_shared_data()
+            except Exception:
+                log.exception('Could not refresh shared desktop/web data')
         self.root.after(POLL_MS, self._poll)
+
+    def _sync_shared_data(self) -> None:
+        """Refresh external writes without discarding drafts or interrupting capture."""
+        if self._sending_to_chatgpt:
+            return
+        from .shared_ui import refresh_settings
+        refresh_settings(self)
+        conversations = self.store.list()
+        for item in conversations:
+            values = (datetime.fromisoformat(item.updated_at).strftime('%m-%d %H:%M'),)
+            title = item.title + (' ●' if item.status == 'recording' else '')
+            if self.conversation_tree.exists(item.id):
+                self.conversation_tree.item(item.id, text=title, values=values)
+            else:
+                self.conversation_tree.insert('', 'end', iid=item.id, text=title, values=values)
+        cid = self._conversation_id()
+        if not cid:
+            return
+        current = self.store.get(cid)
+        if not current:
+            return
+        if not self.transcriber:
+            self.current_conversation = current
+            self.session_file = ConversationTranscript(current, self.store)
+        transcript = self.session_file
+        messages = self.store.messages(cid)
+        signature = (cid, tuple((m.id, m.content, m.header) for m in messages))
+        if signature != self._shared_signature:
+            self._shared_signature = signature
+            self.chat.load_conversation(preserve_draft=True)
+            self.vocab.load_conversation()
+            self._refresh_summary_history(select_latest=True)
+        if not self.transcriber and transcript:
+            text_signature = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in transcript.parts())
+            if text_signature != getattr(self, '_shared_text_signature', None):
+                self._shared_text_signature = text_signature
+                self._show_saved_transcript()
+                self.translation.load_conversation()
+        lines = self.translation.store.lines(cid)
+        translation_signature = tuple((line['id'], line.get('last_state')) for line in lines)
+        if translation_signature != getattr(self, '_shared_translation_signature', None):
+            self._shared_translation_signature = translation_signature
+            for line in lines:
+                self.translation._put_line(line, state=line.get('last_state'), follow=False, show=False)
+            self.translation._show_selected()
 
     def _handle(self, tfile: ConversationTranscript, event: Event) -> None:
         if event.kind == "status":

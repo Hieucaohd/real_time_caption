@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import asdict, dataclass, fields
 
 from .paths import SETTINGS_PATH
+from .shared_access import ProcessLock
 
 log = logging.getLogger(__name__)
 
@@ -80,10 +83,28 @@ class Settings:
         data.setdefault("summary_new_chat", data.get("chatgpt_new_chat", True))
         data.setdefault("summary_chatgpt_selected_tab", data.get("chatgpt_selected_tab", ""))
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        result = cls(**{k: v for k, v in data.items() if k in known})
+        result._baseline = asdict(result)
+        return result
 
     def save(self) -> None:
         try:
-            SETTINGS_PATH.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+            with ProcessLock(SETTINGS_PATH.with_suffix('.lock'), timeout=5):
+                values = asdict(self)
+                baseline = getattr(self, '_baseline', {})
+                try:
+                    latest = json.loads(SETTINGS_PATH.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    latest = {}
+                latest.update({k: v for k, v in values.items() if baseline.get(k) != v or k not in baseline})
+                fd, name = tempfile.mkstemp(dir=SETTINGS_PATH.parent, suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                        json.dump(latest, stream, indent=2)
+                    os.replace(name, SETTINGS_PATH)
+                finally:
+                    if os.path.exists(name):
+                        os.unlink(name)
+                self._baseline = values
         except OSError:
             log.exception("Could not save settings")

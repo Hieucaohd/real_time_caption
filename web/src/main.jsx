@@ -1,0 +1,1586 @@
+import React, { useState, useEffect, useRef } from "react";
+import { createRoot } from "react-dom/client";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import {
+  AudioLines,
+  Plus,
+  Search,
+  Settings2,
+  Play,
+  Pause,
+  Download,
+  Copy,
+  MessageSquare,
+  BookOpen,
+  Languages,
+  FileText,
+  PanelTop,
+  FolderOpen,
+  Pencil,
+  RefreshCw,
+  X,
+  Send,
+  Paperclip,
+  Camera,
+  Check,
+  ArrowDown,
+  ArrowUp,
+  Square,
+  ChevronRight,
+} from "lucide-react";
+import "katex/dist/katex.min.css";
+import "./style.css";
+
+async function api(path, options = {}) {
+  const headers = { "X-RTC-Client": "web", ...options.headers };
+  if (options.body && !(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(options.body);
+  }
+  const response = await fetch("/api" + path, { ...options, headers });
+  if (!response.ok) {
+    let detail;
+    try {
+      detail = (await response.json()).detail;
+    } catch {
+      detail = response.statusText;
+    }
+    throw new Error(
+      typeof detail === "string" ? detail : JSON.stringify(detail),
+    );
+  }
+  return response.json();
+}
+const post = (path, body = {}) => api(path, { method: "POST", body });
+const tabs = [
+  ["transcript", FileText, "Transcript"],
+  ["chat", MessageSquare, "Chat"],
+  ["summary", BookOpen, "Summary"],
+  ["translation", Languages, "Translation"],
+  ["vocab", Plus, "New words"],
+];
+function Button({ children, icon: Icon, className = "", ...props }) {
+  return (
+    <button className={className} {...props}>
+      {Icon && <Icon size={16} />} {children}
+    </button>
+  );
+}
+const Md = React.memo(function Md({ text }) {
+  return (
+    <div className="markdown">
+      <Markdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
+      >
+        {text || ""}
+      </Markdown>
+    </div>
+  );
+});
+function Field({ label, children }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+function Toggle({ label, checked, onChange }) {
+  return (
+    <label className="toggle">
+      <input
+        type="checkbox"
+        checked={!!checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+function Empty({ icon: Icon = FileText, title, text }) {
+  return (
+    <div className="empty">
+      <Icon size={32} />
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </div>
+  );
+}
+const stamp = (text) =>
+  text
+    ? new Date(text).toLocaleString("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+
+function App() {
+  const [boot, setBoot] = useState(null),
+    [detail, setDetail] = useState(null);
+  const [cid, setCid] = useState(
+    localStorage.getItem("rtc-conversation") || "",
+  );
+  const cidRef = useRef(cid);
+  cidRef.current = cid;
+  const [tab, setTab] = useState("transcript"),
+    [query, setQuery] = useState(""),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false),
+    [promptKind, setPromptKind] = useState(null);
+  const [chromeTabs, setChromeTabs] = useState([]),
+    [loadingTabs, setLoadingTabs] = useState(false);
+  const [message, setMessage] = useState(""),
+    [files, setFiles] = useState([]),
+    [uploading, setUploading] = useState(false);
+  const [attach, setAttach] = useState(true),
+    [newChat, setNewChat] = useState(false),
+    [summaryId, setSummaryId] = useState(null);
+  const [words, setWords] = useState(""),
+    [saveVoca, setSaveVoca] = useState(false),
+    [vocabResult, setVocabResult] = useState([]);
+  const [lineId, setLineId] = useState(null),
+    [history, setHistory] = useState([]);
+  const [follow, setFollow] = useState(true),
+    [hiddenTranscript, setHiddenTranscript] = useState(false),
+    [lastCount, setLastCount] = useState(0);
+  const transcriptEnd = useRef(null),
+    chatEnd = useRef(null),
+    fileInput = useRef(null),
+    chatScroll = useRef(null);
+  const jobSeen = useRef(new Set());
+  const settings = boot?.settings || {},
+    active = boot?.capture?.active;
+  const current = boot?.conversations.find((c) => c.id === cid);
+  const busyJob = boot?.jobs.find((j) =>
+    ["queued", "working"].includes(j.status),
+  );
+  const jobs = (boot?.jobs || []).filter(
+    (j) =>
+      j.conversation_id === cid &&
+      (j.kind === tab ||
+        (tab === "translation" && j.kind.startsWith("translation-")) ||
+        (tab === "vocab" && j.kind === "voca-save")),
+  );
+  const messages = detail?.messages || [];
+
+  function choose(id) {
+    setCid(id);
+    cidRef.current = id;
+    localStorage.setItem("rtc-conversation", id);
+    setDetail(null);
+    setFiles([]);
+    setSummaryId(null);
+    setLineId(null);
+    setHistory([]);
+    setHiddenTranscript(false);
+    setVocabResult([]);
+  }
+  async function refresh() {
+    const data = await api("/bootstrap");
+    setBoot(data);
+    let selected = cidRef.current;
+    if (!data.conversations.some((c) => c.id === selected)) {
+      selected = data.conversations[0]?.id || "";
+      choose(selected);
+    }
+    if (selected) {
+      const result = await api("/conversations/" + selected);
+      if (cidRef.current === selected) setDetail(result);
+    }
+    for (const job of data.jobs) {
+      if (job.status === "done" && !jobSeen.current.has(job.id)) {
+        jobSeen.current.add(job.id);
+        if (
+          job.conversation_id === cidRef.current &&
+          Array.isArray(job.result) &&
+          ["vocab", "voca-save"].includes(job.kind)
+        )
+          setVocabResult(job.result);
+      }
+    }
+  }
+  useEffect(() => {
+    let live = true,
+      timer;
+    const tick = async () => {
+      try {
+        await refresh();
+      } catch (e) {
+        if (live) setError(e.message);
+      }
+      if (live) timer = setTimeout(tick, 1000);
+    };
+    tick();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, []);
+  useEffect(() => {
+    if (cid) refresh().catch((e) => setError(e.message));
+  }, [cid]);
+  useEffect(() => {
+    if (follow && tab === "transcript")
+      transcriptEnd.current?.scrollIntoView({ block: "end" });
+  }, [detail?.transcript, boot?.capture?.partial, tab]);
+  useEffect(() => {
+    if (tab === "chat") chatEnd.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, busyJob?.partial, tab]);
+  useEffect(() => {
+    if (!lineId) return;
+    api("/translation/" + lineId + "/history")
+      .then(setHistory)
+      .catch((e) => setError(e.message));
+  }, [lineId, detail?.lines?.find((l) => l.id === lineId)?.last_state]);
+  useEffect(() => {
+    if (notice) {
+      const timer = setTimeout(() => setNotice(""), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [notice]);
+  async function action(fn) {
+    setError("");
+    try {
+      const value = await fn();
+      await refresh();
+      return value;
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function changeSettings(values) {
+    const updated = await api("/settings", { method: "PATCH", body: values });
+    setBoot((old) => ({ ...old, settings: updated }));
+    return updated;
+  }
+  async function create() {
+    const title = window.prompt("Tên cuộc hội thoại mới", "New conversation");
+    if (title?.trim())
+      await action(async () => {
+        const item = await post("/conversations", { title });
+        choose(item.id);
+      });
+  }
+  async function rename() {
+    const title = window.prompt("Đổi tên cuộc hội thoại", current?.title);
+    if (title?.trim())
+      await action(() =>
+        api("/conversations/" + cid, { method: "PATCH", body: { title } }),
+      );
+  }
+  async function scanTabs() {
+    setLoadingTabs(true);
+    try {
+      setChromeTabs(await api("/chrome-tabs"));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoadingTabs(false);
+    }
+  }
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("Đã copy");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function upload(selected) {
+    if (!cid) return;
+    const target = cid;
+    setUploading(true);
+    try {
+      for (const file of selected) {
+        const body = new FormData();
+        body.append("file", file);
+        const result = await post("/conversations/" + target + "/files", body);
+        if (cidRef.current === target) setFiles((old) => [...old, result]);
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function screen() {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      await video.play();
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png"),
+      );
+      await upload([new File([blob], "screen.png", { type: "image/png" })]);
+    } catch (e) {
+      if (e.name !== "NotAllowedError") setError(e.message);
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+    }
+  }
+  async function submit(kind) {
+    const payload = { kind };
+    if (kind === "chat")
+      Object.assign(payload, {
+        message,
+        attach_transcript: attach,
+        new_chat: newChat,
+        files: files.map((f) => f.path),
+      });
+    if (kind === "summary")
+      Object.assign(payload, { new_chat: settings.summary_new_chat });
+    if (kind === "vocab")
+      Object.assign(payload, {
+        message: words,
+        new_chat: newChat,
+        save_voca: saveVoca,
+      });
+    await action(async () => {
+      await post("/conversations/" + cid + "/jobs", payload);
+      if (kind === "chat") {
+        setMessage("");
+        setFiles([]);
+      }
+    });
+  }
+  const download = (kind, mid) =>
+    "/api/conversations/" + cid + "/answers/" + mid + "/export?format=" + kind;
+  function answerActions(m) {
+    return (
+      <div className="answer-actions">
+        <Button icon={Copy} onClick={() => copy(m.content)}>
+          Copy
+        </Button>
+        {["md", "docx", "pdf"].map((f) => (
+          <a key={f} href={download(f, m.id)} download>
+            {f.toUpperCase()}
+          </a>
+        ))}
+      </div>
+    );
+  }
+  function options(kind) {
+    const isSummary = kind === "summary";
+    return (
+      <div className="options">
+        <Field label="ChatGPT tab">
+          <div className="inline">
+            <select
+              aria-label={kind + " ChatGPT tab"}
+              value={
+                settings[
+                  isSummary
+                    ? "summary_chatgpt_selected_tab"
+                    : "chatgpt_selected_tab"
+                ] || ""
+              }
+              onChange={(e) =>
+                action(() =>
+                  changeSettings({
+                    [isSummary
+                      ? "summary_chatgpt_selected_tab"
+                      : "chatgpt_selected_tab"]: e.target.value,
+                  }),
+                )
+              }
+            >
+              <option value="">Chọn tab Chrome…</option>
+              {chromeTabs.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.title}
+                </option>
+              ))}
+              {!chromeTabs.some(
+                (t) =>
+                  t.key ===
+                  settings[
+                    isSummary
+                      ? "summary_chatgpt_selected_tab"
+                      : "chatgpt_selected_tab"
+                  ],
+              ) &&
+                settings[
+                  isSummary
+                    ? "summary_chatgpt_selected_tab"
+                    : "chatgpt_selected_tab"
+                ] && (
+                  <option
+                    value={
+                      settings[
+                        isSummary
+                          ? "summary_chatgpt_selected_tab"
+                          : "chatgpt_selected_tab"
+                      ]
+                    }
+                  >
+                    Tab đã lưu — Refresh để xem
+                  </option>
+                )}
+            </select>
+            <Button
+              icon={RefreshCw}
+              title="Refresh Chrome tabs"
+              onClick={scanTabs}
+              disabled={loadingTabs}
+            />
+          </div>
+        </Field>
+        <Field label="Prompt">
+          <div className="inline">
+            <select
+              value={
+                settings[kind + "_prompt"] || boot.prompts[kind]?.at(-1) || ""
+              }
+              onChange={(e) =>
+                action(() =>
+                  changeSettings({ [kind + "_prompt"]: e.target.value }),
+                )
+              }
+            >
+              {boot.prompts[kind]?.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+            </select>
+            <Button
+              icon={Pencil}
+              title="Edit prompt"
+              onClick={() => setPromptKind(kind)}
+            />
+          </div>
+        </Field>
+        <Field label="Power">
+          <select
+            value={settings[kind + "_chatgpt_power"]}
+            onChange={(e) =>
+              action(() =>
+                changeSettings({ [kind + "_chatgpt_power"]: +e.target.value }),
+              )
+            }
+          >
+            {["Giữ nguyên", "Instant", "Medium", "High"].map((p, i) => (
+              <option key={p} value={i - 1}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Số dòng transcript (0 = tất cả)">
+          <input
+            type="number"
+            min="0"
+            value={settings[kind + "_max_lines"] ?? 300}
+            onChange={(e) =>
+              action(() =>
+                changeSettings({
+                  [kind + "_max_lines"]: Math.max(0, +e.target.value),
+                }),
+              )
+            }
+          />
+        </Field>
+        {isSummary ? (
+          <>
+            <Toggle
+              label="Đính kèm transcript"
+              checked={settings.summary_attach_transcript}
+              onChange={(v) =>
+                action(() => changeSettings({ summary_attach_transcript: v }))
+              }
+            />
+            <Toggle
+              label="New ChatGPT chat"
+              checked={settings.summary_new_chat}
+              onChange={(v) =>
+                action(() => changeSettings({ summary_new_chat: v }))
+              }
+            />
+          </>
+        ) : (
+          <>
+            <Toggle
+              label="Đính kèm transcript"
+              checked={attach}
+              onChange={setAttach}
+            />
+            <Toggle
+              label="Đính kèm lịch sử chat"
+              checked={settings.chat_attach_history}
+              onChange={(v) =>
+                action(() => changeSettings({ chat_attach_history: v }))
+              }
+            />
+            <Toggle
+              label="Auto screenshot"
+              checked={settings.chat_screenshot}
+              onChange={(v) =>
+                action(() => changeSettings({ chat_screenshot: v }))
+              }
+            />
+            <Toggle
+              label="New ChatGPT chat"
+              checked={newChat}
+              onChange={setNewChat}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+  const savedVocab = messages
+    .filter((m) => m.kind === "vocab" && m.role === "bot")
+    .flatMap((m) => {
+      try {
+        return JSON.parse(m.content);
+      } catch {
+        return [];
+      }
+    });
+  const displayWords = vocabResult.length ? vocabResult : savedVocab;
+
+  if (!boot)
+    return (
+      <div className="loading">
+        <AudioLines size={38} />
+        <h2>Real-time Caption</h2>
+        <p>{error || "Đang kết nối…"}</p>
+        <Button onClick={() => location.reload()}>Thử lại</Button>
+      </div>
+    );
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-icon">
+            <AudioLines size={22} />
+          </div>
+          <div>
+            Real-time Caption<small>YOUR LEARNING WORKSPACE</small>
+          </div>
+        </div>
+        <Button className="primary new" icon={Plus} onClick={create}>
+          New conversation
+        </Button>
+        <div className="search">
+          <Search size={15} />
+          <input
+            aria-label="Search conversations"
+            placeholder="Tìm cuộc hội thoại…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="section-label">
+          CONVERSATIONS <span>{boot.conversations.length}</span>
+        </div>
+        <div className="conversation-list">
+          {boot.conversations
+            .filter((c) => c.title.toLowerCase().includes(query.toLowerCase()))
+            .map((c) => (
+              <button
+                className={"conversation " + (c.id === cid ? "selected" : "")}
+                key={c.id}
+                onClick={() => choose(c.id)}
+              >
+                <MessageSquare size={17} />
+                <div>
+                  <strong>{c.title}</strong>
+                  <small>
+                    {stamp(c.updated_at)}{" "}
+                    {c.status === "recording" && (
+                      <span className="live-dot">● LIVE</span>
+                    )}
+                  </small>
+                </div>
+                <ChevronRight size={14} />
+              </button>
+            ))}
+        </div>
+        <div className="sidebar-bottom">
+          <div className="sync">
+            <span /> Dùng chung dữ liệu với desktop
+          </div>
+          <Button icon={Settings2} onClick={() => setSettingsOpen(true)}>
+            Settings
+          </Button>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <div className="eyebrow">
+              WORKSPACE <span>/</span> {tabs.find((t) => t[0] === tab)?.[2]}
+            </div>
+            <h1>{current?.title || "Bắt đầu cuộc hội thoại mới"}</h1>
+          </div>
+          <div className="header-actions">
+            <Button
+              icon={Pencil}
+              title="Rename conversation"
+              onClick={rename}
+              disabled={!cid}
+            />
+            <Button
+              icon={FolderOpen}
+              title="Open conversation folder"
+              onClick={() =>
+                action(() => post("/conversations/" + cid + "/open-folder"))
+              }
+              disabled={!cid}
+            />
+            <Button
+              icon={PanelTop}
+              onClick={() => action(() => post("/overlay"))}
+            >
+              Caption overlay
+            </Button>
+          </div>
+        </header>
+        <div className="capture-bar">
+          <div className={"source-icon " + (active ? "recording" : "")}>
+            <AudioLines size={23} />
+          </div>
+          <div>
+            <strong>Windows Live Captions</strong>
+            <small>{boot.capture.status}</small>
+          </div>
+          <span className="source-tag">Win + Ctrl + L</span>
+          <Button
+            className={active ? "stop" : "primary"}
+            icon={active ? Pause : Play}
+            disabled={!cid}
+            onClick={() =>
+              action(() =>
+                post(
+                  active
+                    ? "/capture/pause"
+                    : "/conversations/" + cid + "/capture",
+                ),
+              )
+            }
+          >
+            {active ? "Pause" : "Start / Continue"}
+          </Button>
+        </div>
+        <nav>
+          {tabs.map(([key, Icon, label]) => (
+            <button
+              key={key}
+              className={key === tab ? "active" : ""}
+              onClick={() => setTab(key)}
+            >
+              <Icon size={17} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        {(error || boot.capture.error) && (
+          <div role="alert" className="alert">
+            {error || boot.capture.error}
+            <button onClick={() => setError("")} aria-label="Close error">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+        {notice && (
+          <div className="toast">
+            <Check size={16} />
+            {notice}
+          </div>
+        )}
+        {!cid ? (
+          <Empty
+            title="Không có cuộc hội thoại"
+            text="Tạo cuộc hội thoại để ghi transcript, hỏi ChatGPT và lưu kiến thức."
+          />
+        ) : (
+          <div className="workspace">
+            {tab === "transcript" && (
+              <>
+                <div className="panel-toolbar">
+                  <div>
+                    <h2>Live transcript</h2>
+                    <span className="muted">
+                      Nội dung tự động lưu vào cuộc hội thoại
+                    </span>
+                  </div>
+                  <div className="inline">
+                    <Toggle
+                      label="Auto-scroll"
+                      checked={follow}
+                      onChange={setFollow}
+                    />
+                    <Button
+                      icon={Copy}
+                      onClick={() => copy(detail?.transcript || "")}
+                    >
+                      Copy
+                    </Button>
+                    <Button onClick={() => setHiddenTranscript((v) => !v)}>
+                      {hiddenTranscript ? "Hiện lại" : "Clear view"}
+                    </Button>
+                    <input
+                      className="line-count"
+                      type="number"
+                      min="0"
+                      title="Download last N lines (0 = all)"
+                      value={lastCount}
+                      onChange={(e) =>
+                        setLastCount(Math.max(0, +e.target.value))
+                      }
+                    />
+                    <a
+                      className="button"
+                      href={
+                        "/api/conversations/" +
+                        cid +
+                        "/transcript?count=" +
+                        lastCount
+                      }
+                      download
+                    >
+                      <Download size={16} />
+                      Download
+                    </a>
+                  </div>
+                </div>
+                <div className="transcript scroll">
+                  {!detail?.transcript && (
+                    <Empty
+                      icon={AudioLines}
+                      title="Sẵn sàng lắng nghe"
+                      text="Bấm Start, mở Windows Live Captions rồi phát âm thanh có lời nói."
+                    />
+                  )}
+                  {!hiddenTranscript && <pre>{detail?.transcript}</pre>}
+                  {boot.capture.conversation_id === cid && (
+                    <p className="partial">{boot.capture.partial}</p>
+                  )}
+                  <div ref={transcriptEnd} />
+                </div>
+              </>
+            )}
+            {tab === "chat" && (
+              <>
+                {options("chat")}
+                <div className="chat-scroll scroll" ref={chatScroll}>
+                  {!messages.filter((m) => m.kind === "chat").length && (
+                    <Empty
+                      icon={MessageSquare}
+                      title="Hỏi sâu hơn về nội dung"
+                      text="Đính kèm transcript, ảnh hoặc tài liệu để ChatGPT trả lời theo ngữ cảnh."
+                    />
+                  )}
+                  {messages
+                    .filter((m) => m.kind === "chat")
+                    .map((m) => (
+                      <article className={"message " + m.role} key={m.id}>
+                        <div className="message-meta">
+                          {m.role === "bot" ? "ChatGPT" : "Bạn"}{" "}
+                          <time>{stamp(m.created_at)}</time>
+                        </div>
+                        {m.role === "bot" ? (
+                          <Md text={m.markdown} />
+                        ) : (
+                          <p className="user-text">{m.content}</p>
+                        )}
+                        <Attachments message={m} cid={cid} />
+                        {m.role === "bot" && answerActions(m)}
+                        {m.role === "user" && (
+                          <Button onClick={() => setMessage(m.content)}>
+                            Dùng lại câu hỏi
+                          </Button>
+                        )}
+                      </article>
+                    ))}
+                  {jobs
+                    .filter((j) => j.status === "working" && j.partial)
+                    .map((j) => (
+                      <article key={j.id} className="message bot preview">
+                        <pre>{j.partial}</pre>
+                      </article>
+                    ))}
+                  <div ref={chatEnd} />
+                </div>
+                <div className="composer">
+                  <div className="composer-files">
+                    {files.map((f) => (
+                      <span key={f.path}>
+                        {f.name}
+                        <button
+                          onClick={() =>
+                            setFiles((old) =>
+                              old.filter((x) => x.path !== f.path),
+                            )
+                          }
+                        >
+                          <X size={13} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <textarea
+                    placeholder="Nhập câu hỏi… Enter để gửi, Shift + Enter xuống dòng"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (message.trim() && !busyJob && !uploading)
+                          submit("chat");
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const images = [...e.clipboardData.files].filter((f) =>
+                        f.type.startsWith("image/"),
+                      );
+                      if (images.length) {
+                        e.preventDefault();
+                        upload(images);
+                      }
+                    }}
+                  />
+                  <div className="composer-actions">
+                    <div className="inline">
+                      <Button
+                        icon={Paperclip}
+                        onClick={() => fileInput.current.click()}
+                        disabled={uploading}
+                      >
+                        Attach files
+                      </Button>
+                      <Button
+                        icon={Camera}
+                        onClick={screen}
+                        disabled={uploading}
+                      >
+                        Screenshot
+                      </Button>
+                      <Button
+                        icon={ArrowUp}
+                        title="Top"
+                        onClick={() => chatScroll.current.scrollTo({ top: 0 })}
+                      />
+                      <Button
+                        icon={ArrowDown}
+                        title="Bottom"
+                        onClick={() => chatEnd.current.scrollIntoView()}
+                      />
+                      <input
+                        hidden
+                        ref={fileInput}
+                        type="file"
+                        multiple
+                        onChange={(e) => {
+                          upload([...e.target.files]);
+                          e.target.value = "";
+                        }}
+                      />
+                    </div>
+                    <Button
+                      className="primary"
+                      icon={Send}
+                      disabled={!message.trim() || !!busyJob || uploading}
+                      onClick={() => submit("chat")}
+                    >
+                      {uploading ? "Uploading…" : "Send"}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+            {tab === "summary" && (
+              <>
+                {options("summary")}
+                <div className="panel-toolbar">
+                  <Field label="Lịch sử tóm tắt">
+                    <select
+                      value={
+                        summaryId ||
+                        messages
+                          .filter(
+                            (m) => m.kind === "summary" && m.role === "bot",
+                          )
+                          .at(-1)?.id ||
+                        ""
+                      }
+                      onChange={(e) => setSummaryId(+e.target.value)}
+                    >
+                      <option value="">Chọn bản tóm tắt</option>
+                      {messages
+                        .filter((m) => m.kind === "summary" && m.role === "bot")
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {stamp(m.created_at)} · #{m.id}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  <Button
+                    className="primary"
+                    icon={BookOpen}
+                    onClick={() => submit("summary")}
+                    disabled={!!busyJob}
+                  >
+                    Summarize
+                  </Button>
+                </div>
+                <div className="summary scroll">
+                  {(() => {
+                    const m =
+                      messages.find((m) => m.id === summaryId) ||
+                      messages
+                        .filter((m) => m.kind === "summary" && m.role === "bot")
+                        .at(-1);
+                    return m ? (
+                      <>
+                        <Md text={m.markdown} />
+                        {answerActions(m)}
+                      </>
+                    ) : (
+                      <Empty
+                        icon={BookOpen}
+                        title="Kiến thức sau mỗi buổi học"
+                        text="Chọn prompt để tóm tắt, giải thích hoặc tạo bài tập từ transcript."
+                      />
+                    );
+                  })()}
+                  {jobs
+                    .filter((j) => j.status === "working")
+                    .map((j) => (
+                      <pre className="partial" key={j.id}>
+                        {j.partial}
+                      </pre>
+                    ))}
+                </div>
+              </>
+            )}
+            {tab === "translation" && (
+              <>
+                <div className="panel-toolbar">
+                  <div>
+                    <h2>Transcript translation</h2>
+                    <span className="muted">
+                      {boot.engines[settings.translation_engine]} ·{" "}
+                      {settings.translation_source} →{" "}
+                      {settings.translation_target}
+                    </span>
+                  </div>
+                  <div className="inline">
+                    <Toggle
+                      label="Auto translate"
+                      checked={settings.translation_enabled}
+                      onChange={(v) =>
+                        action(() => changeSettings({ translation_enabled: v }))
+                      }
+                    />
+                    <Button
+                      icon={Settings2}
+                      onClick={() => setSettingsOpen(true)}
+                    />
+                    <Button
+                      onClick={() =>
+                        action(() =>
+                          post("/conversations/" + cid + "/translate"),
+                        )
+                      }
+                    >
+                      Translate missing
+                    </Button>
+                    <Button
+                      icon={Square}
+                      onClick={() => action(() => post("/translation/stop"))}
+                    >
+                      Stop
+                    </Button>
+                  </div>
+                </div>
+                <div className="translation-grid">
+                  <div className="translation-lines scroll">
+                    {!detail?.lines.length && (
+                      <Empty
+                        icon={Languages}
+                        title="Chưa có câu để dịch"
+                        text="Ghi transcript hoặc chọn một cuộc hội thoại có sẵn."
+                      />
+                    )}
+                    {detail?.lines.map((l) => (
+                      <button
+                        key={l.id}
+                        className={
+                          "translation-line " +
+                          (l.id === lineId ? "selected" : "")
+                        }
+                        onClick={() => setLineId(l.id)}
+                      >
+                        <time>{l.stamp}</time>
+                        <p>{l.source_text}</p>
+                        <small>{l.last_state || "Chưa dịch"}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="translation-history scroll">
+                    <h3>Lịch sử bản dịch</h3>
+                    {lineId ? (
+                      <>
+                        <Button
+                          className="primary"
+                          onClick={() =>
+                            action(() =>
+                              post("/conversations/" + cid + "/translate", {
+                                ids: [lineId],
+                                force: true,
+                              }),
+                            )
+                          }
+                        >
+                          Translate / Retry selected
+                        </Button>
+                        {history.map((h) => (
+                          <article key={h.id} className="translation-attempt">
+                            <small>
+                              {h.engine} · {h.source_lang} → {h.target_lang} ·{" "}
+                              {h.status} · {stamp(h.created_at)}
+                            </small>
+                            {h.batch_size > 1 && (
+                              <details>
+                                <summary>Nhóm {h.batch_size} câu</summary>
+                                <pre>{h.batch_source}</pre>
+                              </details>
+                            )}
+                            <p>
+                              {h.translated_text || h.error || "Đang xử lý…"}
+                            </p>
+                            {h.translated_text && (
+                              <Button
+                                icon={Copy}
+                                onClick={() => copy(h.translated_text)}
+                              >
+                                Copy
+                              </Button>
+                            )}
+                          </article>
+                        ))}
+                      </>
+                    ) : (
+                      <p className="muted">Chọn một câu để xem và dịch lại.</p>
+                    )}
+                    {boot.translation_preview && (
+                      <div className="partial">{boot.translation_preview}</div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+            {tab === "vocab" && (
+              <>
+                <div className="panel-toolbar">
+                  <div>
+                    <h2>Your vocabulary</h2>
+                    <span className="muted">
+                      Từ mới, nghĩa và ngữ cảnh trong transcript
+                    </span>
+                  </div>
+                  <div className="inline">
+                    <Toggle
+                      label="Tự lưu lên Voca"
+                      checked={saveVoca}
+                      onChange={setSaveVoca}
+                    />
+                    <Button
+                      icon={Settings2}
+                      onClick={() => setSettingsOpen(true)}
+                    />
+                    <a
+                      className="button"
+                      href="https://voca-zeta-five.vercel.app/"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open Voca ↗
+                    </a>
+                  </div>
+                </div>
+                <div className="vocab-input">
+                  <textarea
+                    placeholder="Mỗi từ/cụm từ một dòng, hoặc ngăn cách bằng dấu phẩy…"
+                    value={words}
+                    onChange={(e) => setWords(e.target.value)}
+                  />
+                  <div className="inline">
+                    <Toggle
+                      label="New ChatGPT chat"
+                      checked={newChat}
+                      onChange={setNewChat}
+                    />
+                    <Field label="Power">
+                      <select
+                        value={settings.vocab_chatgpt_power}
+                        onChange={(e) =>
+                          action(() =>
+                            changeSettings({
+                              vocab_chatgpt_power: +e.target.value,
+                            }),
+                          )
+                        }
+                      >
+                        {["Giữ nguyên", "Instant", "Medium", "High"].map(
+                          (p, i) => (
+                            <option key={p} value={i - 1}>
+                              {p}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </Field>
+                    <Button
+                      className="primary"
+                      icon={Languages}
+                      onClick={() => submit("vocab")}
+                      disabled={!words.trim() || !!busyJob}
+                    >
+                      Translate words
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        action(() =>
+                          post("/conversations/" + cid + "/jobs", {
+                            kind: "voca-save",
+                            words: displayWords,
+                          }),
+                        )
+                      }
+                      disabled={!displayWords.length || !!busyJob}
+                    >
+                      Save to Voca
+                    </Button>
+                  </div>
+                </div>
+                <div className="vocab-cards scroll">
+                  {messages
+                    .filter((m) => m.kind === "vocab" && m.role === "bot")
+                    .map((m) => (
+                      <div className="vocab-card" key={"export-" + m.id}>
+                        <small>
+                          Vocabulary · {stamp(m.created_at)} · #{m.id}
+                        </small>
+                        <div className="answer-actions">
+                          {["md", "docx", "pdf"].map((format) => (
+                            <a
+                              key={format}
+                              href={download(format, m.id)}
+                              download
+                            >
+                              {format.toUpperCase()}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  {!displayWords.length && (
+                    <Empty
+                      icon={BookOpen}
+                      title="Ghi nhớ từ mới trong ngữ cảnh"
+                      text="Nhập từ cần học. App tìm câu chứa từ trong transcript và nhờ ChatGPT giải thích."
+                    />
+                  )}
+                  {displayWords.map((w, i) => (
+                    <article className="vocab-card" key={i}>
+                      <div>
+                        <h3>{w.word}</h3>
+                        <small>
+                          {w.phonetic} · {w.part_of_speech}
+                        </small>
+                      </div>
+                      <strong>{w.translation}</strong>
+                      <p>{w.meaning}</p>
+                      <blockquote>
+                        {w.sentence}
+                        <small>{w.context_translation}</small>
+                      </blockquote>
+                      <small>
+                        {w.time} {w.voca_status && "· Voca: " + w.voca_status}{" "}
+                        {w.voca_error}
+                      </small>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+            {!!jobs.length && (
+              <div className="job-list">
+                {jobs.slice(-3).map((j) => (
+                  <div className={"job " + j.status} key={j.id}>
+                    <span className="job-dot" />
+                    <div>
+                      <strong>
+                        {j.kind} · {j.status}
+                      </strong>
+                      <small>
+                        {j.error || j.detail}
+                        {j.status === "done" &&
+                        j.kind.startsWith("translation-")
+                          ? ": " + j.result
+                          : ""}
+                      </small>
+                    </div>
+                    {["working", "queued"].includes(j.status) ? (
+                      <Button
+                        onClick={() =>
+                          action(() => post("/jobs/" + j.id + "/cancel"))
+                        }
+                      >
+                        Cancel
+                      </Button>
+                    ) : ["error", "cancelled"].includes(j.status) ? (
+                      <Button
+                        disabled={!!busyJob}
+                        onClick={() =>
+                          action(() => post("/jobs/" + j.id + "/retry"))
+                        }
+                      >
+                        Retry
+                      </Button>
+                    ) : (
+                      <Check size={16} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <footer>
+          <span>
+            <span className="live-dot">●</span> Local workspace
+          </span>
+          <span>Windows Live Captions · Chrome 9222</span>
+          <span>{detail?.lines.length || 0} transcript lines</span>
+        </footer>
+      </main>
+      {settingsOpen && (
+        <SettingsModal
+          settings={settings}
+          boot={boot}
+          close={() => setSettingsOpen(false)}
+          save={(values) =>
+            action(async () => {
+              await changeSettings(values);
+              setSettingsOpen(false);
+              setNotice("Đã lưu cài đặt");
+            })
+          }
+          run={(kind) =>
+            action(() => post("/conversations/" + cid + "/jobs", { kind }))
+          }
+          canRun={!!cid && !busyJob}
+        />
+      )}
+      {promptKind && (
+        <PromptModal
+          kind={promptKind}
+          selected={settings[promptKind + "_prompt"]}
+          close={() => setPromptKind(null)}
+          done={(name) =>
+            action(async () => {
+              await changeSettings({ [promptKind + "_prompt"]: name });
+              setPromptKind(null);
+            })
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function Attachments({ message, cid }) {
+  const files = [
+    ...(message.files || []),
+    ...(message.attachment ? [message.attachment] : []),
+  ];
+  return (
+    <div className="attachments">
+      {files.map((p, i) => {
+        const url =
+          "/api/conversations/" +
+          cid +
+          "/files/" +
+          p.replaceAll("\\", "/").split("/").map(encodeURIComponent).join("/");
+        return (
+          <a key={i} href={url} download>
+            {/\.(png|jpe?g|webp)$/i.test(p) && (
+              <img src={url} alt="Attachment" />
+            )}
+            <span>
+              <Paperclip size={13} /> {p.split(/[\\/]/).at(-1)}
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsModal({ settings, boot, close, save, run, canRun }) {
+  const baseline = useRef(settings);
+  const [draft, setDraft] = useState({ ...settings }),
+    [collections, setCollections] = useState([]),
+    [error, setError] = useState("");
+  const set = (key, value) => setDraft((old) => ({ ...old, [key]: value }));
+  const input = (key, label, type = "text") => (
+    <Field label={label} key={key}>
+      <input
+        type={type}
+        value={draft[key] ?? ""}
+        onChange={(e) =>
+          set(key, type === "number" ? +e.target.value : e.target.value)
+        }
+      />
+    </Field>
+  );
+  return (
+    <div className="modal-backdrop">
+      <section className="modal">
+        <div className="modal-head">
+          <div>
+            <span className="eyebrow">SHARED PREFERENCES</span>
+            <h2>Settings</h2>
+          </div>
+          <Button icon={X} onClick={close} aria-label="Close settings" />
+        </div>
+        <div className="modal-body">
+          <h3>Translation</h3>
+          <div className="form-grid">
+            <Field label="Engine">
+              <select
+                value={draft.translation_engine}
+                onChange={(e) => set("translation_engine", e.target.value)}
+              >
+                {Object.entries(boot.engines).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {["source", "target"].map((k) => (
+              <Field
+                key={k}
+                label={k === "source" ? "Ngôn ngữ nguồn" : "Ngôn ngữ đích"}
+              >
+                <select
+                  value={draft["translation_" + k]}
+                  onChange={(e) => set("translation_" + k, e.target.value)}
+                >
+                  {Object.entries(boot.languages).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ))}
+            {input("translation_batch_size", "Số câu mỗi nhóm", "number")}
+            {input(
+              "translation_batch_timeout",
+              "Thời gian chờ nhóm (giây)",
+              "number",
+            )}
+            <Field label="Offline compute">
+              <select
+                value={draft.translation_device}
+                onChange={(e) => set("translation_device", e.target.value)}
+              >
+                {["cpu", "cuda", "auto"].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <Toggle
+            label="Dịch cả câu đang nói (preview)"
+            checked={draft.translation_partial}
+            onChange={(v) => set("translation_partial", v)}
+          />
+          <div className="form-grid">
+            {input("translation_azure_key", "Azure API key", "password")}
+            {input("translation_azure_region", "Azure region")}
+            {input("translation_google_key", "Google API key", "password")}
+            {input("translation_gemini_key", "Gemini API key", "password")}
+            {input("translation_gemini_model", "Gemini model")}
+          </div>
+          <Field label="Gemini translation prompt">
+            <textarea
+              rows="4"
+              value={draft.translation_gemini_prompt}
+              onChange={(e) => set("translation_gemini_prompt", e.target.value)}
+            />
+          </Field>
+          <div className="inline">
+            <Button disabled={!canRun} onClick={() => run("translation-test")}>
+              Test saved configuration
+            </Button>
+            <Button
+              disabled={!canRun}
+              onClick={() => run("translation-download")}
+            >
+              Download VinAI model
+            </Button>
+          </div>
+          <h3>Voca</h3>
+          <div className="form-grid">
+            {input("voca_api_key", "Voca API key", "password")}
+            <Field label="Collection">
+              <div className="inline">
+                <input
+                  list="collections"
+                  value={draft.voca_collection_id}
+                  onChange={(e) => set("voca_collection_id", e.target.value)}
+                  placeholder="Default collection"
+                />
+                <datalist id="collections">
+                  {collections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </datalist>
+                <Button
+                  icon={RefreshCw}
+                  title="Load collections using saved key"
+                  onClick={async () => {
+                    try {
+                      const result = await api("/voca/collections");
+                      setCollections(
+                        Array.isArray(result)
+                          ? result
+                          : result.collections || [],
+                      );
+                    } catch (e) {
+                      setError(e.message);
+                    }
+                  }}
+                />
+              </div>
+            </Field>
+          </div>
+          <h3>Caption overlay</h3>
+          <div className="form-grid">
+            {input("overlay_font_size", "Cỡ chữ", "number")}
+            {input("overlay_lines", "Số dòng", "number")}
+            {input("overlay_alpha", "Độ đậm nền (0.1–1)", "number")}
+          </div>
+          <Toggle
+            label="Nền trong suốt"
+            checked={draft.overlay_transparent}
+            onChange={(v) => set("overlay_transparent", v)}
+          />
+          <Toggle
+            label="Click-through"
+            checked={draft.overlay_click_through}
+            onChange={(v) => set("overlay_click_through", v)}
+          />
+          {error && <p className="alert">{error}</p>}
+        </div>
+        <div className="modal-foot">
+          <span>Cài đặt dùng chung với native app</span>
+          <Button
+            className="primary"
+            onClick={() =>
+              save(
+                Object.fromEntries(
+                  Object.entries(draft).filter(
+                    ([k, v]) => v !== baseline.current[k],
+                  ),
+                ),
+              )
+            }
+          >
+            Save settings
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PromptModal({ kind, selected, close, done }) {
+  const [text, setText] = useState(""),
+    [name, setName] = useState(""),
+    [loaded, setLoaded] = useState(""),
+    [error, setError] = useState("");
+  useEffect(() => {
+    api("/prompts/" + kind + "?name=" + encodeURIComponent(selected || ""))
+      .then((p) => {
+        setText(p.text);
+        setName(p.name || "");
+        setLoaded(p.name || "");
+      })
+      .catch((e) => setError(e.message));
+  }, [kind]);
+  async function save(overwrite) {
+    try {
+      const value = await post("/prompts/" + kind, {
+        name: overwrite ? loaded : name,
+        text,
+        overwrite,
+      });
+      done(value.name);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  return (
+    <div className="modal-backdrop">
+      <section className="modal">
+        <div className="modal-head">
+          <h2>Edit {kind} prompt</h2>
+          <Button icon={X} onClick={close} />
+        </div>
+        <div className="modal-body">
+          <Field label="Tên phiên bản mới">
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <textarea
+            className="prompt-editor"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <p className="muted">
+            {"{message} · {file_name} · {source} · {started} · {now}"}
+          </p>
+          {error && <p className="alert">{error}</p>}
+        </div>
+        <div className="modal-foot">
+          <Button disabled={!loaded || !text.trim()} onClick={() => save(true)}>
+            Update current version
+          </Button>
+          <Button
+            className="primary"
+            disabled={!text.trim()}
+            onClick={() => save(false)}
+          >
+            Save new version
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
+from .shared_access import process_alive
 
 _CAPTION = re.compile(r"^\[([^\]]+)\]\s*(.*)$")
 
@@ -39,7 +41,8 @@ class TranslationStore:
             # Existing databases keep all their single-line translation history.
             columns = {row["name"] for row in db.execute("PRAGMA table_info(line_translations)")}
             for name, definition in (("batch_source", "TEXT NOT NULL DEFAULT ''"),
-                                     ("batch_size", "INTEGER NOT NULL DEFAULT 1")):
+                                     ("batch_size", "INTEGER NOT NULL DEFAULT 1"),
+                                     ("owner_pid", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE line_translations ADD COLUMN {name} {definition}")
 
@@ -114,6 +117,7 @@ class TranslationStore:
                                     (line["id"], config.engine, config.model, config.source, config.target,
                                      config.fingerprint, line["source_text"], "queued", datetime.now().isoformat(timespec="seconds"), source, len(lines)))
                 attempts.append(cursor.lastrowid)
+                db.execute('UPDATE line_translations SET owner_pid=? WHERE id=?', (os.getpid(), cursor.lastrowid))
         return attempts
 
     def finish(self, attempt, status, text="", error=""):
@@ -122,4 +126,7 @@ class TranslationStore:
 
     def recover(self):
         with self.connect() as db:
-            db.execute("UPDATE line_translations SET status='cancelled',error='App closed before completion; retry manually.' WHERE status IN ('queued','working')")
+            owners = db.execute("SELECT DISTINCT owner_pid FROM line_translations WHERE status IN ('queued','working')").fetchall()
+            for owner in owners:
+                if not process_alive(owner['owner_pid']):
+                    db.execute("UPDATE line_translations SET status='cancelled',error='App closed before completion; retry manually.' WHERE status IN ('queued','working') AND owner_pid=?", (owner['owner_pid'],))

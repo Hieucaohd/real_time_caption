@@ -41,6 +41,7 @@ class ConversationStoreTests(unittest.TestCase):
         self.store.add_message(item.id, "user", "You", "Summarize this conversation", kind="summary")
         self.store.add_message(item.id, "bot", "ChatGPT", "Two sessions.", kind="summary")
         self.store.add_message(item.id, "bot", "ChatGPT", "A newer summary.", kind="summary")
+        transcript.close()  # Renaming requires the active capture to be paused.
         renamed = self.store.rename(item.id, "Long-running project")
 
         self.assertTrue(renamed.folder.exists())

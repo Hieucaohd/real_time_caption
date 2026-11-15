@@ -176,6 +176,7 @@ class TranslationPersistenceTests(unittest.TestCase):
             self.store.line(self.item.id, *record)
         self.store.sync_transcript(transcript)
         self.assertEqual([line["source_text"] for line in self.store.lines(self.item.id)], ["First fragment", "Second fragment"])
+        transcript.close()
 
     def test_retry_and_new_engine_keep_all_previous_answers(self):
         line = self.line()
@@ -306,7 +307,11 @@ class TranslationPersistenceTests(unittest.TestCase):
         second = self.line("test:2")
         attempt = self.store.begin(first, translation.Config(key="key"))
         self.store.finish(attempt, "working")
+        # A running desktop/web process owns this request, so startup preserves it.
         self.store.recover()
+        self.assertEqual(self.store.history(first["id"])[0]["status"], "working")
+        with patch('caption.translation_store.process_alive', return_value=False):
+            self.store.recover()
         self.assertEqual(self.store.history(first["id"])[0]["status"], "cancelled")
         self.assertNotEqual(first["id"], second["id"])
 

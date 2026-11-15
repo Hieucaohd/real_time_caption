@@ -1,7 +1,11 @@
 .venv/
+web/node_modules/
+web/dist/
+cache/
 __pycache__/
 models/
 settings.json
+settings.lock
 caption.log
 transcripts/
 conversations.sqlite3

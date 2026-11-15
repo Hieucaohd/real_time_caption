@@ -1,5 +1,7 @@
 # Real-time Caption
 
+Có thêm bản **React + FastAPI** dùng chung dữ liệu với native app, chỉ lấy transcript từ Windows Live Captions. Chạy `setup_web.bat` một lần, sau đó `launch_chrome.bat` để mở tab web trong Chrome 9222. Xem [hướng dẫn bản web](README_WEB.md).
+
 Phụ đề tiếng Anh thời gian thực cho Windows: nghe âm thanh **đang phát từ các app** (YouTube, Zoom, Teams, game…) hoặc từ **micro**, hiện phụ đề trên một thanh nổi luôn nằm trên cùng và **giữ lại toàn bộ lịch sử** để xem lại hoặc lưu ra file.
 
 ## Cài đặt

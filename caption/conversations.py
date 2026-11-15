@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .paths import CONVERSATIONS_DB, CONVERSATIONS_DIR, TRANSCRIPTS_DIR
+from .shared_access import BusyError, ProcessLock, capture_lock
 
 log = logging.getLogger(__name__)
 PART_LIMIT = 5 * 1024 * 1024
@@ -135,7 +136,11 @@ class ConversationStore:
             )
             # A previous process may have been killed while recording. Nothing is active
             # until this process explicitly starts a capture again.
-            db.execute("UPDATE conversations SET status='paused' WHERE status='recording'")
+            try:
+                with capture_lock(self.db_path):
+                    db.execute("UPDATE conversations SET status='paused' WHERE status='recording'")
+            except BusyError:
+                pass  # The other UI is still recording.
 
     @staticmethod
     def _row(row: sqlite3.Row | None) -> Conversation | None:
@@ -174,6 +179,10 @@ class ConversationStore:
         return result
 
     def rename(self, conversation_id: str, title: str) -> Conversation:
+        with capture_lock(self.db_path), ProcessLock(self.db_path.parent / 'cache' / 'chatgpt-request.lock'), ProcessLock(self.db_path.parent / 'cache' / 'web-job.lock'):
+            return self._rename(conversation_id, title)
+
+    def _rename(self, conversation_id: str, title: str) -> Conversation:
         current = self.get(conversation_id)
         if current is None:
             raise KeyError(conversation_id)
@@ -270,6 +279,12 @@ class ConversationStore:
             files.setdefault(attachment["message_id"], []).append(attachment["path"])
         return [ChatMessage(**dict(row), files=tuple(files.get(row["id"], ()))) for row in rows]
 
+    def update_message_content(self, conversation_id: str, message_id: int, content: str) -> None:
+        with self._connect() as db:
+            db.execute('UPDATE chat_messages SET content=? WHERE conversation_id=? AND id=?',
+                       (content, conversation_id, message_id))
+        self._write_chat_markdown(conversation_id)
+
     def latest_summary(self, conversation_id: str) -> ChatMessage | None:
         with self._connect() as db:
             row = db.execute(
@@ -308,11 +323,17 @@ class ConversationStore:
         return target
 
     def _write_chat_markdown(self, conversation_id: str) -> None:
+        with ProcessLock(self.db_path.parent / 'cache' / 'chat-history.lock', timeout=5):
+            self._write_chat_markdown_unlocked(conversation_id)
+
+    def _write_chat_markdown_unlocked(self, conversation_id: str) -> None:
         conversation = self.get(conversation_id)
         if conversation is None:
             return
         lines = [f"# Chat history — {conversation.title}", ""]
         for message in self.messages(conversation_id):
+            if message.kind == 'vocab':
+                continue
             label = "You" if message.role == "user" else "ChatGPT"
             lines += [f"## {label} · {message.created_at}", "", message.content.strip(), ""]
             if message.files:
@@ -387,6 +408,7 @@ class ConversationTranscript:
         self._capture_text = ""
         self._capture_origin = ""
         self._capture_stamp = ""
+        self._capture_lock = None
 
     @property
     def path(self) -> Path:
@@ -405,6 +427,19 @@ class ConversationTranscript:
         return ([first] if first.exists() else []) + sorted(self.folder.glob("transcript-[0-9][0-9][0-9][0-9].txt"))
 
     def begin_segment(self, source: str | None = None) -> None:
+        if self._capture_lock is None:
+            self._capture_lock = capture_lock(self.store.db_path).acquire()
+        try:
+            self._begin_segment(source)
+        except Exception:
+            self._capture_lock.release()
+            self._capture_lock = None
+            raise
+
+    def _begin_segment(self, source: str | None = None) -> None:
+        current = self.store.get(self.conversation_id)
+        if current:
+            self.folder = current.folder  # The other UI may have renamed it before capture.
         path = self._write_path()
         with open(path, "a", encoding="utf-8") as f:
             if path.stat().st_size == 0:
@@ -470,6 +505,17 @@ class ConversationTranscript:
         return path
 
     def close(self) -> list[tuple[str, str, str]]:
+        try:
+            return self._close()
+        finally:
+            if self._capture_lock:
+                try:
+                    self.store.set_status(self.conversation_id, 'paused')
+                finally:
+                    self._capture_lock.release()
+                    self._capture_lock = None
+
+    def _close(self) -> list[tuple[str, str, str]]:
         if self._line_open:
             with open(self._last_write_path or self._write_path(), "a", encoding="utf-8") as f:
                 f.write("\n")

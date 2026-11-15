@@ -8,12 +8,13 @@ own ChatGPT conversation so the JSON answers don't clutter the summary/chat conv
 from __future__ import annotations
 
 import logging
+import json
 import queue
 import threading
 import tkinter as tk
 import uuid
 import webbrowser
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Callable
@@ -47,6 +48,7 @@ class VocabTranslation:
     api_key: str
     collection_id: str
     source_title: str
+    transcript: ConversationTranscript | None = None
 
 
 class VocabPanel(ttk.Frame):
@@ -319,7 +321,7 @@ class VocabPanel(ttk.Frame):
                 vocab.parse_answer(answer, words)
             except vocab.VocabError as exc:
                 raise chatgpt.ChatGPTError(f"{exc}\n\nChatGPT answered:\n{answer[:1500]}") from exc
-            return VocabTranslation(words, api_key, collection_id, source_title)
+            return VocabTranslation(words, api_key, collection_id, source_title, tfile)
 
         self._active_job = job
         if not self._run_chatgpt(job, self._on_done, self._on_error):
@@ -349,6 +351,12 @@ class VocabPanel(ttk.Frame):
         self._set_pending(None)
         header = f"ChatGPT · {datetime.now():%H:%M:%S}"
         export_key = f"words-{uuid.uuid4().hex}"
+        if translation.transcript:
+            tfile = translation.transcript
+            mid = tfile.store.add_message(tfile.conversation_id, 'bot', header,
+                json.dumps([asdict(w) for w in translation.words], ensure_ascii=False), kind='vocab')
+            export_key = f'vocab-{mid}'
+            self.__dict__.setdefault('_stored_vocab', {})[export_key] = (tfile.store, tfile.conversation_id, mid)
         if not hasattr(self, "_export_answers"):
             self._export_answers = {}
         self._export_answers[export_key] = "".join(vocab.card_html(w) for w in translation.words)
@@ -395,6 +403,10 @@ class VocabPanel(ttk.Frame):
                 break
 
     def _on_voca_saved(self, words: list[vocab.NewWord], message: tuple) -> None:
+        stored = self.__dict__.get('_stored_vocab', {}).get(message[3])
+        if stored:
+            store, cid, mid = stored
+            store.update_message_content(cid, mid, json.dumps([asdict(w) for w in words], ensure_ascii=False))
         saved = sum(word.voca_status in ("created", "updated") for word in words)
         self._update_voca_message(words, message, f" · {saved} saved to Voca" if saved else "")
         self._refresh_voca_status()
@@ -463,6 +475,33 @@ class VocabPanel(ttk.Frame):
         self._render()
 
     # ---------------------------------------------------------------- display
+
+    def load_conversation(self) -> None:
+        if self._busy:
+            return
+        tfile = self._get_session_file()
+        if tfile is None:
+            return
+        if self.__dict__.get('_vocab_conversation') != tfile.conversation_id:
+            self._vocab_conversation = tfile.conversation_id
+            self._messages.clear()
+            self._export_answers = {}
+        for item in tfile.store.messages(tfile.conversation_id):
+            if item.kind != 'vocab' or item.role != 'bot':
+                continue
+            try:
+                cards = ''.join(vocab.card_html(vocab.NewWord(**w)) for w in json.loads(item.content))
+            except (ValueError, TypeError):
+                continue
+            key = f'vocab-{item.id}'
+            entry = ('bot', item.header, cards, key)
+            index = next((i for i, m in enumerate(self._messages) if m[3] == key), None)
+            if index is None:
+                self._messages.append(entry)
+            else:
+                self._messages[index] = entry
+            self._export_answers[key] = cards
+        self._schedule_render()
 
     def _add(self, role: str, header: str, body_html: str, render: bool = True, export_key: str | None = None) -> str:
         action_id = export_key

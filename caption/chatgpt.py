@@ -20,6 +20,7 @@ import re
 import threading
 import time
 import uuid
+from functools import wraps
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -616,6 +617,17 @@ def _read_answer(page, turn_id: str) -> str:
 # --------------------------------------------------------------------------- main
 
 
+def _shared_request(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        from .paths import CACHE_DIR
+        from .shared_access import ProcessLock
+        with ProcessLock(CACHE_DIR / 'chatgpt-request.lock'):
+            return function(*args, **kwargs)
+    return run
+
+
+@_shared_request
 def ask(
     prompt: str,
     file_path: Path | list[Path] | None = None,

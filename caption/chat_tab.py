@@ -372,17 +372,21 @@ class ChatPanel(ttk.Frame):
     def _scroll_history(self, fraction: float) -> None:
         markdown_html.scroll_to(self.history, fraction)
 
-    def load_conversation(self) -> None:
-        self._clear_image()
-        self._clear_files()
+    def load_conversation(self, preserve_draft: bool = False) -> None:
+        if not preserve_draft:
+            self._clear_image()
+            self._clear_files()
         self._messages.clear()
         self._export_answers = {}
-        self._requests.clear()
+        if not preserve_draft:
+            self._requests.clear()
         self._active_request_id = None
         conversation_id = self._get_conversation_id()
         if conversation_id:
             conversation = self._store.get(conversation_id)
             for message in self._store.messages(conversation_id):
+                if message.kind == 'vocab':
+                    continue
                 image = None
                 body = (
                     markdown_html.to_html(message.content)
@@ -405,7 +409,7 @@ class ChatPanel(ttk.Frame):
                 body += self._files_html(files)
                 if message.role == "user" and message.kind == "chat":
                     action_id = f"chat-{message.id}"
-                    self._requests[action_id] = ChatRequest(message.content, image, conversation_id, files=files)
+                    self._requests.setdefault(action_id, ChatRequest(message.content, image, conversation_id, files=files))
                 elif message.role == "bot" and not message.header.startswith("Error"):
                     action_id = f"answer-{message.id}"
                     self._export_answers[action_id] = message.content
