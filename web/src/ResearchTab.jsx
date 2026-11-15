@@ -488,7 +488,10 @@ export default function ResearchTab({
                   <p className="research-response-tab" title={reading.response_tab_title || ""}>
                     Tab ChatGPT trả lời: <strong>{reading.response_tab_title || "Chưa có tên tab được lưu"}</strong>
                   </p>
-                  <ResponseSource response={reading} />
+                  <ResponseSource key={reading.id} response={reading} onSave={reading.status === "done" ? async (values) => {
+                    await api(base + "/" + reading.id + "/source", { method: "PUT", body: values });
+                    await refresh();
+                  } : undefined} />
                   <div className="research-question">
                     <small>CÂU HỎI</small>
                     <h3>{reading.question}</h3>

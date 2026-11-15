@@ -230,6 +230,36 @@ class ResearchStore:
             nid = node['parent_id']
         return list(reversed(chain))
 
+    def update_response_source(self, cid, source, *, mid=None, nid=None):
+        fields = {'response_conversation_url', 'response_message_id', 'response_turn_id'}
+        if set(source) != fields or (mid is None) == (nid is None):
+            raise ValueError('Invalid response source update')
+        with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if nid is not None:
+                node = db.execute('SELECT status, source_message_id FROM research_nodes WHERE id=? AND conversation_id=?', (nid, cid)).fetchone()
+                if node is None:
+                    raise KeyError('Research node not found')
+                if node['status'] != 'done':
+                    raise ValueError('Chờ câu trả lời hoàn tất trước khi cập nhật nguồn.')
+                mid = node['source_message_id']
+            assignments = ', '.join(f'{key}=?' for key in source)
+            values = tuple(source.values())
+            if mid is not None:
+                message = db.execute('SELECT role FROM chat_messages WHERE id=? AND conversation_id=?', (mid, cid)).fetchone()
+                if message is None:
+                    raise KeyError('Chat answer not found')
+                if message['role'] != 'bot':
+                    raise ValueError('Chỉ cập nhật nguồn cho câu trả lời ChatGPT.')
+                db.execute('UPDATE chat_messages SET ' + assignments + ' WHERE id=? AND conversation_id=?', (*values, mid, cid))
+                # An imported root and its source Chat message refer to the same response.
+                db.execute('UPDATE research_nodes SET ' + assignments + ', updated_at=? WHERE source_message_id=? AND conversation_id=?',
+                           (*values, now(), mid, cid))
+            else:
+                db.execute('UPDATE research_nodes SET ' + assignments + ', updated_at=? WHERE id=? AND conversation_id=?',
+                           (*values, now(), nid, cid))
+        return source
+
     @staticmethod
     def _subtree(db, cid, nid):
         rows = db.execute('''WITH RECURSIVE branch(id) AS (

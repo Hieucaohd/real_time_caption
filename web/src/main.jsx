@@ -916,7 +916,10 @@ function App() {
                           <p className="user-text">{m.content}</p>
                         )}
                         <Attachments message={m} cid={cid} />
-                        {m.role === "bot" && <ResponseSource response={m} />}
+                        {m.role === "bot" && <ResponseSource response={m} onSave={async (values) => {
+                          await api(`/conversations/${cid}/answers/${m.id}/source`, { method: "PUT", body: values });
+                          await refresh();
+                        }} />}
                         {m.role === "bot" && answerActions(m)}
                         {m.role === "user" && (
                           <Button onClick={() => setMessage(m.content)}>

@@ -40,6 +40,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Với câu trả lời thiếu nguồn, mở **Nguồn ChatGPT → Cập nhật nguồn**, nhập link hội thoại và Message ID/Turn ID đang có rồi bấm **Lưu nguồn**. Có thể để trống trường chưa biết hoặc sửa lại thông tin đã nhập. Nguồn lưu trong SQLite; Chat và node gốc nhập từ chính response đó đồng bộ hai chiều, còn node con giữ nguồn riêng. Link phải là cuộc hội thoại ChatGPT (`https://chatgpt.com/.../c/...`).
+
 Mỗi câu trả lời mới trong Chat và nghiên cứu lưu nguồn ChatGPT cùng nội dung trong SQLite: `response_conversation_url` (link hội thoại, kể cả hội thoại trong Project), `response_message_id` (mã assistant response) và `response_turn_id` (mã lượt chứa câu trả lời được Copy). Mở **Nguồn ChatGPT** để xem link và vị trí. Node gốc nhập từ Chat giữ nguyên nguồn; từng nhánh con lưu nguồn riêng. Dùng mã định danh thay vì đếm phần tử đang tải trong trang, vì ChatGPT có thể chỉ dựng một phần lịch sử. Link mở cuộc hội thoại; Message ID/Turn ID ghi lại vị trí của response. Câu trả lời cũ hoặc trang không cung cấp đủ metadata sẽ hiện thông tin còn thiếu; app không đoán nguồn từ tab đang mở.
 
 Trong **Settings → Giao diện web → Chế độ hiển thị**, chọn **Sáng** hoặc **Tối** rồi bấm **Save settings**. Lựa chọn lưu vào bảng `web_preferences` trong SQLite và áp dụng cho toàn bộ web app, gồm Chat, nghiên cứu, công thức, code và các hộp thoại. Trình duyệt nhớ tạm lựa chọn để tránh chớp nền sáng khi tải lại; database là nguồn cài đặt chính.

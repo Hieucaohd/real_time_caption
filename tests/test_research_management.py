@@ -140,6 +140,47 @@ class ResearchManagementTests(unittest.TestCase):
         self.assertEqual(node['response_turn_id'], '')
         self.assertEqual(node['response_message_id'], '')
 
+    def test_manual_source_syncs_chat_and_imported_root_but_not_children(self):
+        self.service.busy = True
+        child = self.child()[0]
+        self.store.update(self.cid, child['id'], status='done', answer='Child answer')
+        source = dict(response_conversation_url=' https://chatgpt.com/g/project/c/original?foo=bar#fragment ',
+                      response_message_id=' manual-message ', response_turn_id='manual-turn')
+        url = f'/api/conversations/{self.cid}/answers/{self.mid}/source'
+        result = self.client.put(url, json=source, headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        expected = dict(response_conversation_url='https://chatgpt.com/g/project/c/original',
+                        response_message_id='manual-message', response_turn_id='manual-turn')
+        self.assertEqual(result.json(), expected)
+        for key, value in expected.items():
+            self.assertEqual(getattr(self.service.store.messages(self.cid)[-1], key), value)
+            self.assertEqual(ResearchStore(self.service.store).get(self.cid, self.root_node['id'])[key], value)
+            self.assertEqual(self.store.get(self.cid, child['id'])[key], '')
+        partial = dict(response_conversation_url='https://chatgpt.com/c/corrected')
+        result = self.client.put(self.base + '/' + self.root_node['id'] + '/source', json=partial, headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        message = self.service.store.messages(self.cid)[-1]
+        self.assertEqual(message.response_conversation_url, partial['response_conversation_url'])
+        self.assertEqual(message.response_message_id, '')
+        self.client.put(self.base + '/' + child['id'] + '/source', json=expected, headers=self.headers)
+        self.assertEqual(self.service.store.messages(self.cid)[-1].response_conversation_url, partial['response_conversation_url'])
+        self.assertEqual(self.store.get(self.cid, self.root_node['id'])['answer'], self.root_node['answer'])
+
+    def test_manual_source_validates_scope_roles_and_urls_without_partial_writes(self):
+        url = f'/api/conversations/{self.cid}/answers/{self.mid}/source'
+        other = self.post('/api/conversations', {'title': 'Other'}).json()['id']
+        source = dict(response_conversation_url='https://chatgpt.com/c/valid', response_message_id='response')
+        self.assertEqual(self.client.put(url.replace(self.cid, other), json=source, headers=self.headers).status_code, 404)
+        self.assertEqual(self.client.put(self.base.replace(self.cid, other) + '/' + self.root_node['id'] + '/source', json=source, headers=self.headers).status_code, 404)
+        user_mid = self.service.store.messages(self.cid)[0].id
+        self.assertEqual(self.client.put(f'/api/conversations/{self.cid}/answers/{user_mid}/source', json=source, headers=self.headers).status_code, 400)
+        self.assertEqual(self.client.put(url, json=source).status_code, 403)
+        for value in ('javascript:alert(1)', 'https://evil.test/c/id', 'https://chatgpt.com/', 'https://user:pass@chatgpt.com/c/id'):
+            self.assertEqual(self.client.put(url, json={**source, 'response_conversation_url': value}, headers=self.headers).status_code, 422)
+        self.assertEqual(self.client.put(url, json={**source, 'response_turn_id': 'bad id'}, headers=self.headers).status_code, 422)
+        self.assertEqual(self.store.get(self.cid, self.root_node['id'])['response_conversation_url'], '')
+        self.assertEqual(self.service.store.messages(self.cid)[-1].response_conversation_url, '')
+
 
 if __name__ == '__main__':
     unittest.main()

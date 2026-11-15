@@ -20,6 +20,9 @@
 .response-source dt { font-weight: 600; margin-top: 6px; }
 .response-source dd { margin: 2px 0; font-family: ui-monospace, monospace; }
 .response-source p { margin: 8px 0; }
+.response-source-editor { display: grid; gap: 10px; max-width: 640px; margin-top: 10px; }
+.response-source-editor input { width: 100%; }
+.response-source-editor .alert { margin: 0; }
 * {
   box-sizing: border-box;
 }

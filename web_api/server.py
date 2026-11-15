@@ -28,6 +28,7 @@ from caption.transcript_export import last_lines
 from .service import Service
 from .server_math import browser_markdown
 from .research_routes import router as research_router, preferences_router
+from .response_source import ResponseSourceInput
 
 ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
@@ -154,6 +155,11 @@ def create_app(service=None):
         lines = s.translations.lines(cid)
         return {'conversation': asdict(s.conversation(cid)), 'transcript': transcript.read_text(),
                 'messages': messages, 'lines': lines}
+
+    @app.put('/api/conversations/{cid}/answers/{mid}/source')
+    def save_answer_source(cid: str, mid: int, body: ResponseSourceInput, request: Request):
+        svc(request).conversation(cid)
+        return svc(request).research.store.update_response_source(cid, body.model_dump(), mid=mid)
 
     @app.post('/api/conversations')
     def create(body: ConversationInput, request: Request):

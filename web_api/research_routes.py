@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from .server_math import browser_markdown
+from .response_source import ResponseSourceInput
 
 router = APIRouter(prefix='/api/conversations/{cid}/research')
 preferences_router = APIRouter(prefix='/api/research')
@@ -137,6 +138,10 @@ def node(cid: str, nid: str, request: Request):
 @router.put('/{nid}/reading-mark')
 def save_reading_mark(cid: str, nid: str, body: ReadingMarkInput, request: Request):
     return research(request, cid).store.update(cid, nid, reading_mark=body.mark.model_dump() if body.mark else None)
+
+@router.put('/{nid}/source')
+def save_source(cid: str, nid: str, body: ResponseSourceInput, request: Request):
+    return research(request, cid).store.update_response_source(cid, body.model_dump(), nid=nid)
 
 
 @router.post('/{nid}/children')
