@@ -8,9 +8,9 @@
 .graph-tools {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: 8px;
   border-bottom: 1px solid #3b444f;
   position: relative;
   z-index: 8;
@@ -30,6 +30,12 @@
 .graph-tools button:hover,
 .graph-footer button:hover {
   background: #48566a;
+}
+.graph-tools .graph-arrange {
+  gap: 6px;
+  padding-inline: 10px;
+  white-space: nowrap;
+  font-size: 12px;
 }
 .graph-tools button[aria-pressed="true"] {
   background: #56577c;

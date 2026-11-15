@@ -84,7 +84,7 @@ Khi đọc câu trả lời, web và native cùng chuẩn hóa các dấu escape
 - Bật **Bám lưới** để kéo theo bước 10 px; giữ **Alt** khi kéo để bỏ bám lưới tạm thời. **Mũi tên** dịch node 1 px, **Shift + mũi tên** dịch 10 px.
 - **Ctrl+Z** hoàn tác vị trí, **Ctrl+Shift+Z / Ctrl+Y** làm lại. **Esc** hủy lượt kéo đang diễn ra. Hoàn tác áp dụng cho bố cục, được giữ trong phiên đang mở.
 - **F** vừa khung, **C** tới node đang đọc, **0** trở về zoom 100%; **+/−** phóng/thu. Bản đồ thu nhỏ cho phép bấm/kéo để đi nhanh. Nút **Mở rộng đồ thị** dành toàn bộ chiều rộng cho cây; bấm node để mở lại khung đọc.
-- Nút **Tự sắp xếp cây** sắp lại các node và có thể hoàn tác. Các node mới được đặt cạnh node cha, không đẩy các node bạn đã sắp xếp.
+- Nút **Sắp xếp lại** trên thanh công cụ đồ thị dàn cây từ trái sang phải, giãn các nhánh để tránh chồng lấn, căn vừa khung và tự lưu bố cục vào SQLite. Có thể dùng **Ctrl+Z** để hoàn tác. Các node mới được đặt cạnh node cha, không đẩy các node bạn đã sắp xếp.
 
 Tọa độ, khung nhìn/zoom, trạng thái thu gọn và các tùy chọn thao tác tự lưu vào bảng `research_graph_layouts` trong SQLite, riêng cho từng cây. Góc dưới báo **Đang lưu / Đã lưu DB / Chưa lưu — Thử lại**. Bố cục được tải lại từ database, không phụ thuộc localStorage của Chrome. Phím tắt chỉ có hiệu lực khi đồ thị được focus, không chiếm phím khi soạn câu hỏi hoặc đọc câu trả lời.
 

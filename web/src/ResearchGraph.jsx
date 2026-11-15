@@ -378,6 +378,7 @@ export default function ResearchGraph({
     if (Object.keys(patch).length) change(patch);
   }
   function arrange() {
+    if (!ready || gesture.current) return;
     const before = dataRef.current.positions,
       after = autoLayout(nodesRef.current, rootId);
     paint({ ...dataRef.current, positions: after });
@@ -693,11 +694,13 @@ export default function ResearchGraph({
             <Redo2 size={15} />
           </button>
           <button
+            className="graph-arrange"
             title="Tự sắp xếp cây (có thể hoàn tác)"
-            disabled={!ready}
+            disabled={!ready || !!dragging}
             onClick={arrange}
           >
             <LayoutList size={15} />
+            Sắp xếp lại
           </button>
         </div>
         <label>
@@ -731,6 +734,7 @@ export default function ResearchGraph({
           <div>
             <strong>Di chuyển như một trình vẽ sơ đồ</strong>
             <p>Kéo node: đổi vị trí. Bấm node: đọc câu trả lời.</p>
+            <p>Sắp xếp lại: dàn cây từ trái sang phải, giãn đều các nhánh và căn vừa khung. Ctrl+Z để hoàn tác.</p>
             <p>
               Space + kéo / chuột giữa / chuột phải / kéo nền: di chuyển khung
               nhìn.

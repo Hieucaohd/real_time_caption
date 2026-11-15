@@ -102,7 +102,19 @@ def main():
             page.get_by_label('Kéo cả nhánh',exact=True).uncheck();node(a).locator('.research-collapse').click()
 
             # Rubber-band selection and node positions survive normal status polling.
-            page.get_by_title('Tự sắp xếp cây (có thể hoàn tác)',exact=True).click();fit()
+            before_arrange={nid:xy(nid) for nid in (root['id'],a,b,c)}
+            page.get_by_role('button',name='Sắp xếp lại',exact=True).click();saved()
+            arranged={nid:xy(nid) for nid in before_arrange}
+            assert arranged != before_arrange
+            assert arranged[root['id']]['x'] < arranged[a]['x'] < arranged[c]['x']
+            assert arranged[a]['x'] == arranged[b]['x']
+            assert arranged[b]['y'] - arranged[a]['y'] >= 78
+            assert store.graph_layout(fixture.cid,root['id'])['positions'] == arranged
+            page.get_by_title('Hoàn tác bố cục (Ctrl+Z)',exact=True).click()
+            assert {nid:xy(nid) for nid in before_arrange} == before_arrange
+            page.get_by_title('Làm lại (Ctrl+Shift+Z)',exact=True).click()
+            assert {nid:xy(nid) for nid in arranged} == arranged
+            fit()
             r=canvas.bounding_box();page.mouse.click(r['x']+15,r['y']+r['height']-20)
             ra,rb=node(a).bounding_box(),node(b).bounding_box();start=(min(ra['x'],rb['x'])-8,min(ra['y'],rb['y'])-8);end=(max(ra['x']+ra['width'],rb['x']+rb['width'])+8,max(ra['y']+ra['height'],rb['y']+rb['height'])+8)
             page.keyboard.down('Shift');drag(start,end[0]-start[0],end[1]-start[1]);page.keyboard.up('Shift')
