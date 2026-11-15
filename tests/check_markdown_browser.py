@@ -131,7 +131,37 @@ def main():
             branch.locator('p').first.evaluate('el=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)}')
             branch.locator('p').first.click(button='right')
             expect(page.get_by_role('menuitem', name='Tạo nhánh từ đoạn đã chọn')).to_be_visible()
-            page.keyboard.press('Escape')
+            page.get_by_role('menuitem', name='Đánh dấu đã đọc tới đây', exact=True).click()
+            expect(page.get_by_role('button', name='Bỏ dấu', exact=True)).to_be_visible()
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
+            root = fixture.service.research.store.list(fixture.cid)[0]
+            saved_mark = root['reading_mark']
+            assert saved_mark and 'Ý tưởng chính' in saved_mark['text']
+            assert page.evaluate("[...CSS.highlights.get('rtc-reading-mark')][0].toString()") == saved_mark['text']
+            assert root['answer'] == ANSWER
+            child = fixture.service.research.children(fixture.cid, root['id'],
+                {'questions': ['Child mark test'], 'config': {'selected_tab': 'fake-tab'}})[0]
+            fixture.service.research.store.update(fixture.cid, child['id'], status='done', answer='A different answer')
+            page.get_by_label('Tìm node', exact=True).fill('Child mark test')
+            page.locator('.research-search-results button').first.click()
+            expect(branch).to_have_text('A different answer')
+            assert not page.evaluate("CSS.highlights.has('rtc-reading-mark')")
+            page.locator('.research-breadcrumb').get_by_role('button', name='Gốc', exact=True).click()
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
+            assert page.evaluate("[...CSS.highlights.get('rtc-reading-mark')][0].toString()") == saved_mark['text']
+            page.reload()
+            page.locator('nav button').nth(2).click()
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
+            # The toolbar pencil replaces the previous mark; clear removes it from SQLite.
+            branch.locator('li').first.evaluate('el=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)}')
+            page.get_by_role('button', name='Đánh dấu', exact=True).click()
+            expect(page.locator('.research-notice')).to_contain_text('Đã tô vàng')
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1 && [...CSS.highlights.get('rtc-reading-mark')][0].toString().includes('công thức khối')")
+            page.get_by_role('button', name='Tới dấu', exact=True).click()
+            page.get_by_role('button', name='Bỏ dấu', exact=True).click()
+            expect(page.get_by_role('button', name='Bỏ dấu', exact=True)).to_have_count(0)
+            assert not page.evaluate("CSS.highlights.has('rtc-reading-mark')")
+            assert fixture.service.research.store.get(fixture.cid, root['id'])['reading_mark'] is None
             page.set_viewport_size({'width':390,'height':844})
             page.get_by_role('button', name='Mở rộng câu trả lời', exact=True).click()
             expect(branch).to_be_visible()

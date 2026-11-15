@@ -273,6 +273,7 @@
   min-height: 0;
   overflow-y: auto;
 }
+::highlight(rtc-reading-mark) { background-color: #ffe58a; color: #29230b; }
 .research-response-tab {
   font-size: 12px;
   color: #617b6d;

@@ -14,10 +14,12 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Highlighter,
 } from "lucide-react";
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
+import { selectedReadingMark, readingMarkRange } from "./readingMark";
 
 const labels = {
   done: "Đã trả lời",
@@ -75,6 +77,7 @@ export default function ResearchTab({
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [changingBranch, setChangingBranch] = useState(false);
+  const [savingMark, setSavingMark] = useState(false);
   const [graphExpanded, setGraphExpanded] = useState(false);
   const [readerExpanded, setReaderExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
@@ -239,6 +242,21 @@ export default function ResearchTab({
       setError(e.message);
     }
   }
+  async function saveReadingMark(clear = false) {
+    if (savingMark || detail?.id !== selected || detail.status !== "done") return;
+    const mark = clear ? null : selectedReadingMark(answer.current);
+    if (!clear && !mark) {
+      setNotice("Bôi đen đoạn đã đọc tới, rồi bấm Đánh dấu.");
+      return;
+    }
+    setSavingMark(true);
+    await action(async () => {
+      await api(base + "/" + detail.id + "/reading-mark", { method: "PUT", body: { mark } });
+      window.getSelection()?.removeAllRanges();
+      setNotice(clear ? "Đã bỏ dấu." : "Đã tô vàng và lưu dấu đọc của node này.");
+    });
+    setSavingMark(false);
+  }
   function selectionMenu(e) {
     const selection = window.getSelection();
     if (
@@ -254,11 +272,17 @@ export default function ResearchTab({
     e.preventDefault();
     setMenu({
       x: Math.max(8, Math.min(e.clientX, window.innerWidth - 282)),
-      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 76)),
+      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 118)),
       excerpt,
     });
   }
   const reading = detail?.id === selected && (showHidden || !detail.hidden) ? detail : null;
+  useEffect(() => {
+    const range = readingMarkRange(answer.current, reading?.reading_mark);
+    if (range) CSS.highlights.set("rtc-reading-mark", new Highlight(range));
+    else CSS.highlights.delete("rtc-reading-mark");
+    return () => CSS.highlights.delete("rtc-reading-mark");
+  }, [reading?.id, reading?.answer, reading?.reading_mark]);
 
   return (
     <section className="research">
@@ -557,6 +581,18 @@ export default function ResearchTab({
                         Copy
                       </button>
                       <small>Bôi đen + chuột phải để hỏi về một đoạn</small>
+                      <button disabled={savingMark} onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => saveReadingMark()} title="Bôi đen đoạn đã đọc tới rồi bấm để tô vàng. Mỗi node lưu một dấu đọc.">
+                        <Highlighter size={14} />Đánh dấu
+                      </button>
+                      {reading.reading_mark && <>
+                        <button onClick={() => {
+                          const range = readingMarkRange(answer.current, reading.reading_mark);
+                          const pane = answer.current?.closest(".research-reading");
+                          if (range && pane) pane.scrollTop += range.getBoundingClientRect().top - pane.getBoundingClientRect().top - 20;
+                        }}>Tới dấu</button>
+                        <button disabled={savingMark} onClick={() => saveReadingMark(true)}>Bỏ dấu</button>
+                      </>}
                     </>
                   ) : ["queued", "working"].includes(reading.status) ? (
                     <button
@@ -598,6 +634,9 @@ export default function ResearchTab({
           >
             <GitBranch size={16} />
             Tạo nhánh từ đoạn đã chọn
+          </button>
+          <button role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => saveReadingMark()}>
+            <Highlighter size={16} />Đánh dấu đã đọc tới đây
           </button>
         </div>
       )}

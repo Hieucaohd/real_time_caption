@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from .server_math import browser_markdown
 
@@ -61,6 +61,23 @@ class GraphPoint(BaseModel):
     x: float = Field(ge=-1_000_000, le=1_000_000)
     y: float = Field(ge=-1_000_000, le=1_000_000)
 
+class ReadingMark(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    start: int = Field(ge=0, le=100_000_000)
+    end: int = Field(ge=1, le=100_000_000)
+    text: str = Field(min_length=1, max_length=20_000)
+
+    @model_validator(mode='after')
+    def valid_range(self):
+        if self.end <= self.start:
+            raise ValueError('The reading mark must have a nonempty range.')
+        return self
+
+
+class ReadingMarkInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mark: ReadingMark | None
+
 
 class GraphCamera(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
@@ -88,7 +105,7 @@ def research(request, cid):
 @router.get('')
 def nodes(cid: str, request: Request):
     rows = research(request, cid).store.list(cid)
-    return [{k: v for k, v in row.items() if k not in ('answer', 'partial', 'config')} for row in rows]
+    return [{k: v for k, v in row.items() if k not in ('answer', 'partial', 'config', 'reading_mark')} for row in rows]
 
 
 @router.post('/import')
@@ -116,6 +133,10 @@ def node(cid: str, nid: str, request: Request):
             result.update(partial=job['partial'], detail=job['detail'])
     result['markdown'] = browser_markdown(result['answer'])
     return result
+
+@router.put('/{nid}/reading-mark')
+def save_reading_mark(cid: str, nid: str, body: ReadingMarkInput, request: Request):
+    return research(request, cid).store.update(cid, nid, reading_mark=body.mark.model_dump() if body.mark else None)
 
 
 @router.post('/{nid}/children')

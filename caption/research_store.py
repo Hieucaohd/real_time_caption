@@ -70,7 +70,8 @@ class ResearchStore:
             db.execute('BEGIN IMMEDIATE')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(research_nodes)')}
             for name, definition in (('hidden', 'INTEGER NOT NULL DEFAULT 0'),
-                                     ('response_tab_title', "TEXT NOT NULL DEFAULT ''")):
+                                     ('response_tab_title', "TEXT NOT NULL DEFAULT ''"),
+                                     ('reading_mark', 'TEXT')):
                 if name not in columns:
                     db.execute(f'ALTER TABLE research_nodes ADD COLUMN {name} {definition}')
             owners = db.execute("SELECT DISTINCT owner_pid FROM research_nodes WHERE status='working'").fetchall()
@@ -184,6 +185,7 @@ class ResearchStore:
         result['config'] = json.loads(result['config'])
         result['understood'] = bool(result['understood'])
         result['hidden'] = bool(result['hidden'])
+        result['reading_mark'] = json.loads(result['reading_mark']) if result['reading_mark'] else None
         if private:
             result['request'] = json.loads(result['request'])
         else:
@@ -310,11 +312,11 @@ class ResearchStore:
                               (os.getpid(), nid, cid)).rowcount == 1
 
     def update(self, cid, nid, **values):
-        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title'}
+        allowed = {'status', 'detail', 'answer', 'partial', 'understood', 'title', 'config', 'request', 'response_tab_title', 'reading_mark'}
         if not values or not values.keys() <= allowed:
             raise ValueError('Invalid node update')
-        for key in ('config', 'request'):
-            if key in values:
+        for key in ('config', 'request', 'reading_mark'):
+            if key in values and values[key] is not None:
                 values[key] = json.dumps(values[key], ensure_ascii=False)
         values['updated_at'] = now()
         with self.conversations._connect() as db:
