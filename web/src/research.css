@@ -440,6 +440,14 @@
   font-weight: 550;
   color: #567864;
 }
+.branch-save-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0 12px;
+  font-size: 12px;
+}
 .branch-explanation {
   background: #f1f5f2;
   border-radius: 7px;

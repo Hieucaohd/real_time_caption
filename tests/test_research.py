@@ -39,6 +39,27 @@ class ResearchTests(unittest.TestCase):
             time.sleep(.02)
         self.fail(str([(n['status'], n['detail']) for n in results]))
 
+    def test_saved_defaults_persist_without_changing_chat_or_queued_nodes(self):
+        self.service.busy = True
+        queued = self.child()[0]
+        original = self.store.get(self.cid, queued['id'])['config']
+        chat_settings = Settings.load()
+        url = '/api/research/defaults'
+        self.assertEqual(self.client.get(url).json(), {})
+        config = dict(selected_tab='saved-tab', prompt='v1 - default', power=0,
+                      attach_transcript=True, attach_history=True, max_lines=17,
+                      screenshot=False, new_chat=False)
+        response = self.client.put(url, json=config, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), config)
+        self.assertEqual(self.client.get(url).json(), config)
+        self.assertEqual(ResearchStore(self.service.store).defaults(), config)
+        self.assertEqual(Settings.load(), chat_settings)
+        self.assertEqual(self.store.get(self.cid, queued['id'])['config'], original)
+        self.assertEqual(self.client.put(url, json={**config, 'question': 'private draft'}, headers=self.headers).status_code, 422)
+        self.assertEqual(self.client.put(url, json={**config, 'power': 9}, headers=self.headers).status_code, 422)
+        self.assertEqual(self.client.get(url).json(), config)
+
     def test_import_is_idempotent_snapshot_and_scoped_to_conversation(self):
         again = self.post(self.base + '/import', {'message_id': self.mid}).json()
         self.assertEqual(again['id'], self.root_node['id'])

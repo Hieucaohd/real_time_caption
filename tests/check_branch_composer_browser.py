@@ -90,6 +90,21 @@ def main():
             expect(dialog.locator('.composer-files')).to_contain_text('screen.png')
             dialog.get_by_role('button', name=re.compile(r'^Bỏ .*screen\.png$')).click()
             expect(dialog.locator('.composer-files')).not_to_contain_text('screen.png')
+            # Saving preferences keeps the question/files intact and never sends a branch.
+            page.route('**/api/research/defaults', lambda route: route.fulfill(status=500, json={'detail':'Save failed'}))
+            dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
+            expect(dialog.get_by_role('alert')).to_contain_text('Save failed')
+            assert store.defaults() == {}
+            page.unroute('**/api/research/defaults')
+            dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
+            expect(dialog.get_by_role('status')).to_contain_text('Đã lưu vào database')
+            expect(question).to_have_value('Keep this draft')
+            expect(dialog.locator('.composer-files')).to_contain_text('pasted.png')
+            assert len(store.list(fixture.cid)) == 1
+            saved = store.defaults()
+            assert saved['selected_tab'] == 'new-tab'
+            assert saved['prompt'] == 'v2 - Composer test'
+            assert 'question' not in saved and 'files' not in saved
             question.fill('Explain limits')
             question.press('Shift+Enter'); question.type('With examples')
             expect(question).to_have_value('Explain limits\nWith examples')
@@ -120,8 +135,21 @@ def main():
             dialog.get_by_role('button', name='Xếp hàng 2 nhánh', exact=True).click()
             expect(dialog).to_have_count(0)
             assert len(store.list(fixture.cid)) == 4
+            # A full reload restores DB defaults, without carrying over the old draft/assets.
+            page.reload()
+            page.locator('nav button').nth(2).click()
+            page.locator(f'[data-node-id="{root["id"]}"] .research-node').click()
+            page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
+            expect(page.get_by_label('research Prompt', exact=True)).to_have_value('v2 - Composer test')
+            expect(question).to_have_value('')
+            expect(dialog.locator('.composer-files')).to_be_empty()
+            page.get_by_label('research Power', exact=True).select_option('0')
+            dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
             assert not errors, errors
-            print('Composer browser checks passed: refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite.')
+            print('Composer browser checks passed: refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite defaults, save failure/retry, reload.')
             browser.close()
     finally:
         server.should_exit = True; thread.join(timeout=10)

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from .server_math import browser_markdown
 
 router = APIRouter(prefix='/api/conversations/{cid}/research')
+preferences_router = APIRouter(prefix='/api/research')
 Question = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)]
 
 
@@ -30,6 +31,16 @@ class ChildrenInput(BaseModel):
     excerpt: str = Field(default='', max_length=20_000)
     config: BranchConfig = Field(default_factory=BranchConfig)
     files: list[str] = Field(default_factory=list, max_length=20)
+
+
+@preferences_router.get('/defaults')
+def defaults(request: Request):
+    return request.app.state.service.research.store.defaults()
+
+
+@preferences_router.put('/defaults')
+def save_defaults(body: BranchConfig, request: Request):
+    return request.app.state.service.research.store.save_defaults(body.model_dump(exclude_none=True))
 
 
 class NodePatch(BaseModel):

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, Paperclip, Send, X } from "lucide-react";
+import { Camera, Paperclip, Save, Send, X } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 
@@ -22,6 +22,9 @@ export default function BranchComposer({
   const [files, setFiles] = useState([]);
   const [uploads, setUploads] = useState(0);
   const [sending, setSending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedConfig, setSavedConfig] = useState("");
+  const savingRef = useRef(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [error, setError] = useState("");
   const input = useRef(null),
@@ -39,10 +42,28 @@ export default function BranchComposer({
     questions.length <= 20 &&
     !!config.selected_tab &&
     !sending &&
+    !saving &&
     !uploads;
   useEffect(() => {
     area.current?.focus();
   }, []);
+
+  async function saveSettings() {
+    if (savingRef.current || sendingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError("");
+    setSavedConfig("");
+    try {
+      await api("/research/defaults", { method: "PUT", body: config });
+      setSavedConfig(JSON.stringify(config));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
 
   async function upload(items) {
     uploadsRef.current += 1;
@@ -93,7 +114,7 @@ export default function BranchComposer({
   }
   async function submit(e) {
     e?.preventDefault();
-    if (!canSend || sendingRef.current || uploadsRef.current || editingPrompt)
+    if (!canSend || sendingRef.current || savingRef.current || uploadsRef.current || editingPrompt)
       return;
     sendingRef.current = true;
     setSending(true);
@@ -135,7 +156,7 @@ export default function BranchComposer({
             <button
               type="button"
               aria-label="Đóng tạo nhánh"
-              disabled={sending || !!uploads}
+              disabled={sending || saving || !!uploads}
               onClick={close}
             >
               <X size={18} />
@@ -156,8 +177,19 @@ export default function BranchComposer({
               prompts={prompts}
               editPrompt={() => setEditingPrompt(true)}
               scope="research"
-              disabled={sending}
+              disabled={sending || saving}
             />
+            <div className="branch-save-settings">
+              <button type="button" onClick={saveSettings} disabled={sending || saving}>
+                <Save size={15} />
+                {saving ? "Đang lưu…" : "Lưu cài đặt"}
+              </button>
+              <span role="status">
+                {savedConfig === JSON.stringify(config)
+                  ? "Đã lưu vào database. Áp dụng cho các nhánh tạo sau."
+                  : "Lưu các tùy chọn để dùng lại khi tạo nhánh tiếp theo."}
+              </span>
+            </div>
             {draft.excerpt && (
               <details className="research-excerpt">
                 <summary>Đoạn đã chọn từ node cha</summary>

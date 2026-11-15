@@ -62,6 +62,10 @@ class ResearchStore:
                     revision INTEGER NOT NULL DEFAULT 1,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS research_preferences (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    config TEXT NOT NULL
+                );
             ''')
             owners = db.execute("SELECT DISTINCT owner_pid FROM research_nodes WHERE status='working'").fetchall()
             for owner in owners:
@@ -69,6 +73,18 @@ class ResearchStore:
                     db.execute("UPDATE research_nodes SET status='interrupted', detail=? WHERE status='working' AND owner_pid=?",
                                ('Server stopped before completion. Retry manually to avoid sending twice.', owner['owner_pid']))
         self.archive_legacy_attachments()
+
+    def defaults(self):
+        with self.conversations._connect() as db:
+            row = db.execute('SELECT config FROM research_preferences WHERE id=1').fetchone()
+        return json.loads(row['config']) if row else {}
+
+    def save_defaults(self, config):
+        with self.conversations._connect() as db:
+            db.execute('''INSERT INTO research_preferences(id, config) VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET config=excluded.config''',
+                (json.dumps(config, ensure_ascii=False),))
+        return config
 
     def graph_layout(self, cid, rid):
         root = self.get(cid, rid)

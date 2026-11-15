@@ -179,7 +179,7 @@ export default function ResearchTab({
       setError(e.message);
     }
   }
-  function createDraft(excerpt = "") {
+  async function createDraft(excerpt = "") {
     if (detail?.status !== "done") return;
     if (excerpt.length > 20000) {
       setMenu(null);
@@ -187,12 +187,19 @@ export default function ResearchTab({
       return;
     }
     setMenu(null);
-    setDraft({
-      parent: detail,
-      excerpt,
-      question: excerpt,
-      config: currentDefaults(),
-    });
+    setError("");
+    try {
+      const saved = await api("/research/defaults");
+      if (selectedRef.current !== detail.id) return;
+      setDraft({
+        parent: detail,
+        excerpt,
+        question: excerpt,
+        config: { ...currentDefaults(), ...saved },
+      });
+    } catch (e) {
+      setError(e.message);
+    }
   }
   function selectionMenu(e) {
     const selection = window.getSelection();

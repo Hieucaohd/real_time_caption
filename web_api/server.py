@@ -26,7 +26,7 @@ from caption.translation_batch import batch_options
 from caption.transcript_export import last_lines
 from .service import Service
 from .server_math import browser_markdown
-from .research_routes import router as research_router
+from .research_routes import router as research_router, preferences_router
 
 ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
@@ -74,6 +74,7 @@ def create_app(service=None):
     app = FastAPI(title='Real-time Caption', lifespan=lifespan, docs_url=None, redoc_url=None)
 
     app.include_router(research_router)
+    app.include_router(preferences_router)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
