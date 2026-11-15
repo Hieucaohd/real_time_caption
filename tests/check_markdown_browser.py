@@ -193,6 +193,16 @@ def main():
             missing_source_dialog = page.locator('.branch-composer')
             expect(missing_source_dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True)).to_be_disabled()
             expect(missing_source_dialog).to_contain_text('Hãy bổ sung link và số thứ tự câu trả lời')
+            expect(missing_source_dialog.get_by_label('Đính kèm ngữ cảnh tổ tiên', exact=True)).not_to_be_checked()
+            missing_source_dialog.get_by_label('Đính kèm ngữ cảnh tổ tiên', exact=True).check()
+            missing_source_dialog.get_by_label('Lấy ngữ cảnh ngược tới', exact=True).select_option('2')
+            expect(missing_source_dialog).to_contain_text('Sẽ đính kèm 2 cặp câu hỏi – câu trả lời')
+            missing_source_dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
+            expect(missing_source_dialog).to_contain_text('Đã lưu vào database')
+            assert fixture.service.research.store.defaults()['ancestor_depth'] == 2
+            missing_source_dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            expect(missing_source_dialog.get_by_label('Lấy ngữ cảnh ngược tới', exact=True)).to_have_value('2')
             missing_source_dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
             page.locator('.research-breadcrumb').get_by_role('button', name='Gốc', exact=True).click()
             page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1")
@@ -269,6 +279,10 @@ def main():
             queued = next(n for n in fixture.service.research.store.list(fixture.cid) if n['question'] == 'Keep this draft question')
             assert queued['config']['selected_tab'] == 'fresh-branch-tab'
             assert queued['config']['new_chat'] is False
+            assert queued['config']['ancestor_depth'] == 1  # Root has only one available ancestor pair.
+            saved_request = fixture.service.research.store.get(fixture.cid, queued['id'], private=True)['request']
+            assert saved_request['ancestor_ids'] == [root['id']]
+            assert any(name.endswith('research-ancestors.md') for name in saved_request['attachments'])
             page.locator('nav button').nth(1).click()
             assert md.evaluate('el=>getComputedStyle(el).color') == 'rgb(236, 236, 236)'
             assert page.locator('.message.bot').evaluate('el=>getComputedStyle(el).backgroundColor') == 'rgba(0, 0, 0, 0)'

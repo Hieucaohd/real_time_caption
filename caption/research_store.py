@@ -222,13 +222,15 @@ class ResearchStore:
 
     def ancestry(self, cid, nid):
         chain, seen = [], set()
-        while nid:
-            if nid in seen:
-                raise ValueError('Invalid research tree')
-            seen.add(nid)
-            node = self.get(cid, nid)
-            chain.append(node)
-            nid = node['parent_id']
+        with self.conversations._connect() as db:
+            db.execute('BEGIN')
+            while nid:
+                if nid in seen:
+                    raise ValueError('Invalid research tree')
+                seen.add(nid)
+                node = self.row(db.execute('SELECT * FROM research_nodes WHERE id=? AND conversation_id=?', (nid, cid)).fetchone())
+                chain.append(node)
+                nid = node['parent_id']
         return list(reversed(chain))
 
     def update_response_source(self, cid, source, *, mid=None, nid=None):

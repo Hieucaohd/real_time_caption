@@ -103,6 +103,7 @@ export default function ResearchTab({
     max_lines: settings.chat_max_lines ?? 300,
     screenshot: !!settings.chat_screenshot,
     new_chat: false,
+    ancestor_depth: 0,
   });
 
   function select(id, all = nodes) {
@@ -235,6 +236,7 @@ export default function ResearchTab({
       if (selectedRef.current !== detail.id) return;
       setDraft({
         parent: detail,
+        ancestors: pathTo(nodes, detail.id),
         excerpt,
         question: excerpt,
         config: { ...currentDefaults(), ...saved },

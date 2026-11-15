@@ -24,6 +24,7 @@ class BranchConfig(BaseModel):
     screenshot: bool | None = None
     prompt: str | None = Field(default=None, max_length=500)
     attach_history: bool | None = None
+    ancestor_depth: int | None = Field(default=None, ge=-1, le=10000, strict=True)
     new_chat: bool | None = None
 
 

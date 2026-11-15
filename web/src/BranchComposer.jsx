@@ -17,7 +17,12 @@ export default function BranchComposer({
   created,
 }) {
   const [question, setQuestion] = useState(draft.question);
-  const [config, setConfig] = useState(draft.config);
+  const ancestors = draft.ancestors || [draft.parent];
+  const [config, setConfig] = useState(() => ({ ...draft.config,
+    ancestor_depth: draft.config.ancestor_depth > 0 ? Math.min(draft.config.ancestor_depth, ancestors.length) : (draft.config.ancestor_depth ?? 0),
+  }));
+  const ancestorDepth = config.ancestor_depth ?? 0;
+  const selectedAncestors = ancestorDepth === -1 ? ancestors : ancestorDepth > 0 ? ancestors.slice(-ancestorDepth) : [];
   const [batch, setBatch] = useState(false);
   const [files, setFiles] = useState([]);
   const [uploads, setUploads] = useState(0);
@@ -229,6 +234,30 @@ export default function BranchComposer({
               scope="research"
               disabled={sending || saving || branching}
             />
+            <div className="branch-ancestor-options">
+              <label className="toggle">
+                <input type="checkbox" checked={ancestorDepth !== 0} disabled={sending || saving || branching}
+                  onChange={(e) => setConfig((old) => ({ ...old, ancestor_depth: e.target.checked ? 1 : 0 }))} />
+                Đính kèm ngữ cảnh tổ tiên
+              </label>
+              {ancestorDepth !== 0 && <>
+                <label className="field">
+                  <span>Lấy ngữ cảnh ngược tới</span>
+                  <select aria-label="Lấy ngữ cảnh ngược tới" value={ancestorDepth} disabled={sending || saving || branching}
+                    onChange={(e) => setConfig((old) => ({ ...old, ancestor_depth: Number(e.target.value) }))}>
+                    {[...ancestors].reverse().map((node, index) => <option key={node.id} value={index + 1}>
+                      {index === 0 ? "Cha" : index === 1 ? "Ông/bà" : index === 2 ? "Cụ" : `Tổ tiên cấp ${index + 1}`} — {node.title} ({index + 1} cặp)
+                    </option>)}
+                    <option value={-1}>Toàn bộ về node gốc ({ancestors.length} cặp)</option>
+                  </select>
+                </label>
+                <details>
+                  <summary>Sẽ đính kèm {selectedAncestors.length} cặp câu hỏi – câu trả lời</summary>
+                  <ol>{selectedAncestors.map((node) => <li key={node.id}>{node.title}</li>)}</ol>
+                  <p className="muted">Toàn bộ câu hỏi và câu trả lời của các node trên được đính kèm thành một file, từ cũ đến mới.</p>
+                </details>
+              </>}
+            </div>
             <div className="branch-save-settings">
               <button type="button" onClick={saveSettings} disabled={sending || saving || branching}>
                 <Save size={15} />
@@ -342,7 +371,7 @@ export default function BranchComposer({
                 ? "Bạn đã bật tạo cuộc chat mới cho mỗi câu hỏi."
                 : "Gửi vào cuộc hội thoại đang mở trong tab ChatGPT đã chọn."}{" "}
               Dùng mẫu prompt của Chat; các câu hỏi được gửi lần lượt. Ngữ cảnh
-              tổ tiên không được tự thêm vào prompt.
+              tổ tiên {ancestorDepth !== 0 ? `được đính kèm từ ${selectedAncestors.length} cặp câu hỏi – câu trả lời đã chọn.` : "chưa được đính kèm."}
             </p>
             {error && (
               <p role="alert" className="alert">

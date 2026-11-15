@@ -32,7 +32,7 @@ class Research:
                           power=settings.chat_chatgpt_power, attach_transcript=False,
                           max_lines=settings.chat_max_lines, screenshot=settings.chat_screenshot,
                           attach_history=settings.chat_attach_history, prompt=settings.chat_prompt,
-                          new_chat=False)
+                          new_chat=False, ancestor_depth=0)
             config.update(payload.get('config', {}))
             if not config['selected_tab']:
                 raise ValueError('Chọn tab ChatGPT cho nghiên cứu trước khi xếp hàng.')
@@ -40,6 +40,14 @@ class Research:
             if not version:
                 raise ValueError('No prompt version found.')
             config['prompt'] = version
+            depth = config['ancestor_depth']
+            if type(depth) is not int or not -1 <= depth <= 10000:
+                raise ValueError('Số cấp ngữ cảnh tổ tiên không hợp lệ.')
+            ancestors = self.store.ancestry(cid, pid) if depth else []
+            if depth > 0:
+                ancestors = ancestors[-depth:]
+            if any(node['status'] != 'done' for node in ancestors):
+                raise ValueError('Chờ các câu trả lời trong ngữ cảnh tổ tiên hoàn tất trước khi đính kèm.')
             transcript = self.service.transcript_for(cid)
             # Freeze files when queued, so later renames/edits do not change a branch or its retry.
             folder = paths.CACHE_DIR / 'research' / uuid.uuid4().hex
@@ -71,13 +79,22 @@ class Research:
                     target = folder / history.name
                     shutil.copy2(history, target)
                     attachments.append(str(target))
+            if ancestors:
+                context_file = folder / 'research-ancestors.md'
+                sections = ['# Ngữ cảnh nghiên cứu theo nhánh',
+                            'Các cặp câu hỏi và câu trả lời được chọn, theo thứ tự từ cũ nhất đến node cha.']
+                for index, ancestor in enumerate(ancestors, 1):
+                    sections.append(f"## {index}. {ancestor['title']}\n\n### Câu hỏi\n\n{ancestor['question']}\n\n### Câu trả lời\n\n{ancestor['answer']}")
+                context_file.write_text('\n\n---\n\n'.join(sections) + '\n', encoding='utf-8')
+                attachments.append(str(context_file))
             prepared = []
             for question in payload['questions']:
                 prompt = chatgpt.build_prompt(upload, transcript.source, transcript.started,
                     prompt_versions.path_for(version, prompt_versions.CHAT_DIR), question)
                 prepared.append(dict(id=uuid.uuid4().hex, title=question.splitlines()[0][:100], question=question,
                     excerpt=payload.get('excerpt', ''), config=config,
-                    request=dict(prompt=prompt, attachments=attachments)))
+                    request=dict(prompt=prompt, attachments=attachments,
+                                 ancestor_ids=[node['id'] for node in ancestors])))
             return self.store.add_children(cid, parent, prepared)
 
     def create_chatgpt_branch(self, cid, nid):
