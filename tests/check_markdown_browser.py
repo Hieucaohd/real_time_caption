@@ -87,6 +87,7 @@ def main():
             # Exercise the button without replacing the user's system clipboard.
             context.add_init_script("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.__copiedCode = text}}})")
             page = context.new_page()
+            page.route('**/api/chrome-tabs', lambda route: route.fulfill(json=[]))
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
@@ -167,6 +168,43 @@ def main():
             expect(branch).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert branch.evaluate('el=>el.scrollWidth <= el.clientWidth + 1')
+            # Theme setting is global, durable in SQLite, and covers controls and responses.
+            page.set_viewport_size({'width':1440,'height':1000})
+            page.get_by_role('button', name='Settings', exact=True).click()
+            page.get_by_label('Chế độ hiển thị', exact=True).select_option('dark')
+            page.get_by_role('button', name='Save settings', exact=True).click()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+            assert fixture.service.store.web_theme() == 'dark'
+            assert branch.evaluate('el=>getComputedStyle(el).color') == 'rgb(236, 236, 236)'
+            expect(branch.locator('.katex-error')).to_have_count(0)
+            page.get_by_role('button', name='Hiện đồ thị', exact=True).click()
+            page.screenshot(path='cache/theme-dark-research.png')
+            for selector in ('main', '.sidebar', '.research-reader'):
+                color = page.locator(selector).evaluate('el=>getComputedStyle(el).backgroundColor')
+                assert color in ('rgb(25, 30, 27)', 'rgb(34, 42, 37)'), (selector, color)
+            page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
+            dialog = page.locator('.branch-composer')
+            assert dialog.evaluate('el=>getComputedStyle(el).backgroundColor') == 'rgb(25, 30, 27)'
+            assert dialog.locator('textarea').evaluate('el=>getComputedStyle(el).color') == 'rgb(230, 238, 232)'
+            dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            page.locator('nav button').nth(1).click()
+            assert md.evaluate('el=>getComputedStyle(el).color') == 'rgb(236, 236, 236)'
+            assert page.locator('.message.bot').evaluate('el=>getComputedStyle(el).backgroundColor') == 'rgba(0, 0, 0, 0)'
+            page.screenshot(path='cache/theme-dark-chat.png')
+            page.reload()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+            page.get_by_role('button', name='Settings', exact=True).click()
+            expect(page.get_by_label('Chế độ hiển thị', exact=True)).to_have_value('dark')
+            page.get_by_label('Chế độ hiển thị', exact=True).select_option('light')
+            page.get_by_role('button', name='Close settings', exact=True).click()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+            page.get_by_role('button', name='Settings', exact=True).click()
+            page.get_by_label('Chế độ hiển thị', exact=True).select_option('light')
+            page.get_by_role('button', name='Save settings', exact=True).click()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'light')
+            page.locator('nav button').nth(1).click()
+            assert md.evaluate('el=>getComputedStyle(el).color') == 'rgb(13, 13, 13)'
+            assert fixture.service.store.web_theme() == 'light'
             assert not errors, errors
             print('Markdown browser checks passed: display/inline math, arrays, lists, tables, highlighting, copy, safety, branch selection, mobile.')
             browser.close()

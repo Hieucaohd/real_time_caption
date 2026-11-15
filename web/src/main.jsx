@@ -40,6 +40,7 @@ import "katex/dist/katex.min.css";
 import "./style.css";
 import "./reading-layout.css";
 import "./response-markdown.css";
+import "./theme.css";
 
 async function api(path, options = {}) {
   const headers = { "X-RTC-Client": "web", ...options.headers };
@@ -163,6 +164,12 @@ function App() {
   const jobSeen = useRef(new Set());
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
+  useLayoutEffect(() => {
+    if (!boot) return;
+    const theme = settings.web_theme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("rtc-theme", theme); } catch { /* SQLite remains authoritative. */ }
+  }, [settings.web_theme]);
   const current = boot?.conversations.find((c) => c.id === cid);
   const busyJob = boot?.jobs.find((j) =>
     ["queued", "working"].includes(j.status),
@@ -1477,6 +1484,13 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           <Button icon={X} onClick={close} aria-label="Close settings" />
         </div>
         <div className="modal-body">
+          <h3>Giao diện web</h3>
+          <Field label="Chế độ hiển thị">
+            <select aria-label="Chế độ hiển thị" value={draft.web_theme || "light"} onChange={(e) => set("web_theme", e.target.value)}>
+              <option value="light">Sáng</option>
+              <option value="dark">Tối</option>
+            </select>
+          </Field>
           <h3>Translation</h3>
           <div className="form-grid">
             <Field label="Engine">

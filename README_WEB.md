@@ -40,6 +40,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Trong **Settings → Giao diện web → Chế độ hiển thị**, chọn **Sáng** hoặc **Tối** rồi bấm **Save settings**. Lựa chọn lưu vào bảng `web_preferences` trong SQLite và áp dụng cho toàn bộ web app, gồm Chat, nghiên cứu, công thức, code và các hộp thoại. Trình duyệt nhớ tạm lựa chọn để tránh chớp nền sáng khi tải lại; database là nguồn cài đặt chính.
+
 Để nhớ chỗ đã đọc, bôi đen một đoạn trong câu trả lời rồi bấm **Đánh dấu** (hoặc chuột phải → **Đánh dấu đã đọc tới đây**). Đoạn đó được tô vàng và lưu vào SQLite riêng cho node, vẫn còn khi chuyển qua node con rồi quay lại hoặc tải lại trang. Mỗi node có một dấu đọc; đánh dấu đoạn mới thay thế đoạn cũ. **Tới dấu** cuộn đến đoạn đã tô, **Bỏ dấu** xóa dấu. Không tự theo dõi vị trí cuộn và không thay đổi Markdown gốc.
 
 Mỗi câu trả lời mới lưu tên tab ChatGPT tại lúc nhận xong vào SQLite (`response_tab_title`), hiển thị trong khung đọc và tooltip node. Node gốc nhập từ Chat giữ tên tab của câu trả lời gốc (cả Chat web và native từ phiên bản này). Node cũ chưa ghi thông tin sẽ hiện “Chưa có tên tab được lưu”; tên hiện tại của tab không được dùng để đoán lại lịch sử.

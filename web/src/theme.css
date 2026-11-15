@@ -1,0 +1,105 @@
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #191e1b;
+  --surface-raised: #222a25;
+  --surface-hover: #303c34;
+  --text: #e6eee8;
+  --muted: #acb9b0;
+  --green: #83d9b6;
+  --line: #3b4840;
+  color: var(--text);
+  background: var(--surface);
+}
+:root[data-theme="dark"] :is(main, .modal, .research-reader, .research-context-menu, .composer) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+}
+:root[data-theme="dark"] :is(.sidebar, .options, .chat-settings, .research, .capture-bar, footer,
+  .search, .message, .translation-line, .vocab-card, .job, .research-stream, .research-excerpt, .research-request) {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--line);
+}
+:root[data-theme="dark"] :is(button, .button):where(:not(.research-node):not(.research-collapse)),
+:root[data-theme="dark"] :is(input, textarea, select) {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--line);
+}
+:root[data-theme="dark"] :is(input, textarea)::placeholder { color: #a1afa6; }
+:root[data-theme="dark"] :is(button, .button):where(:not(.research-node):not(.research-collapse)):hover {
+  background: var(--surface-hover);
+  border-color: #6f8979;
+}
+:root[data-theme="dark"] :is(button.primary, .primary, .brand-icon, .source-icon.recording) {
+  background: #226c50;
+  border-color: #3e9671;
+  color: #ffffff;
+}
+:root[data-theme="dark"] :is(button.primary, .primary):hover { background: #2b825f; }
+:root[data-theme="dark"] :is(.conversation.selected, .translation-line.selected, .message.user, .research-notice) {
+  background: #253c30;
+  border-color: #547861;
+  color: #ddf4e5;
+}
+:root[data-theme="dark"] :is(nav button, .sidebar-bottom > button, .conversation,
+  .research-breadcrumb button, .answer-actions button, .composer > textarea, .research-search input,
+  .response-code-header button) {
+  background: transparent;
+}
+:root[data-theme="dark"] nav button.active { color: var(--green); }
+:root[data-theme="dark"] :is(.conversation strong, .research-heading h2, .research-question h3,
+  .research-welcome h3, .empty h3, .vocab-card h3, .modal-body h3, .transcript pre) { color: var(--text); }
+:root[data-theme="dark"] :is(.muted, .toggle, .field > span, .brand small, .eyebrow, .conversation small,
+  .sync, .capture-bar small, .source-tag, .message-meta, .message-meta time, .answer-actions a,
+  .translation-line time, .translation-line small, .translation-attempt > small, .vocab-card strong,
+  .vocab-card small, .vocab-card blockquote, .job small, .modal-foot span, .empty, .empty p,
+  .research-heading span, .research-response-tab, .research-question small, .research-excerpt summary,
+  .research-request, .research-reader-actions small, .research-wait, .research-welcome, .branch-explanation,
+  .branch-save-settings, .loading, .loading p, .research-reader-head .research-status,
+  .chat-settings > summary) { color: var(--muted); }
+:root[data-theme="dark"] :is(.research-heading, .partial, .source-icon) { color: var(--green); }
+:root[data-theme="dark"] :is(.source-icon, .composer-files > span, .composer-actions .inline button,
+  .reading-focus-toggle[aria-pressed="true"]) { background: #293c31; }
+:root[data-theme="dark"] .transcript { background: var(--surface); }
+:root[data-theme="dark"] :is(.research-question, .research-breadcrumb, .answer-actions, .branch-composer .composer) {
+  border-color: var(--line);
+}
+:root[data-theme="dark"] :is(.alert, .job.error, .job.cancelled, .research-detail.error, .research-detail.interrupted, .stop) {
+  background: #3e2926;
+  border-color: #835449;
+  color: #ffb7a4;
+}
+:root[data-theme="dark"] .research-reader-head :is(.research-status.error, .research-status.interrupted) { color: #ffb7a4; }
+:root[data-theme="dark"] .research-reader-head .research-status.working { color: #eacb84; }
+:root[data-theme="dark"] .modal-backdrop { background: #0009; }
+:root[data-theme="dark"] .scroll { scrollbar-color: #5d7163 transparent; }
+:root[data-theme="dark"] ::selection { background: #547b65; color: #fff; }
+:root[data-theme="dark"] .research-answer ::selection { background: #655b92; color: #fff; }
+:root[data-theme="dark"] ::highlight(rtc-reading-mark) { background-color: #e4c65a; color: #201b05; }
+
+/* Keep Markdown metrics and KaTeX layout identical in both themes. */
+:root[data-theme="dark"] .response-markdown {
+  --response-text: #ececec;
+  --response-muted: #b4bbb6;
+  --response-border: #414943;
+  color: var(--response-text);
+}
+:root[data-theme="dark"] .compact-workspace .chat-scroll .message.bot { background: transparent; }
+:root[data-theme="dark"] .compact-workspace .chat-scroll .message.user { background: #2e3832; }
+:root[data-theme="dark"] .compact-workspace .chat-scroll .message-meta { color: var(--muted); }
+:root[data-theme="dark"] .response-markdown a { color: #91c3ff; }
+:root[data-theme="dark"] .response-markdown blockquote::before { background: #637067; }
+:root[data-theme="dark"] .response-markdown :not(pre) > code { background: #303632; color: #eeeeee; }
+:root[data-theme="dark"] .response-code-block { background: #222724; border-color: #414943; }
+:root[data-theme="dark"] .response-markdown :is(th, td) { background: transparent; color: inherit; }
+:root[data-theme="dark"] .response-markdown .katex-error { color: #ffb0a1; }
+:root[data-theme="dark"] .response-markdown .hljs { color: #ececec; background: transparent; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-comment, .hljs-quote) { color: #a7b4ab; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal) { color: #d2b3ff; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-string, .hljs-regexp, .hljs-addition) { color: #a9dba6; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-number, .hljs-symbol, .hljs-attr, .hljs-built_in) { color: #f0c38a; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-title, .hljs-type, .hljs-section, .hljs-selector-id) { color: #9bcaff; }
+:root[data-theme="dark"] .response-markdown :is(.hljs-meta, .hljs-deletion, .hljs-name, .hljs-variable, .hljs-template-variable) { color: #f6a8ad; }

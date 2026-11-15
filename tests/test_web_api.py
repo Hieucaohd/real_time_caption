@@ -136,6 +136,21 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.client.patch('/api/settings',json={'unknown':1},headers=self.headers).status_code,422)
         self.assertEqual(self.client.patch('/api/settings',json={'translation_batch_size':0},headers=self.headers).status_code,400)
 
+    def test_web_theme_persists_in_sqlite_and_survives_other_settings_changes(self):
+        self.assertEqual(self.client.get('/api/bootstrap').json()['settings']['web_theme'], 'light')
+        result = self.client.patch('/api/settings', json={'web_theme': 'dark'}, headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(ConversationStore(self.service.store.db_path).web_theme(), 'dark')
+        native = settings.Settings.load(); native.chat_max_lines = 40; native.save()
+        result = self.client.patch('/api/settings', json={'summary_max_lines': 15}, headers=self.headers)
+        self.assertEqual(result.json()['web_theme'], 'dark')
+        self.assertEqual(result.json()['chat_max_lines'], 40)
+        self.assertEqual(self.client.patch('/api/settings', json={'web_theme': 'invalid'}, headers=self.headers).status_code, 422)
+        self.assertEqual(self.client.patch('/api/settings', json={'web_theme': 'light', 'translation_batch_size': 0}, headers=self.headers).status_code, 400)
+        self.assertEqual(self.client.get('/api/bootstrap').json()['settings']['web_theme'], 'dark')
+        self.client.patch('/api/settings', json={'web_theme': 'light'}, headers=self.headers)
+        self.assertEqual(self.service.store.web_theme(), 'light')
+
     def test_chat_and_summary_store_results_and_keep_prompt_and_attachments(self):
         self.post(f'/api/conversations/{self.cid}/capture')
         self.service.on_caption(Event('final','Original caption',end_of_utterance=True))

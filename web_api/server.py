@@ -11,6 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict, fields
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -31,6 +32,7 @@ from .research_routes import router as research_router, preferences_router
 ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
 SettingsPatch = create_model('SettingsPatch', __config__=ConfigDict(extra='forbid', strict=True),
+    web_theme=(Literal['light', 'dark'] | None, None),
     **{f.name: (type(f.default) | None, None) for f in fields(Settings)})
 
 
@@ -127,7 +129,7 @@ def create_app(service=None):
         state = s.state()
         state['jobs'] = [{k: v for k, v in job.items() if not k.startswith('_')} for job in state['jobs']]
         return {**state, 'conversations': [asdict(c) for c in s.store.list()],
-                'settings': asdict(Settings.load()), 'engines': ENGINES, 'languages': LANGUAGES,
+                'settings': {**asdict(Settings.load()), 'web_theme': s.store.web_theme()}, 'engines': ENGINES, 'languages': LANGUAGES,
                 'prompts': {kind: prompt_versions.list_versions(folder) for kind, folder in
                             [('chat', prompt_versions.CHAT_DIR), ('summary', prompt_versions.SUMMARY_DIR)]}}
 
@@ -219,6 +221,7 @@ def create_app(service=None):
     def settings(body: SettingsPatch, request: Request):
         current = Settings.load()
         values = body.model_dump(exclude_none=True)
+        theme = values.pop('web_theme', None)
         for key, value in values.items():
             if key.endswith('_max_lines') and not 0 <= value <= 1_000_000:
                 raise ValueError('Line count must be between 0 and 1000000.')
@@ -231,9 +234,11 @@ def create_app(service=None):
         if not 8 <= current.overlay_font_size <= 96 or not 1 <= current.overlay_lines <= 10 or not .1 <= current.overlay_alpha <= 1:
             raise ValueError('Invalid overlay settings.')
         current.save()
+        if theme is not None:
+            svc(request).store.save_web_theme(theme)
         if values.get('translation_enabled'):
             svc(request).worker.resume()
-        return asdict(Settings.load())
+        return {**asdict(Settings.load()), 'web_theme': svc(request).store.web_theme()}
 
     @app.get('/api/chrome-tabs')
     def tabs():

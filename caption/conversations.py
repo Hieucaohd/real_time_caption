@@ -133,6 +133,10 @@ class ConversationStore:
                     path TEXT NOT NULL,
                     PRIMARY KEY(message_id, position)
                 );
+                CREATE TABLE IF NOT EXISTS web_preferences (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    theme TEXT NOT NULL CHECK (theme IN ('light', 'dark'))
+                );
                 """
             )
             db.execute('BEGIN IMMEDIATE')
@@ -156,6 +160,17 @@ class ConversationStore:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM conversations ORDER BY updated_at DESC").fetchall()
         return [self._row(row) for row in rows if row is not None]  # type: ignore[misc]
+
+    def web_theme(self) -> str:
+        with self._connect() as db:
+            row = db.execute('SELECT theme FROM web_preferences WHERE id=1').fetchone()
+        return row['theme'] if row else 'light'
+
+    def save_web_theme(self, theme: str) -> None:
+        if theme not in ('light', 'dark'):
+            raise ValueError('Invalid web theme.')
+        with self._connect() as db:
+            db.execute('INSERT INTO web_preferences(id, theme) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET theme=excluded.theme', (theme,))
 
     def get(self, conversation_id: str) -> Conversation | None:
         with self._connect() as db:
