@@ -67,6 +67,7 @@ export default function ResearchGraph({
   nodes,
   rootId,
   selected,
+  highlightedIds = [],
   onSelect,
   onOpenChatGPT,
   openingNode,
@@ -103,9 +104,18 @@ export default function ResearchGraph({
     [saveError, setSaveError] = useState("");
   const loaded = useRef(false),
     lastSelected = useRef(selected);
+  const highlighted = useMemo(() => new Set(highlightedIds), [highlightedIds]);
   const visible = useMemo(
-    () => visibleNodes(nodes, new Set(data.collapsed)),
-    [nodes, data.collapsed],
+    () => {
+      // Preview collapsed paths while hovering, without persisting a layout change.
+      const collapsed = new Set(data.collapsed), map = new Map(nodes.map((node) => [node.id, node]));
+      for (const id of highlighted) {
+        let node = map.get(id);
+        while (node?.parent_id) { collapsed.delete(node.parent_id); node = map.get(node.parent_id); }
+      }
+      return visibleNodes(nodes, collapsed);
+    },
+    [nodes, data.collapsed, highlighted],
   );
   const visibleIds = new Set(visible.map((n) => n.id));
   const parentsWithChildren = useMemo(
@@ -824,11 +834,12 @@ export default function ResearchGraph({
                   .map((n) => (
                     <path
                       key={n.id}
+                      data-child-id={n.id}
                       d={edgePath(
                         data.positions[n.parent_id],
                         data.positions[n.id],
                       )}
-                      className={n.understood ? "understood" : ""}
+                      className={`${n.understood ? "understood" : ""} ${highlighted.has(n.id) ? "branch-highlighted" : ""}`}
                     />
                   ))}
               </svg>
@@ -853,7 +864,7 @@ export default function ResearchGraph({
                       aria-label={"Đọc: " + n.title}
                       title={n.question + (n.response_tab_title ? "\nTab ChatGPT: " + n.response_tab_title : "") + (n.hidden ? "\nĐã ẩn" : "")}
                       data-hidden={n.hidden || undefined}
-                      className={`research-node ${selected === n.id ? "selected" : ""} ${picked.has(n.id) ? "picked" : ""} ${!n.parent_id ? "root" : ""} ${n.understood ? "understood" : ""}`}
+                      className={`research-node ${selected === n.id ? "selected" : ""} ${picked.has(n.id) ? "picked" : ""} ${!n.parent_id ? "root" : ""} ${n.understood ? "understood" : ""} ${highlighted.has(n.id) ? "branch-highlighted" : ""}`}
                       onFocus={() => reveal(n.id, true)}
                       onClick={(e) => {
                         if (e.detail === 0) {
@@ -944,7 +955,7 @@ export default function ResearchGraph({
                     width={WIDTH}
                     height={HEIGHT}
                     fill={
-                      picked.has(n.id)
+                      highlighted.has(n.id) ? "#7dd3fc" : picked.has(n.id)
                         ? "#b7b5ff"
                         : n.understood
                           ? "#66af90"

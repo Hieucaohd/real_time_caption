@@ -81,6 +81,7 @@ export default function ResearchTab({
     [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [hoveredChildren, setHoveredChildren] = useState([]);
   const [changingBranch, setChangingBranch] = useState(false);
   const [savingMark, setSavingMark] = useState(false);
   const [openingNode, setOpeningNode] = useState("");
@@ -113,6 +114,7 @@ export default function ResearchTab({
   });
 
   function select(id, all = nodes) {
+    setHoveredChildren([]);
     selectedRef.current = id;
     setSelected(id);
     setOpenRevision((value) => value + 1);
@@ -459,6 +461,7 @@ export default function ResearchTab({
               nodes={treeNodes}
               rootId={rootId}
               selected={selected}
+              highlightedIds={hoveredChildren}
               onSelect={(id) => {
                 select(id);
                 setGraphExpanded(false);
@@ -591,7 +594,11 @@ export default function ResearchTab({
                     )}
                   </div>
                   {reading.status === "done" && <BranchMarks answerRef={answer} nodeId={reading.id}
-                    content={reading.answer} marks={reading.branch_marks} />}
+                    content={reading.answer} marks={reading.branch_marks} onHover={setHoveredChildren}
+                    onSelect={(child) => {
+                      if (child.hidden) setShowHidden(true);
+                      select(child.id);
+                    }} />}
                   {["working", "error", "cancelled", "interrupted"].includes(
                     reading.status,
                   ) && (
