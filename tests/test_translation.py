@@ -234,11 +234,42 @@ class TranslationPersistenceTests(unittest.TestCase):
 
     def test_preview_is_not_saved_to_sqlite(self):
         worker = self.worker()
-        worker.preview(self.item.id, "partial", translation.Config(key="key"), 5)
+        worker.preview(self.item.id, "partial", translation.Config(engine="chrome"), 5)
         task, status, text = worker.results.get(timeout=2)
         self.assertTrue(task.preview)
         self.assertEqual(task.revision, 5)
         self.assertEqual(self.store.lines(self.item.id), [])
+
+    def test_preview_rejects_cloud_engines_without_sending(self):
+        adapter = SimpleNamespace(translate=Mock(return_value='unused'))
+        worker = self.worker(adapter)
+        with self.assertRaises(translation.TranslationError):
+            worker.preview(self.item.id, 'draft', translation.Config(key='key'), 1)
+        adapter.translate.assert_not_called()
+
+    def test_preview_coalesces_and_runs_between_finalized_lines(self):
+        entered, release = threading.Event(), threading.Event()
+        def translate(text, config, cancel):
+            if text == 'First final':
+                entered.set(); release.wait(3)
+            if text == 'Latest draft':
+                worker.preview(self.item.id, 'Next draft', config, 1)
+            return text
+        worker = self.worker(SimpleNamespace(translate=Mock(side_effect=translate)))
+        config = translation.Config(engine='chrome')
+        try:
+            worker.submit(self.line('1', 'First final'), config)
+            self.assertTrue(entered.wait(2))
+            worker.submit(self.line('2', 'Second final'), config)
+            worker.submit(self.line('3', 'Third final'), config)
+            worker.preview(self.item.id, 'Old draft', config, 1)
+            worker.preview(self.item.id, 'Latest draft', config, 1)
+        finally:
+            release.set()
+        outcomes = [worker.results.get(timeout=3) for _ in range(5)]
+        self.assertEqual([result[2] for result in outcomes],
+                         ['First final', 'Latest draft', 'Second final', 'Next draft', 'Third final'])
+        self.assertEqual(len(self.store.lines(self.item.id)), 3)
 
     def test_queued_requests_keep_their_engine_and_source_snapshot(self):
         entered, release = threading.Event(), threading.Event()
@@ -408,6 +439,7 @@ class TranslationPanelTests(unittest.TestCase):
         panel = object.__new__(TranslationPanel)
         panel.enabled_var = Mock(get=lambda: True)
         panel.partial_var = Mock(get=lambda: True)
+        panel.engine = Mock(return_value='chrome')
         panel._get_conversation_id = Mock(return_value="conversation")
         panel._revision = 3
         panel._preview_after = None

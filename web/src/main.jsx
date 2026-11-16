@@ -1223,6 +1223,11 @@ function App() {
                         finally { setTranslationFollowOverride(null); }
                       }}
                     />
+                    {settings.translation_engine === "chrome" && <Toggle
+                      label="Dịch ngay khi đang nói"
+                      checked={settings.translation_partial}
+                      onChange={(v) => action(() => changeSettings({ translation_partial: v }))}
+                    />}
                     <Button
                       icon={Settings2}
                       onClick={() => setSettingsOpen(true)}
@@ -1314,8 +1319,12 @@ function App() {
                     ) : (
                       <p className="muted">Chọn một câu để xem và dịch lại.</p>
                     )}
-                    {boot.translation_preview && (
-                      <div className="partial">{boot.translation_preview}</div>
+                    {settings.translation_engine === "chrome" && settings.translation_partial &&
+                      boot.capture.conversation_id === cid && boot.translation_preview && (
+                      <div className="partial" aria-label="Bản dịch tạm">
+                        <small>Bản dịch tạm · Câu chưa kết thúc</small>
+                        <div>{boot.translation_preview}</div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1638,11 +1647,11 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
               </select>
             </Field>
           </div>
-          <Toggle
-            label="Dịch cả câu đang nói (preview)"
+          {draft.translation_engine === "chrome" && <Toggle
+            label="Dịch ngay khi đang nói"
             checked={draft.translation_partial}
             onChange={(v) => set("translation_partial", v)}
-          />
+          />}
           {draft.translation_engine === "chrome" && <ChromeTranslatorSettings
             source={draft.translation_source} target={draft.translation_target} />}
           <div className="form-grid">

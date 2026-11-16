@@ -13,6 +13,7 @@ from test_web_api import WebApiTests
 from caption import chrome_translate
 from caption.settings import Settings
 from caption.translation import Config
+from caption.transcriber import Event
 from web_api.server import create_app
 
 FAKE_API = """(() => {
@@ -75,8 +76,26 @@ def main():
             assert history[-1]['engine'] == 'chrome'
             assert not fixture.service.worker.submit(line, config)  # Existing DB cache.
             assert page.evaluate('window.modelCreates') == 1
+            page.locator('nav button').nth(4).click()
+            live_toggle = page.get_by_role('checkbox', name='Dịch ngay khi đang nói', exact=True)
+            expect(live_toggle).to_be_visible()
+            live_toggle.click()
+            expect(live_toggle).to_be_checked()
+            page.get_by_role('checkbox', name='Auto translate', exact=True).click()
+            expect(page.get_by_role('checkbox', name='Auto translate', exact=True)).to_be_checked()
+            fixture.post(f'/api/conversations/{fixture.cid}/capture')
+            fixture.service.on_caption(Event('partial', 'Unfinished speech'))
+            fixture.service.on_caption(Event('partial', 'Unfinished speech with more words'))
+            preview = page.get_by_label('Bản dịch tạm', exact=True)
+            expect(preview).to_contain_text('Bản dịch: Unfinished speech with more words', timeout=15000)
+            assert len(fixture.service.translations.lines(fixture.cid)) == 1  # No finalized caption emitted.
+            fixture.post('/api/capture/pause')
+            expect(preview).to_have_count(0)
             page.get_by_role('button', name='Settings', exact=True).click()
             expect(panel.get_by_role('status')).to_contain_text('Sẵn sàng')
+            expect(page.locator('.modal').get_by_role('checkbox', name='Dịch ngay khi đang nói', exact=True)).to_be_checked()
+            page.get_by_role('combobox', name='Engine', exact=True).select_option('google_web')
+            expect(page.locator('.modal').get_by_role('checkbox', name='Dịch ngay khi đang nói', exact=True)).to_have_count(0)
             page.get_by_role('button', name='Close settings', exact=True).click()
             page.reload()
             page.get_by_role('button', name='Settings', exact=True).click()
@@ -89,7 +108,7 @@ def main():
             assert page.evaluate('window.modelCreates') == 0
             assert not errors, errors
             browser.close()
-            print('Chrome Translator: Settings/save/reload, unsupported pairs, CDP worker, SQLite persistence/cache and no background downloads passed.')
+            print('Chrome Translator: Settings/save/reload, Chrome-only live preview before finalization, CDP worker, SQLite persistence/cache and no background downloads passed.')
     finally:
         server.should_exit = True; thread.join(timeout=10); fixture.tearDown()
 

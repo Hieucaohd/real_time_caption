@@ -40,6 +40,7 @@ class Service:
         self.preview_revision = 0
         self.preview_timer = None
         self.preview_snapshot = None
+        self.preview_context = None
         self.last_final = ''
         self.final_revision = 0
         self.batcher = SentenceBatcher(self.schedule, lambda timer: timer.cancel(), self.submit_batch, self.translation_error)
@@ -79,6 +80,7 @@ class Service:
         with self.lock:
             if self.reader:
                 raise ValueError('Pause the active recording before starting another one.')
+            self.clear_preview()
             transcript = self.transcript_for(cid)
             transcript.begin_segment(livecaptions.LABEL)
             try:
@@ -115,24 +117,15 @@ class Service:
                         self.reader.stop()
                 elif event.kind == 'partial':
                     self.capture['partial'] = event.text
-                    self.preview_revision += 1
-                    self.translation_preview = ''
-                    self.worker.cancel_preview()
-                    settings = Settings.load()
-                    if event.text and settings.translation_enabled and settings.translation_partial:
-                        self.preview_snapshot = (self.capture['conversation_id'], event.text, Config.from_settings(settings), self.preview_revision)
-                        if self.preview_timer is None:
-                            self.preview_timer = self.schedule(500, self.send_preview)
+                    self.update_preview(Settings.load())
                 elif event.kind == 'final' and self.transcript:
-                    self.preview_revision += 1
-                    self.preview_snapshot = None
-                    self.translation_preview = ''
-                    self.worker.cancel_preview()
+                    self.clear_preview()
                     self.last_final = event.text
                     self.final_revision += 1
                     self.on_lines(self.transcript.write(event.text, event.end_of_utterance))
                 elif event.kind == 'stopped':
                     try:
+                        self.clear_preview()
                         if self.transcript:
                             self.on_lines(self.transcript.close())
                         self.batcher.flush()
@@ -152,9 +145,46 @@ class Service:
             if settings.translation_enabled:
                 self.batcher.add(line, Config.from_settings(settings), settings.translation_batch_size, settings.translation_batch_timeout)
 
+    def clear_preview(self):
+        """Invalidate an utterance/settings epoch, not every new word."""
+        self.preview_revision += 1
+        self.preview_snapshot = self.preview_context = None
+        if self.preview_timer:
+            self.preview_timer.cancel()
+            self.preview_timer = None
+        self.translation_preview = ''
+        self.worker.cancel_preview()
+
+    def update_preview(self, settings):
+        text = self.capture['partial'].strip()
+        if not (self.capture['active'] and self.transcript and text and settings.translation_enabled
+                and settings.translation_partial and settings.translation_engine == 'chrome'):
+            self.clear_preview()
+            return
+        config = Config.from_settings(settings)
+        context = (self.capture['conversation_id'], config.fingerprint)
+        if context != self.preview_context:
+            self.clear_preview()
+            self.preview_context = context
+        combined = ' '.join(part for part in (self.transcript.pending_text, text) if part)
+        snapshot = (self.capture['conversation_id'], combined, config, self.preview_revision)
+        if snapshot == self.preview_snapshot:
+            return
+        self.preview_snapshot = snapshot
+        # Throttle rather than debounce: continuous speech must still be sent.
+        # Keep the in-flight result; the worker coalesces pending drafts.
+        if self.preview_timer is None:
+            self.preview_timer = self.schedule(300, self.send_preview)
+
     def send_preview(self):
         self.preview_timer = None
         if self.preview_snapshot:
+            settings = Settings.load()
+            context = (self.capture['conversation_id'], Config.from_settings(settings).fingerprint)
+            if not (self.capture['active'] and settings.translation_enabled and settings.translation_partial
+                    and settings.translation_engine == 'chrome' and context == self.preview_context):
+                self.clear_preview()
+                return
             try:
                 self.worker.preview(*self.preview_snapshot)
             except Exception as exc:
@@ -172,9 +202,12 @@ class Service:
                 while True:
                     task, status, value = self.worker.results.get_nowait()
                     with self.lock:
-                        if task.preview and task.revision == self.preview_revision and status == 'done':
+                        current_preview = (task.revision == self.preview_revision
+                            and task.line['conversation_id'] == self.capture['conversation_id']
+                            and self.capture['active'])
+                        if task.preview and current_preview and status == 'done':
                             self.translation_preview = value
-                        if status == 'error':
+                        if status == 'error' and (not task.preview or current_preview):
                             self.capture['error'] = value
             except queue.Empty:
                 pass

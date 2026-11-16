@@ -37,6 +37,7 @@ class TranslationWorker:
         self._keys = set()
         self._preview = None
         self._active = None
+        self._last_was_preview = False
         self._closed = False
         self._paused = False
         self._thread = threading.Thread(target=self._run, name="transcript-translation", daemon=True)
@@ -83,6 +84,8 @@ class TranslationWorker:
 
     def preview(self, conversation_id, text, config, revision):
         config.validate()
+        if config.engine != 'chrome':
+            raise TranslationError('Live preview is only available with Chrome Translator API.')
         with self._condition:
             if not self._closed:
                 if self._paused:
@@ -128,9 +131,13 @@ class TranslationWorker:
                 self._condition.wait_for(lambda: self._closed or self._tasks or self._preview)
                 if self._closed:
                     return
-                task = self._tasks.popleft() if self._tasks else self._preview
+                # Alternate when both queues have work: drafts must not wait for
+                # the entire transcript backlog, and finals must still be saved.
+                use_preview = self._preview is not None and (not self._tasks or not self._last_was_preview)
+                task = self._preview if use_preview else self._tasks.popleft()
                 if task is self._preview:
                     self._preview = None
+                self._last_was_preview = task.preview
                 self._active = task
             status, value = "done", ""
             try:

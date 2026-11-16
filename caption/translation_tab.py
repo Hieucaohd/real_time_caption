@@ -16,10 +16,12 @@ FIELDS = {
     "azure": [("translation_azure_key", "API key", True), ("translation_azure_region", "Region (if required)", False)],
     "google": [("translation_google_key", "API key (Basic v2)", True)],
     "google_web": [],
+    "chrome": [],
     "gemini": [("translation_gemini_key", "API key", True), ("translation_gemini_model", "Model ID", False)],
     "vinai": [],
 }
 NOTES = {
+    "chrome": "On-device Chrome Translator API. Open the web app in Chrome 9222 and initialize the language pair in its Settings first. Live preview translates unfinished speech; finalized translations are saved normally.",
     "azure": "Cloud: sends transcript text to Microsoft. Configure a Translator resource/key and region. Quota depends on your plan.",
     "google": "Cloud: sends text to Google Cloud Translation Basic v2. Enable the API in the project that owns this key. Billing/quota depends on the project.",
     "google_web": "No API key. Open Google Translate in Chrome launched with launch_chrome.bat (port 9222). Reuses one existing Translate tab, types the source text and reads Copy translation. Text is sent to Google; the tab's previous input is replaced. Other tabs and your system clipboard are left alone.",
@@ -67,7 +69,8 @@ class TranslationPanel(ttk.Frame):
         ttk.Checkbutton(bar, text="Auto translate", variable=self.enabled_var, command=self._toggle_enabled).pack(side="left", padx=4)
         options = ttk.Frame(self, padding=(4, 0))
         options.pack(fill="x")
-        ttk.Checkbutton(options, text="Translate provisional speech (extra requests)", variable=self.partial_var, command=self._options_changed).pack(side="left")
+        self.partial_button = ttk.Checkbutton(options, text="Live preview (Chrome only)", variable=self.partial_var, command=self._options_changed)
+        self.partial_button.pack(side="left")
         ttk.Checkbutton(options, text="Follow latest", variable=self.follow_var).pack(side="left", padx=8)
         self.status = tk.StringVar(value="Translation is off. Configure an engine, then enable Auto translate.")
         self.status_label = ttk.Label(self, textvariable=self.status, wraplength=650, foreground="#666666", padding=4)
@@ -193,6 +196,7 @@ class TranslationPanel(ttk.Frame):
             self.config_frame.pack(fill="x", before=self.actions_frame)
 
     def _engine_changed(self):
+        self.partial_button.configure(state='normal' if self.engine() == 'chrome' else 'disabled')
         self.flush_pending()
         self.invalidate_preview()
         for page in self._config_pages.values():
@@ -241,7 +245,7 @@ class TranslationPanel(ttk.Frame):
         self.preview_label.configure(text="")
 
     def on_partial(self, transcript, text):
-        if not text.strip() or not self.enabled_var.get() or not self.partial_var.get():
+        if not text.strip() or not self.enabled_var.get() or not self.partial_var.get() or self.engine() != 'chrome':
             self.invalidate_preview()
             return
         if transcript.conversation_id != self._get_conversation_id():
@@ -259,11 +263,10 @@ class TranslationPanel(ttk.Frame):
             try:
                 cid, latest = self._preview_snapshot
                 self.worker.preview(cid, latest, self.config(), revision)
-                self.preview_label.configure(text="Provisional: translating…")
             except translation.TranslationError as exc:
                 self.status.set(str(exc))
 
-        self._preview_after = self.after(1200, submit)
+        self._preview_after = self.after(300, submit)
 
     def on_lines(self, conversation_id, captured):
         if not captured:

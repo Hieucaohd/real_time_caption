@@ -272,6 +272,12 @@ def create_app(service=None):
         if not 8 <= current.overlay_font_size <= 96 or not 1 <= current.overlay_lines <= 10 or not .1 <= current.overlay_alpha <= 1:
             raise ValueError('Invalid overlay settings.')
         current.save()
+        if values.keys() & {'translation_enabled', 'translation_partial', 'translation_engine',
+                            'translation_source', 'translation_target'}:
+            s = svc(request)
+            with s.lock:
+                s.clear_preview()
+                s.update_preview(current)
         if theme is not None:
             svc(request).store.save_web_theme(theme)
         if values.get('translation_enabled'):
@@ -343,13 +349,7 @@ def create_app(service=None):
         with s.lock:
             s.batcher.clear()
             s.worker.cancel_all()
-            s.worker.cancel_preview()
-            if s.preview_timer:
-                s.preview_timer.cancel()
-                s.preview_timer = None
-            s.preview_snapshot = None
-            s.preview_revision += 1
-            s.translation_preview = ''
+            s.clear_preview()
         settings = Settings.load()
         settings.translation_enabled = False
         settings.save()

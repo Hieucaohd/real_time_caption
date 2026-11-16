@@ -39,6 +39,6 @@ export default function ChromeTranslatorSettings({ source, target }) {
       : "Sau khi khởi tạo, bấm Save rồi bật Auto translate trong tab Translation."}</p>
     {busy && <progress max="100" value={state.progress} aria-label="Tiến trình tải gói ngôn ngữ" />}
     {error && <p role="alert" className="alert">{errors[error] || errors.prepare}</p>}
-    <small>Để cập nhật nhanh: đặt Số câu mỗi nhóm = 1; bật Dịch cả câu đang nói nếu cần bản dịch tạm.</small>
+    <small>Để cập nhật nhanh: đặt Số câu mỗi nhóm = 1; bật Dịch ngay khi đang nói để dịch trước khi hết câu. Bản dịch tạm có thể thay đổi khi có thêm từ.</small>
   </section>;
 }
