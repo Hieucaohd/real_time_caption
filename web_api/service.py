@@ -108,6 +108,8 @@ class Service:
             try:
                 if event.kind in ('ready', 'status'):
                     self.capture['status'] = event.text
+                elif event.kind == 'warning':
+                    self.capture['error'] = event.text
                 elif event.kind == 'error':
                     self.capture['error'] = event.text
                     self.capture['status'] = event.text

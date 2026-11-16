@@ -16,15 +16,20 @@ class FakeControls:
         self.ready = True
         self.ignore_selection = False
         self.mic_calls = 0
+        self.language_reads = 0
+        self.continues = 0
 
-    def languages(self):
+    def languages(self, refresh=False):
+        self.language_reads += 1
         return self.language, self.available
 
     def select_language(self, name):
-        if not self.ignore_selection:
-            self.language = name
+        if self.ignore_selection:
+            raise captions.CaptionsSettingsError('Windows did not select the language')
+        self.language = name
 
     def continue_language(self):
+        self.continues += 1
         return self.ready
 
     def microphone(self, desired=None):
@@ -66,11 +71,15 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
     def test_apply_verifies_persists_and_reapplies_after_reopen(self):
         controls = FakeControls()
         desired = {'microphone': False, 'language': 'Japanese (Japan)'}
+        self.service.capture['error'] = 'Không áp dụng được cài đặt Live Captions: previous menu failure'
         with self.controller(controls):
             response = self.put(desired)
             self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.service.capture['error'], '')
             self.assertTrue(response.json()['ready'])
             self.assertFalse(controls.mic)
+            self.assertEqual(controls.language_reads, 1)
+            self.assertEqual(controls.continues, 1)
             reloaded = ConversationStore(self.service.store.db_path)
             self.assertEqual(reloaded.livecaptions_preferences(), desired)
             controls.language = 'English (United States)'; controls.mic = True
@@ -131,6 +140,30 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
 
 
 class MicrophoneControlTests(unittest.TestCase):
+    def test_same_session_and_language_skip_picker_but_external_change_invalidates_cache(self):
+        windows = captions.WindowsControls(Mock())
+        windows.exists = Mock(return_value=False)
+        windows.language_picker = Mock(side_effect=captions.CaptionsSettingsError('Picker requested'))
+        with patch.object(captions, '_language_cache', (('session1', 'ja-JP'), 'Japanese (Japan)', ['Japanese (Japan)'])):
+            with patch.object(captions, 'language_fingerprint', return_value=('session1', 'ja-JP')):
+                self.assertEqual(windows.languages(), ('Japanese (Japan)', ['Japanese (Japan)']))
+                windows.language_picker.assert_not_called()
+                with self.assertRaises(captions.CaptionsSettingsError):
+                    windows.languages(refresh=True)
+            for fingerprint in (('session2', 'ja-JP'), ('session1', 'en-US'), None):
+                with patch.object(captions, 'language_fingerprint', return_value=fingerprint):
+                    with self.assertRaises(captions.CaptionsSettingsError):
+                        windows.languages()
+
+    def test_menu_invokes_once_and_waits_instead_of_repeated_toggling(self):
+        windows = captions.WindowsControls(Mock())
+        windows.exists = Mock(return_value=False)
+        windows.invoke = Mock()
+        windows.control = Mock(side_effect=[Mock(), captions.CaptionsSettingsError('Menu unavailable')])
+        with self.assertRaises(captions.CaptionsSettingsError):
+            windows.menu()
+        windows.invoke.assert_called_once_with('ButtonControl', 'SettingsButton')
+
     def test_never_blindly_toggles_and_verifies_windows_state(self):
         windows = captions.WindowsControls(Mock())
         mic = Mock(); mic.GetTogglePattern.return_value.ToggleState = 1

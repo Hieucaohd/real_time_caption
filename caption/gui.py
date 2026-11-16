@@ -1212,7 +1212,7 @@ class App:
             self.translation._show_selected()
 
     def _handle(self, tfile: ConversationTranscript, event: Event) -> None:
-        if event.kind == "status":
+        if event.kind in ("status", "warning"):
             self.status_var.set(event.text)
         elif event.kind == "ready":
             self.status_var.set(f"{event.text} — saving to {tfile.path.name}")

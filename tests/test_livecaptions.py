@@ -11,7 +11,52 @@ class _TextControl:
         self.Name = text
 
 
+class UnicodeCaptionTests(unittest.TestCase):
+    def test_distinct_japanese_chinese_and_accented_words_are_not_duplicates(self):
+        for a, b in [('今日は晴れです。', '明日は雨になります。'), ('你好世界', '今天学习数学'), ('má', 'mà')]:
+            self.assertFalse(livecaptions.similar(a, b), (a, b))
+        self.assertTrue(livecaptions.similar('Hello, WORLD!', 'hello world'))
+        self.assertTrue(livecaptions.similar('café', 'cafe\u0301'))
+
+    def test_japanese_rolling_captions_emit_new_lines_once(self):
+        differ = livecaptions.CaptionDiffer()
+        lines = ['今日は晴れです。', '数学について勉強しましょう。', '新しい言葉を覚えます。', '明日は雨になります。']
+        finals = []
+        for index in range(len(lines)):
+            snapshot = '\n'.join(lines[max(0, index - 1):index + 1])
+            new, partial = differ.update(snapshot, flush=True)
+            finals.extend(unit.text for unit in new)
+            self.assertEqual(partial, '')
+            self.assertEqual(differ.update(snapshot, flush=True)[0], [])
+        self.assertEqual(finals, lines)
+
+    def test_scroll_container_supplies_text_when_leaf_empty_or_stale(self):
+        scroll = _TextControl('新しい文章です。')
+        self.assertEqual(livecaptions._CaptionText(_TextControl(''), scroll).Name, scroll.Name)
+        class Stale:
+            @property
+            def Name(self): raise RuntimeError('Element no longer exists')
+        self.assertEqual(livecaptions._CaptionText(Stale(), scroll).Name, scroll.Name)
+        self.assertEqual(livecaptions._CaptionText(scroll, Stale()).Name, scroll.Name)
+        self.assertEqual(livecaptions._CaptionText(Stale(), Stale()).Name, '')
+
+
 class LiveCaptionsReconnectTests(unittest.TestCase):
+    def test_settings_failure_does_not_stop_caption_reader(self):
+        events = []
+        reader = livecaptions.LiveCaptionsReader(events.append)
+        def failed_settings(): raise ValueError('Settings menu unavailable')
+        reader.configure = failed_settings
+        def emit(event):
+            events.append(event)
+            if event.kind == 'final': reader.stop()
+        reader._emit = emit
+        with (patch.object(reader, '_find_text', return_value=_TextControl('字幕は引き続き表示されます。')),
+              patch.object(livecaptions, 'POLL_S', .001), patch.object(livecaptions, 'FLUSH_AFTER_S', .002)):
+            reader._loop(object())
+        self.assertTrue(any(e.kind == 'warning' for e in events))
+        self.assertFalse(any(e.kind == 'error' for e in events))
+        self.assertEqual([e.text for e in events if e.kind == 'final'], ['字幕は引き続き表示されます。'])
     def test_ready_window_without_text_waits_for_first_caption(self) -> None:
         events = []
         reader = livecaptions.LiveCaptionsReader(events.append)

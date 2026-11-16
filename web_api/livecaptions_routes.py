@@ -23,4 +23,10 @@ def inspect(request: Request):
 
 @router.put('/settings')
 def apply(body: Preferences, request: Request):
-    return livecaptions_settings.apply_windows(request.app.state.service.store, body.model_dump(), save=True)
+    service = request.app.state.service
+    result = livecaptions_settings.apply_windows(service.store, body.model_dump(), save=True)
+    if result['ready']:
+        with service.lock:
+            if service.capture['error'].startswith('Không áp dụng được cài đặt Live Captions:'):
+                service.capture['error'] = ''
+    return result

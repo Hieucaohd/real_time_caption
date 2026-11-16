@@ -9,6 +9,21 @@ import time
 from .shared_access import ProcessLock
 
 WINDOW_CLASS = 'LiveCaptionsDesktopWindow'
+# Read-only session/language fingerprint invalidates this cache after an external
+# language change or Windows restart. Unknown Windows versions simply bypass it.
+_language_cache = None
+
+
+def language_fingerprint():
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\LiveCaptions') as key:
+            session = winreg.QueryValueEx(key, 'AppSessionId')[0]
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\LiveCaptions\UI') as key:
+            language = winreg.QueryValueEx(key, 'CaptionLanguage')[0]
+        return session, language
+    except (ImportError, OSError):
+        return None
 
 
 class CaptionsSettingsError(ValueError):
@@ -19,6 +34,7 @@ class WindowsControls:
     def __init__(self, auto):
         self.auto = auto
         self.window = auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS)
+        self.selection = None
 
     def control(self, kind, identity, timeout=3):
         control = getattr(self.window, kind)(AutomationId=identity)
@@ -35,19 +51,19 @@ class WindowsControls:
             subprocess.Popen([os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'LiveCaptions.exe')])
         if not self.window.Exists(15):
             raise CaptionsSettingsError('Không mở được Windows Live Captions. Hãy thử Win + Ctrl + L.')
+        # XAML flyouts dismiss immediately when their owning window is inactive.
+        # Activate once for the whole operation; restore the caller in finally.
+        self.window.SetActive(waitTime=.2)
 
     def invoke(self, kind, identity):
         self.control(kind, identity).GetInvokePattern().Invoke()
         time.sleep(.25)  # XAML menus animate asynchronously after Invoke returns.
 
     def menu(self):
-        for _ in range(3):
-            if self.exists('MenuItemControl', 'PreferencesButton'):
-                return
+        if not self.exists('MenuItemControl', 'PreferencesButton'):
+            self.control('ButtonControl', 'SettingsButton').SetFocus()
             self.invoke('ButtonControl', 'SettingsButton')
-            if self.window.MenuItemControl(AutomationId='PreferencesButton').Exists(1):
-                return
-        self.control('MenuItemControl', 'PreferencesButton')
+        self.control('MenuItemControl', 'PreferencesButton', timeout=5)
 
     def dismiss_menu(self):
         if self.exists('MenuItemControl', 'PreferencesButton'):
@@ -66,10 +82,11 @@ class WindowsControls:
             raise CaptionsSettingsError('Không đọc được trạng thái micro của Live Captions.')
         if desired is not None and bool(current) != desired:
             pattern.Toggle()
-            time.sleep(.3)
-            # Reopen the menu if toggling dismissed it, then verify actual state.
-            self.menu()
-            self.control('MenuItemControl', 'PreferencesButton').GetExpandCollapsePattern().Expand()
+            # TogglePattern normally keeps the menu alive; read it in place.
+            time.sleep(.25)
+            if not self.exists('MenuItemControl', 'MicrophoneMenuFlyoutItem'):
+                self.menu()
+                self.control('MenuItemControl', 'PreferencesButton').GetExpandCollapsePattern().Expand()
             current = self.control('MenuItemControl', 'MicrophoneMenuFlyoutItem').GetTogglePattern().ToggleState
             if current != int(desired):
                 raise CaptionsSettingsError('Windows chưa áp dụng tùy chọn micro. Hãy kiểm tra quyền truy cập micro.')
@@ -86,7 +103,11 @@ class WindowsControls:
     def items(combo):
         return [item for item in combo.GetChildren() if item.ControlTypeName == 'ListItemControl']
 
-    def languages(self):
+    def languages(self, refresh=False):
+        fingerprint = language_fingerprint()
+        if not refresh and fingerprint and _language_cache and _language_cache[0] == fingerprint:
+            if not self.exists('ComboBoxControl', 'SpeechModelDropDown'):
+                return _language_cache[1], list(_language_cache[2])
         combo = self.language_picker()
         current = next((item.Name for item in self.items(combo) if item.GetSelectionItemPattern().IsSelected), '')
         combo.GetExpandCollapsePattern().Expand()
@@ -95,31 +116,45 @@ class WindowsControls:
         combo.GetExpandCollapsePattern().Collapse()
         if not current or not names:
             raise CaptionsSettingsError('Không đọc được danh sách ngôn ngữ Live Captions.')
+        self.selection = (current, names)
         return current, names
 
     def select_language(self, name):
         combo = self.language_picker()
         combo.GetExpandCollapsePattern().Expand()
         time.sleep(.25)
-        item = next((item for item in self.items(combo) if item.Name == name), None)
+        items = self.items(combo)
+        item = next((item for item in items if item.Name == name), None)
         if item is None:
             combo.GetExpandCollapsePattern().Collapse()
             raise CaptionsSettingsError('Ngôn ngữ đã chọn không có trên Windows này. Hãy tải lại danh sách.')
         item.GetSelectionItemPattern().Select()
+        if not item.GetSelectionItemPattern().IsSelected:
+            raise CaptionsSettingsError('Windows chưa chọn ngôn ngữ được yêu cầu.')
+        self.selection = (name, list(dict.fromkeys(item.Name for item in items)))
         combo.GetExpandCollapsePattern().Collapse()
 
     def continue_language(self):
+        global _language_cache
+        if not self.exists('ComboBoxControl', 'SpeechModelDropDown'):
+            return self.caption_ready()
         self.invoke('ButtonControl', 'ContinueButton')
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             # Ready/caption controls only reappear after the chosen model is ready.
-            if (not self.exists('ComboBoxControl', 'SpeechModelDropDown') and
-                    (self.exists('TextControl', 'ReadyToCaptionTextBlock') or
-                     self.exists('PaneControl', 'CaptionsScrollViewer'))):
+            if self.caption_ready():
+                fingerprint = language_fingerprint()
+                if self.selection and fingerprint:
+                    _language_cache = (fingerprint, *self.selection)
                 time.sleep(.5)
                 return True
             time.sleep(.2)
         return False
+
+    def caption_ready(self):
+        return (not self.exists('ComboBoxControl', 'SpeechModelDropDown') and
+                (self.exists('TextControl', 'ReadyToCaptionTextBlock') or
+                 self.exists('PaneControl', 'CaptionsScrollViewer')))
 
 
 @contextmanager
@@ -151,7 +186,7 @@ def windows_controls(db_path):
 
 def inspect(controls):
     microphone = controls.microphone()
-    language, languages = controls.languages()
+    language, languages = controls.languages(refresh=True)
     ready = controls.continue_language()
     return dict(microphone=microphone, language=language, languages=languages,
                 ready=ready, status='applied' if ready else 'setup_required')
@@ -167,13 +202,10 @@ def apply(controls, preferences):
         controls.select_language(target)
     if not controls.continue_language():
         return dict(language=target, languages=languages, microphone=None, ready=False, status='setup_required')
-    # Read the selected language back from Windows; do not trust a successful click alone.
-    actual, languages = controls.languages()
-    ready = controls.continue_language()
-    if actual != target or not ready:
-        raise CaptionsSettingsError('Chưa xác nhận được ngôn ngữ Live Captions đã áp dụng.')
+    # SelectionItem confirms the choice before Continue; readiness confirms the
+    # transition. Reopening Change language here resets captioning a second time.
     microphone = controls.microphone(preferences['microphone'])
-    return dict(language=actual, languages=languages, microphone=microphone, ready=True, status='applied')
+    return dict(language=target, languages=languages, microphone=microphone, ready=True, status='applied')
 
 
 def read_windows(store):

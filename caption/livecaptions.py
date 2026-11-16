@@ -20,6 +20,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Callable
 
@@ -59,14 +60,16 @@ def split_units(text: str) -> list[Unit]:
 
 
 def _key(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    # Preserve every writing system; ASCII-only keys collapse Japanese/Chinese
+    # sentences to the same empty string and silently discard the transcript.
+    return re.sub(r"[\W_]+", " ", unicodedata.normalize('NFKC', text).casefold()).strip()
 
 
 def similar(a: str, b: str, truncated: bool = False) -> bool:
     """Fuzzy sentence equality. ``truncated``: ``a`` may be ``b`` with its start cut off."""
     ka, kb = _key(a), _key(b)
     if not ka or not kb:
-        return ka == kb
+        return a.strip() == b.strip()
     if ka == kb or (truncated and kb.endswith(ka)):
         return True
     return difflib.SequenceMatcher(None, ka, kb).ratio() >= 0.85
@@ -122,6 +125,24 @@ class CaptionDiffer:
         return None
 
 
+class _CaptionText:
+    """Windows sometimes exposes captions on the scroll container, not its leaf."""
+    def __init__(self, text, scroll):
+        self.text, self.scroll = text, scroll
+
+    @property
+    def Name(self):
+        for control in (self.scroll, self.text):
+            if control is not None:
+                try:
+                    value = control.Name
+                    if value:
+                        return value
+                except Exception:
+                    pass  # Settings can recreate either accessible element.
+        return ''
+
+
 class LiveCaptionsReader:
     """Polls the Live Captions window on a background thread and emits :class:`Event` s."""
 
@@ -175,7 +196,10 @@ class LiveCaptionsReader:
                 if self._stop.is_set() or time.monotonic() > deadline:
                     return None
         text = window.TextControl(AutomationId=TEXT_ID)
-        return text if text.Exists(0.2) else None
+        scroll = window.PaneControl(AutomationId='CaptionsScrollViewer')
+        text = text if text.Exists(0.2) else None
+        scroll = scroll if scroll.Exists(0.2) else None
+        return _CaptionText(text, scroll) if text is not None or scroll is not None else None
 
     def _window_exists(self, auto) -> bool:
         return auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS).Exists(0.5)
@@ -183,7 +207,13 @@ class LiveCaptionsReader:
     def _loop(self, auto) -> None:
         if self.configure:
             self._emit(Event('status', 'Applying Windows Live Captions settings…'))
-            self.configure()
+            try:
+                self.configure()
+            except Exception as exc:
+                # A settings/menu failure must not disable the independent text reader.
+                log.warning('Could not apply Live Captions settings; continuing to read', exc_info=True)
+                self._emit(Event('warning', f'Không áp dụng được cài đặt Live Captions: {exc}. '
+                                           'App vẫn đọc phụ đề theo cấu hình hiện tại của Windows.'))
         text_ctrl = self._find_text(auto, launch=True)
         if self._stop.is_set():
             return
