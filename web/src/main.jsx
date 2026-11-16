@@ -177,6 +177,8 @@ function App() {
     chatEnd = useRef(null),
     fileInput = useRef(null),
     chatScroll = useRef(null);
+  const translationLinesScroll = useRef(null), translationHistoryScroll = useRef(null);
+  const [translationFollowOverride, setTranslationFollowOverride] = useState(null);
   const messageInput = useRef(null);
   useLayoutEffect(() => {
     const area = messageInput.current;
@@ -217,6 +219,21 @@ function App() {
         (tab === "vocab" && j.kind === "voca-save")),
   );
   const messages = detail?.messages || [];
+  const translationFollow = translationFollowOverride ?? settings.translation_auto_scroll ?? true;
+  const latestTranslationLine = detail?.lines?.findLast((line) => line.last_state?.endsWith(": done"))?.id
+    || detail?.lines?.at(-1)?.id;
+  const lastTranslationSource = detail?.lines?.at(-1)?.id;
+  useLayoutEffect(() => {
+    if (tab !== "translation" || !translationFollow) return;
+    if (latestTranslationLine) setLineId(latestTranslationLine);
+    const list = translationLinesScroll.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [tab, cid, translationFollow, latestTranslationLine, lastTranslationSource]);
+  useLayoutEffect(() => {
+    if (tab !== "translation" || !translationFollow) return;
+    const panel = translationHistoryScroll.current;
+    if (panel) panel.scrollTop = panel.scrollHeight;
+  }, [tab, translationFollow, history, boot?.translation_preview]);
 
   function choose(id) {
     setCid(id);
@@ -290,10 +307,15 @@ function App() {
     if (tab === "chat") chatEnd.current?.scrollIntoView({ block: "end" });
   }, [messages.length, busyJob?.kind === "chat" ? busyJob.partial : "", tab]);
   useEffect(() => {
+    setHistory([]);
+  }, [lineId]);
+  useEffect(() => {
     if (!lineId) return;
+    let live = true;
     api("/translation/" + lineId + "/history")
-      .then(setHistory)
-      .catch((e) => setError(e.message));
+      .then((value) => { if (live) setHistory(value); })
+      .catch((e) => { if (live) setError(e.message); });
+    return () => { live = false; };
   }, [lineId, detail?.lines?.find((l) => l.id === lineId)?.last_state]);
   useEffect(() => {
     if (notice) {
@@ -1191,6 +1213,16 @@ function App() {
                         action(() => changeSettings({ translation_enabled: v }))
                       }
                     />
+                    <Toggle
+                      label="Tự cuộn xuống cuối"
+                      checked={translationFollow}
+                      onChange={async (v) => {
+                        setTranslationFollowOverride(v);
+                        try { await changeSettings({ translation_auto_scroll: v }); }
+                        catch (e) { setError(e.message); }
+                        finally { setTranslationFollowOverride(null); }
+                      }}
+                    />
                     <Button
                       icon={Settings2}
                       onClick={() => setSettingsOpen(true)}
@@ -1213,7 +1245,7 @@ function App() {
                   </div>
                 </div>
                 <div className="translation-grid">
-                  <div className="translation-lines scroll">
+                  <div className="translation-lines scroll" ref={translationLinesScroll}>
                     {!detail?.lines.length && (
                       <Empty
                         icon={Languages}
@@ -1236,7 +1268,7 @@ function App() {
                       </button>
                     ))}
                   </div>
-                  <div className="translation-history scroll">
+                  <div className="translation-history scroll" ref={translationHistoryScroll}>
                     <h3>Lịch sử bản dịch</h3>
                     {lineId ? (
                       <>

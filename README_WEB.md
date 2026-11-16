@@ -45,6 +45,8 @@ Log build: `build\web-exe\build.log`; báo cáo kiểm tra: `build\web-exe\selft
 - **Summary:** tab Chrome và cài đặt riêng, chọn prompt/version, bật/tắt transcript, tạo chat mới, xem lịch sử và xuất kết quả.
 - **Translation:** Azure, Google API, Chrome Translator API (trên máy), Gemini, Google Translate web, VinAI offline; tự dịch câu đã chốt, tùy chọn dịch tạm, nhóm câu, dịch phần còn thiếu hoặc câu được chọn, Stop/Retry, lịch sử theo engine, kiểm tra cấu hình và tải model offline. VinAI cần `requirements-translation.txt`, giống native.
 
+Trong tab **Translation**, bật **Tự cuộn xuống cuối** để theo dõi realtime: danh sách câu cuộn xuống cuối và tự chọn câu mới nhất đã dịch xong; phần bản dịch cuộn theo kết quả/preview mới. Tắt tùy chọn để giữ câu đang chọn và đọc lại phía trên. Lựa chọn được lưu trong cài đặt và giữ sau khi F5.
+
 ### Chrome Translator API
 
 Mở app bằng `launch_chrome.bat`. Trong **Settings → Translation**, chọn **Chrome Translator API (trên máy)**, chọn ngôn ngữ nguồn/đích, rồi bấm **Tải / khởi tạo gói ngôn ngữ**. Chờ báo **Sẵn sàng**, bấm **Save settings**, sau đó bật **Auto translate** trong tab Translation. Đặt số câu mỗi nhóm bằng 1 để dịch ngay khi câu được chốt; bật dịch preview nếu muốn dịch cả câu đang nói.
