@@ -39,3 +39,10 @@ export function readingMarkRange(root, mark) {
   }
   return null;
 }
+
+export function scrollToReadingMark(root, mark) {
+  const range = readingMarkRange(root, mark);
+  const pane = root?.closest(".research-reading");
+  if (!range || !pane?.clientHeight) return;
+  pane.scrollTop += range.getBoundingClientRect().top - pane.getBoundingClientRect().top - 20;
+}

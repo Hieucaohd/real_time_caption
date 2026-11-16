@@ -21,7 +21,7 @@ import "./research.css";
 import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
 import ResponseSource from "./ResponseSource";
-import { selectedReadingMark, readingMarkRange } from "./readingMark";
+import { selectedReadingMark, readingMarkRange, scrollToReadingMark } from "./readingMark";
 
 const labels = {
   done: "Đã trả lời",
@@ -72,6 +72,8 @@ export default function ResearchTab({
   const [nodes, setNodes] = useState([]),
     [selected, setSelected] = useState(() => readSaved(storageKey, ""));
   const selectedRef = useRef(selected);
+  const [openRevision, setOpenRevision] = useState(0);
+  const scrolledOpening = useRef("");
   selectedRef.current = selected;
   const [detail, setDetail] = useState(null),
     [error, setError] = useState(""),
@@ -112,6 +114,7 @@ export default function ResearchTab({
   function select(id, all = nodes) {
     selectedRef.current = id;
     setSelected(id);
+    setOpenRevision((value) => value + 1);
     localStorage.setItem(storageKey, JSON.stringify(id));
     setMenu(null);
   }
@@ -308,6 +311,25 @@ export default function ResearchTab({
     else CSS.highlights.delete("rtc-reading-mark");
     return () => CSS.highlights.delete("rtc-reading-mark");
   }, [reading?.id, reading?.answer, reading?.reading_mark]);
+  useEffect(() => {
+    if (!reading || reading.status !== "done") return;
+    const opening = `${cid}:${reading.id}:${openRevision}`;
+    if (scrolledOpening.current === opening) return;
+    let cancelled = false;
+    let frame = requestAnimationFrame(() => {
+      // Math/web fonts can change the mark's position just after a reload.
+      document.fonts.ready.then(() => {
+        if (cancelled) return;
+        frame = requestAnimationFrame(() => {
+          if (!answer.current?.closest(".research-reading")?.clientHeight) return;
+          scrolledOpening.current = opening;
+          scrollToReadingMark(answer.current, reading.reading_mark);
+        });
+      });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+  }, [cid, openRevision, reading?.id, reading?.status, reading?.answer, reading?.reading_mark,
+      graphExpanded, readerExpanded, readingFocus]);
 
   return (
     <section className="research">
@@ -625,11 +647,7 @@ export default function ResearchTab({
                         <Highlighter size={14} />Đánh dấu
                       </button>
                       {reading.reading_mark && <>
-                        <button onClick={() => {
-                          const range = readingMarkRange(answer.current, reading.reading_mark);
-                          const pane = answer.current?.closest(".research-reading");
-                          if (range && pane) pane.scrollTop += range.getBoundingClientRect().top - pane.getBoundingClientRect().top - 20;
-                        }}>Tới dấu</button>
+                        <button onClick={() => scrollToReadingMark(answer.current, reading.reading_mark)}>Tới dấu</button>
                         <button disabled={savingMark} onClick={() => saveReadingMark(true)}>Bỏ dấu</button>
                       </>}
                     </>

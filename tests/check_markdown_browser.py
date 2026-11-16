@@ -254,6 +254,31 @@ def main():
             expect(page.locator('.research-notice')).to_contain_text('Đã tô vàng')
             page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1 && [...CSS.highlights.get('rtc-reading-mark')][0].toString().includes('công thức khối')")
             page.get_by_role('button', name='Tới dấu', exact=True).click()
+            # Reopening a marked node scrolls its reader, but polling never pulls the reader back.
+            branch.locator('.response-code-block code').first.evaluate('el=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)}')
+            page.get_by_role('button', name='Đánh dấu', exact=True).click()
+            page.wait_for_function("[...CSS.highlights.get('rtc-reading-mark')][0].toString().includes('def square')")
+            page.get_by_label('Tìm node', exact=True).fill('Child mark test')
+            page.locator('.research-search-results button').first.click()
+            expect(branch).to_have_text('A different answer')
+            page.locator('.research-breadcrumb').get_by_role('button', name='Gốc', exact=True).click()
+            at_mark = """() => {
+                const range = [...(CSS.highlights.get('rtc-reading-mark') || [])][0];
+                const pane = document.querySelector('.research-reading');
+                if (!range || !range.toString().includes('def square') || !pane || pane.scrollTop <= 0) return false;
+                const rect = range.getBoundingClientRect(), viewport = pane.getBoundingClientRect();
+                return rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+            }"""
+            page.wait_for_function(at_mark)
+            pane = page.locator('.research-reading')
+            pane.evaluate('el=>el.scrollTop=0')
+            page.wait_for_timeout(1500)
+            assert pane.evaluate('el=>el.scrollTop') == 0
+            page.locator(f'[data-node-id="{root["id"]}"] .research-node').click()
+            page.wait_for_function(at_mark)
+            page.reload()
+            page.locator('nav button').nth(2).click()
+            page.wait_for_function(at_mark)
             page.get_by_role('button', name='Bỏ dấu', exact=True).click()
             expect(page.get_by_role('button', name='Bỏ dấu', exact=True)).to_have_count(0)
             assert not page.evaluate("CSS.highlights.has('rtc-reading-mark')")

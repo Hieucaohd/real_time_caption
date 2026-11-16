@@ -80,6 +80,7 @@ Khi đọc câu trả lời, web và native cùng chuẩn hóa các dấu escape
 Đồ thị hỗ trợ kéo/thả và điều hướng theo các thao tác quen thuộc của [draw.io](https://www.drawio.com/docs/reference/shortcuts/modifier-shortcuts-in-diagrams/):
 
 - **Kéo node** để đổi vị trí; bấm node để đọc. Kéo chỉ đổi bố cục, không đổi quan hệ cha–con hay ngữ cảnh câu hỏi.
+- Khi mở node có dấu đọc, khung câu trả lời tự cuộn tới đoạn tô vàng. Bấm lại node đang đọc cũng đưa bạn về dấu đó; cập nhật trạng thái định kỳ không kéo vị trí cuộn khi bạn đang đọc tiếp.
 - **Kéo nền**, **Space + kéo**, **chuột giữa** hoặc **chuột phải + kéo** để di chuyển khung nhìn tự do. Công cụ bàn tay (**H**) cho phép kéo khung nhìn ngay trên node; **V** quay về công cụ chọn/kéo node.
 - **Shift/Ctrl + bấm** để chọn nhiều node; **Shift + kéo nền** để khoanh vùng chọn. Kéo một node được chọn để di chuyển cả nhóm. Bật **Kéo cả nhánh** để các node con, kể cả đang thu gọn, đi theo.
 - **Lăn chuột** zoom tại con trỏ; **Alt + lăn** di chuyển, **Shift + lăn** di chuyển ngang. Với trackpad, tắt **Lăn để zoom** để cuộn khung nhìn; **Ctrl + lăn** vẫn zoom.
