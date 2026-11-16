@@ -51,14 +51,17 @@ function ImageAttachment({ file, url, onOpen, onRemove, disabled }) {
   </div>;
 }
 
-export default function AttachmentList({ files, cid, onRemove, disabled = false, className = "composer-files" }) {
+export default function AttachmentList({ files, cid, onRemove, disabled = false, className = "composer-files", getUrl }) {
   const [preview, setPreview] = useState(null);
   const shown = preview && cid === preview.cid && files.find((file) => file.path === preview.path);
   return <>
     <div className={className}>
       {files.map((file) => {
-        const url = fileUrl(cid, file.path);
-        const image = file.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg|ico)$/i.test(file.path);
+        const url = getUrl ? getUrl(file) : fileUrl(cid, file.path);
+        const image = file.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg|ico)$/i.test(file.name || file.path);
+        if (file.available === false) return <span className="attachment-file" key={file.path}>
+          <Paperclip size={14} />{file.name} — Không còn file đã lưu
+        </span>;
         return image ? <ImageAttachment key={file.path} file={file} url={url} disabled={disabled}
           onOpen={() => setPreview({ path: file.path, cid })}
           onRemove={onRemove ? () => onRemove(file) : undefined} />
@@ -69,6 +72,7 @@ export default function AttachmentList({ files, cid, onRemove, disabled = false,
           </span>;
       })}
     </div>
-    {shown && <ImageViewer key={cid + shown.path} file={shown} url={fileUrl(cid, shown.path)} close={() => setPreview(null)} />}
+    {shown && shown.available !== false && <ImageViewer key={cid + shown.path} file={shown}
+      url={getUrl ? getUrl(shown) : fileUrl(cid, shown.path)} close={() => setPreview(null)} />}
   </>;
 }

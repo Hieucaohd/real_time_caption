@@ -22,6 +22,7 @@ import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
 import ResponseSource from "./ResponseSource";
 import BranchMarks from "./BranchMarks";
+import AttachmentList from "./AttachmentList";
 import { selectedReadingMark, readingMarkRange, scrollToReadingMark } from "./readingMark";
 
 const labels = {
@@ -559,6 +560,11 @@ export default function ResearchTab({
                   <div className="research-question">
                     <small>CÂU HỎI</small>
                     <h3>{reading.question}</h3>
+                    {!!reading.attachments?.length && <div className="research-attachments">
+                      <small>ĐÍNH KÈM KHI HỎI ({reading.attachments.length})</small>
+                      <AttachmentList key={reading.id} files={reading.attachments} cid={cid} className="attachments"
+                        getUrl={(file) => `/api${base}/${reading.id}/attachments/${file.position}`} />
+                    </div>}
                   </div>
                   {reading.excerpt && (
                     <details className="research-excerpt">

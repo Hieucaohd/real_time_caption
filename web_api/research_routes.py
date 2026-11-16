@@ -1,6 +1,9 @@
 from typing import Annotated, Literal
+import mimetypes
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from .server_math import browser_markdown
@@ -140,7 +143,17 @@ def node(cid: str, nid: str, request: Request):
             result.update(partial=job['partial'], detail=job['detail'])
     result['markdown'] = browser_markdown(result['answer'])
     result['branch_marks'] = manager.store.branch_marks(cid, nid)
+    from .research_attachments import list_attachments
+    result['attachments'] = list_attachments(manager.service, cid, nid)
     return result
+
+
+@router.get('/{nid}/attachments/{position}')
+def attachment(cid: str, nid: str, position: int, request: Request):
+    from .research_attachments import read_attachment
+    name, content = read_attachment(research(request, cid).service, cid, nid, position)
+    return Response(content, media_type=mimetypes.guess_type(name)[0] or 'application/octet-stream',
+                    headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(name, safe='')})
 
 @router.put('/{nid}/reading-mark')
 def save_reading_mark(cid: str, nid: str, body: ReadingMarkInput, request: Request):

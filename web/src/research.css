@@ -333,6 +333,10 @@
   margin: 0 0 8px;
   overflow-wrap: anywhere;
 }
+.research-attachments { margin: 10px 0 14px; }
+.research-attachments > small { display: block; margin-bottom: 8px; }
+.research-attachments .attachments { max-height: 240px; overflow-y: auto; }
+.research-attachments .attachment-file { overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .research-node[data-hidden="true"] { opacity: .5; border-style: dashed; }
 .research-show-hidden { font-size: 12px; margin-left: auto; white-space: nowrap; }
 .research-reader-head .inline { flex-wrap: wrap; }
