@@ -32,10 +32,12 @@ export default function BranchComposer({
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tabAction, setTabAction] = useState("");
-  const branching = !!tabAction;
+  const [resolvingTab, setResolvingTab] = useState(false);
+  const tabResolution = useRef(0);
+  const branching = !!tabAction || resolvingTab;
   const tabMode = config.tab_mode;
   const automaticTab = tabMode !== "existing";
-  const [preparedMode, setPreparedMode] = useState("existing");
+  const [preparedMode, setPreparedMode] = useState("");
   const [openedTab, setOpenedTab] = useState(null);
   const [tabNotice, setTabNotice] = useState("");
   const branchingRef = useRef(false);
@@ -59,6 +61,7 @@ export default function BranchComposer({
     questions.length > 0 &&
     questions.length <= 20 &&
     !!config.selected_tab &&
+    !!preparedMode &&
     (!automaticTab || (preparedMode === tabMode && (tabMode !== "branch" || hasSource))) &&
     !sending &&
     !saving &&
@@ -66,28 +69,33 @@ export default function BranchComposer({
     !uploads;
   useEffect(() => {
     area.current?.focus();
-    let active = true;
-    // Refresh once per opening, including branches created from selected text.
-    scanTabs()
-      .then((failure) => {
-        if (active && failure) setError(failure);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      });
-    return () => {
-      active = false;
-    };
   }, []);
 
   useEffect(() => {
-    setPreparedMode("existing");
+    setPreparedMode("");
     setTabNotice("");
     if (automaticTab) {
-      setPreparedMode("");
       openChatGPTTab(tabMode, true);
-    }
+    } else refreshExistingTabs();
+    return () => { tabResolution.current += 1; };
   }, [tabMode]);
+
+  async function refreshExistingTabs() {
+    const revision = ++tabResolution.current;
+    setResolvingTab(true);
+    setPreparedMode("");
+    setConfig(old => ({ ...old, selected_tab: "" }));
+    setError("");
+    try {
+      const result = await scanTabs({ ensure: true });
+      if (revision !== tabResolution.current) return;
+      if (!Array.isArray(result)) throw new Error(result || "Không lấy được danh sách tab ChatGPT.");
+      setOpenedTab(null);
+      setConfig(old => ({ ...old, selected_tab: result[0].key }));
+      setPreparedMode("existing");
+    } catch (e) { if (revision === tabResolution.current) setError(e.message); }
+    finally { if (revision === tabResolution.current) setResolvingTab(false); }
+  }
 
   async function saveSettings() {
     if (savingRef.current || sendingRef.current || branchingRef.current) return;
@@ -248,7 +256,7 @@ export default function BranchComposer({
                 {label}
               </label>)}
               <p className="muted">Chỉ chọn một chế độ. Khi bật hoặc mở lại hộp tạo node con với chế độ đã lưu,
-                app tự mở và chọn tab mới. Bỏ cả hai để chọn tab thủ công.</p>
+                app tự mở và chọn tab mới. Bỏ cả hai để tự chọn tab ChatGPT đầu tiên; nếu chưa có, app mở một tab mới.</p>
               {automaticTab && preparedMode !== tabMode && !branching && (tabMode !== "branch" || hasSource) &&
                 <button type="button" disabled={sending || saving} onClick={() => openChatGPTTab(tabMode, true)}>Thử tạo tab lại</button>}
             </div>
@@ -271,9 +279,10 @@ export default function BranchComposer({
               onChange={(patch) => setConfig((old) => ({ ...old, ...patch }))}
               tabs={availableTabs}
               scanTabs={async () => {
+                if (!automaticTab) return refreshExistingTabs();
                 setError("");
                 const failure = await scanTabs();
-                if (failure) setError(failure);
+                if (typeof failure === "string") setError(failure);
               }}
               loadingTabs={loadingTabs}
               prompts={prompts}

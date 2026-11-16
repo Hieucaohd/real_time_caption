@@ -225,14 +225,14 @@ def main():
             dialog.get_by_role('button', name='Xếp hàng 2 nhánh', exact=True).click()
             expect(dialog).to_have_count(0)
             assert len(store.list(fixture.cid)) == 4
-            # A full reload restores DB defaults, without carrying over the old draft/assets.
+            # Reload restores prompt defaults and selects the first current tab, not the saved target.
             page.reload()
             page.locator('nav button').nth(2).click()
             page.get_by_label('Tìm node', exact=True).fill('Question')
             page.locator('.research-search-results button').first.click()
             page.get_by_label('Tìm node', exact=True).fill('')
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
-            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
+            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('existing')
             expect(page.get_by_label('research Prompt', exact=True)).to_have_value('v2 - Composer test')
             expect(question).to_have_value('')
             expect(dialog.locator('.composer-files')).to_be_empty()
@@ -241,7 +241,7 @@ def main():
             tabs.append({'key':'another-tab', 'title':'Opened since last branch'})
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             expect(page.get_by_label('research ChatGPT tab', exact=True).locator('option')).to_have_count(4)
-            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('new-tab')
+            expect(page.get_by_label('research ChatGPT tab', exact=True)).to_have_value('existing')
             expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
             dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
             # Manage a subtree with a grandchild, preserving siblings and the source Chat.

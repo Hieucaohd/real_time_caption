@@ -7,6 +7,7 @@ import AttachmentList from "./AttachmentList";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
+import { createChatGPTTabLoader } from "./chatGPTTabs";
 import {
   AudioLines,
   Plus,
@@ -149,6 +150,10 @@ function App() {
     [readingFocus, setReadingFocus] = useState(false);
   const [chromeTabs, setChromeTabs] = useState([]),
     [loadingTabs, setLoadingTabs] = useState(false);
+  const tabLoader = useRef(null), tabLoads = useRef(0), chatPreparation = useRef(0);
+  if (!tabLoader.current) tabLoader.current = createChatGPTTabLoader(api, post);
+  const [chatSelectedTab, setChatSelectedTab] = useState("");
+  const [preparingChatTab, setPreparingChatTab] = useState(false);
   const [message, setMessage] = useState(""),
     [files, setFiles] = useState([]),
     [uploading, setUploading] = useState(false);
@@ -255,6 +260,11 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
+    if (tab !== "chat" || !boot || !cid) return;
+    prepareChatTab();
+    return () => { chatPreparation.current += 1; };
+  }, [tab, cid, !!boot]);
+  useEffect(() => {
     if (follow && tab === "transcript")
       transcriptEnd.current?.scrollIntoView({ block: "end" });
   }, [detail?.transcript, boot?.capture?.partial, tab]);
@@ -333,16 +343,34 @@ function App() {
     } catch (e) { setError(e.message); }
     finally { transferRef.current = false; setTransferring(""); }
   }
-  async function scanTabs() {
+  async function scanTabs({ ensure = false } = {}) {
+    tabLoads.current += 1;
     setLoadingTabs(true);
     try {
-      setChromeTabs(await api("/chrome-tabs"));
+      const tabs = await tabLoader.current({ ensure });
+      setChromeTabs(tabs);
+      return tabs;
     } catch (e) {
       setError(e.message);
       return e.message;
     } finally {
-      setLoadingTabs(false);
+      tabLoads.current -= 1;
+      setLoadingTabs(tabLoads.current > 0);
     }
+  }
+  async function prepareChatTab() {
+    const revision = ++chatPreparation.current;
+    setPreparingChatTab(true);
+    setChatSelectedTab("");
+    try {
+      const tabs = await scanTabs({ ensure: true });
+      if (revision !== chatPreparation.current) return;
+      if (!Array.isArray(tabs)) return; // scanTabs already displays the connection error.
+      const key = tabs[0].key;
+      setChatSelectedTab(key);
+      await changeSettings({ chatgpt_selected_tab: key });
+    } catch (e) { setError(e.message); }
+    finally { if (revision === chatPreparation.current) setPreparingChatTab(false); }
   }
   async function copy(text) {
     try {
@@ -394,10 +422,12 @@ function App() {
     }
   }
   async function submit(kind) {
+    if (kind === "chat" && (preparingChatTab || !chatSelectedTab)) return;
     const payload = { kind };
     if (kind === "chat")
       Object.assign(payload, {
         message,
+        selected_tab: chatSelectedTab,
         attach_transcript: attach,
         new_chat: newChat,
         files: files.map((f) => f.path),
@@ -456,7 +486,7 @@ function App() {
       return (
         <ChatOptions
           value={{
-            selected_tab: settings.chatgpt_selected_tab,
+            selected_tab: chatSelectedTab,
             prompt: settings.chat_prompt,
             power: settings.chat_chatgpt_power,
             max_lines: settings.chat_max_lines,
@@ -466,6 +496,11 @@ function App() {
             new_chat: newChat,
           }}
           onChange={(patch) => {
+            if ("selected_tab" in patch) {
+              chatPreparation.current += 1;
+              setChatSelectedTab(patch.selected_tab);
+              setPreparingChatTab(false);
+            }
             if ("attach_transcript" in patch)
               setAttach(patch.attach_transcript);
             else if ("new_chat" in patch) setNewChat(patch.new_chat);
@@ -488,8 +523,9 @@ function App() {
             }
           }}
           tabs={chromeTabs}
-          scanTabs={scanTabs}
+          scanTabs={prepareChatTab}
           loadingTabs={loadingTabs}
+          tabDisabled={preparingChatTab}
           prompts={boot.prompts.chat || []}
           editPrompt={() => setPromptKind("chat")}
         />
@@ -927,15 +963,15 @@ function App() {
                     <span
                       title={
                         chromeTabs.find(
-                          (t) => t.key === settings.chatgpt_selected_tab,
+                          (t) => t.key === chatSelectedTab,
                         )?.title
                       }
                     >
                       {chromeTabs.find(
-                        (t) => t.key === settings.chatgpt_selected_tab,
+                        (t) => t.key === chatSelectedTab,
                       )?.title ||
-                        (settings.chatgpt_selected_tab
-                          ? "Tab ChatGPT đã lưu"
+                        (preparingChatTab
+                          ? "Đang chọn tab ChatGPT…"
                           : "Chọn tab ChatGPT")}
                     </span>
                     <span
@@ -1058,7 +1094,7 @@ function App() {
                     <Button
                       className="primary"
                       icon={Send}
-                      disabled={!message.trim() || !!busyJob || uploading}
+                      disabled={!message.trim() || !!busyJob || uploading || preparingChatTab || !chatSelectedTab}
                       onClick={() => submit("chat")}
                     >
                       {uploading ? "Uploading…" : "Send"}
