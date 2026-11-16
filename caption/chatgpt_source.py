@@ -62,18 +62,18 @@ def conversation_path(mapping, key):
 def response_message_at_position(snapshot, position):
     """Resolve the user's ordinal on the conversation's active history path."""
     if type(position) is not int or position < 1:
-        raise ValueError('Cần link hội thoại và số thứ tự câu trả lời từ 1 để tạo nhánh ChatGPT.')
+        raise ValueError('Cần link hội thoại và số thứ tự câu trả lời từ 1 để xác định response ChatGPT.')
     if not isinstance(snapshot, dict):
-        raise ValueError('Không lấy được lịch sử đầy đủ của hội thoại ChatGPT. Chưa tạo nhánh.')
+        raise ValueError('Không lấy được lịch sử đầy đủ của hội thoại ChatGPT.')
     path = conversation_path(snapshot.get('mapping'), snapshot.get('current_node'))
     if path is None:
-        raise ValueError('Không lấy được lịch sử đầy đủ của hội thoại ChatGPT. Chưa tạo nhánh.')
+        raise ValueError('Không lấy được lịch sử đầy đủ của hội thoại ChatGPT.')
     answers = [message for message in path if is_answer(message)]
     if position > len(answers):
-        raise ValueError(f'Hội thoại có {len(answers)} câu trả lời; không có câu trả lời thứ {position}. Hãy cập nhật nguồn của node cha.')
+        raise ValueError(f'Hội thoại có {len(answers)} câu trả lời; không có câu trả lời thứ {position}. Hãy cập nhật nguồn của node.')
     message_id = answers[position - 1].get('id')
     if not message_id:
-        raise ValueError('Không xác định được response để tạo nhánh ChatGPT.')
+        raise ValueError('Không xác định được response ChatGPT.')
     return message_id
 
 

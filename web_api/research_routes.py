@@ -155,6 +155,15 @@ def create_chatgpt_branch(cid: str, nid: str, request: Request):
     return research(request, cid).create_chatgpt_branch(cid, nid)
 
 
+@router.post('/{nid}/open-chatgpt')
+def open_chatgpt_response(cid: str, nid: str, request: Request):
+    from caption.chatgpt_navigation import open_response
+    node = research(request, cid).store.get(cid, nid)
+    if node['status'] != 'done':
+        raise ValueError('Chờ câu trả lời hoàn tất trước khi mở nguồn ChatGPT.')
+    return open_response(node['response_conversation_url'], node['response_position'])
+
+
 @router.patch('/{nid}')
 def update(cid: str, nid: str, body: NodePatch, request: Request):
     store = research(request, cid).store

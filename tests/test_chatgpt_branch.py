@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from caption import chatgpt, chatgpt_branch
+from caption import chatgpt, chatgpt_branch, chatgpt_navigation
 from caption.chatgpt_source import response_message_at_position
 from test_chatgpt_source import conversation_mapping
 
@@ -135,7 +135,7 @@ class NativeBranchUITests(unittest.TestCase):
         elif path.startswith('/native-ui-branch?'):
             self.visits.append(path)
             route.fulfill(content_type='text/html', body=SOURCE_HTML + '<script>branch(new URL(location).searchParams.get("message"));</script>')
-        elif path == '/g/project/c/source':
+        elif path.split('?')[0] == '/g/project/c/source':
             route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};window.localBranch={str(self.local_branch).lower()};window.discardBranchBody={str(self.discard_body).lower()};</script>')
         elif path in ('/', '/g/project/c/created', '/g/project/c/local-chatgpt%3Adraft-id', '/c/unrelated'):
             self.visits.append(path)
@@ -201,6 +201,37 @@ class NativeBranchUITests(unittest.TestCase):
         self.assertEqual(selected.url, tab.url)
         self.assertEqual(len(self.context.pages), 2)
         self.assertEqual(self.requests, [])
+
+    def test_open_saved_response_scrolls_virtual_history_without_branching(self):
+        url = 'https://chatgpt.com/g/project/c/source?keep=yes#saved'
+        before_scroll = self.original.locator('#scroll').evaluate('el => el.scrollTop')
+        result = chatgpt_navigation._open_response_in_browser(self.browser, url, 2)
+        self.assertEqual(result['url'], url)
+        self.assertEqual(result['response_position'], 2)
+        opened, created = chatgpt._selected_chatgpt_tab(self.browser, result['key'])
+        self.assertFalse(created)
+        self.assertNotEqual(opened, self.original)
+        self.assertEqual(len(self.context.pages), 2)
+        self.assertEqual(opened.evaluate('window.branchClicks'), 0)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.original.locator('#scroll').evaluate('el => el.scrollTop'), before_scroll)
+        self.assertTrue(opened.locator('[data-message-id="a2"]').evaluate('''el => {
+            const a=el.getBoundingClientRect(), b=document.querySelector('#scroll').getBoundingClientRect();
+            return a.top >= b.top && a.bottom <= b.bottom;
+        }'''))
+
+    def test_open_response_reports_missing_ordinal_and_keeps_new_tab(self):
+        with self.assertRaises(chatgpt.ChatGPTError):
+            chatgpt_navigation._open_response_in_browser(self.browser, self.original.url, 99)
+        self.assertEqual(len(self.context.pages), 2)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.original.url, 'https://chatgpt.com/g/project/c/source')
+
+    def test_open_response_validates_source_before_opening_a_tab(self):
+        for url, position in [('https://example.org/c/source', 2), (self.original.url, 0), ('', None)]:
+            with self.assertRaises(ValueError):
+                chatgpt_navigation._open_response_in_browser(self.browser, url, position)
+        self.assertEqual(len(self.context.pages), 1)
 
     def test_request_lock_is_per_real_target_and_released_after_failure(self):
         from caption import paths

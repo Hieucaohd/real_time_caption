@@ -15,6 +15,7 @@ import {
   EyeOff,
   Trash2,
   Highlighter,
+  ExternalLink,
 } from "lucide-react";
 import "./research.css";
 import ResearchGraph from "./ResearchGraph";
@@ -79,6 +80,8 @@ export default function ResearchTab({
   const [showHidden, setShowHidden] = useState(false);
   const [changingBranch, setChangingBranch] = useState(false);
   const [savingMark, setSavingMark] = useState(false);
+  const [openingNode, setOpeningNode] = useState("");
+  const openingRef = useRef(false);
   const [graphExpanded, setGraphExpanded] = useState(false);
   const [readerExpanded, setReaderExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
@@ -193,6 +196,22 @@ export default function ResearchTab({
       await refresh();
     } catch (e) {
       setError(e.message);
+    }
+  }
+  async function openChatGPT(node) {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpeningNode(node.id);
+    setError("");
+    setNotice("");
+    try {
+      const result = await post(base + "/" + node.id + "/open-chatgpt", {});
+      setNotice(`Đã mở ChatGPT và cuộn tới câu trả lời thứ ${result.response_position}.`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      openingRef.current = false;
+      setOpeningNode("");
     }
   }
   async function changeBranch(node, operation) {
@@ -415,6 +434,8 @@ export default function ResearchTab({
                 setGraphExpanded(false);
               }}
               statusOf={statusOf}
+              onOpenChatGPT={openChatGPT}
+              openingNode={openingNode}
               api={api}
               base={base}
               expanded={graphExpanded}
@@ -439,6 +460,14 @@ export default function ResearchTab({
                     {statusOf(reading)}{reading.hidden ? " · Đã ẩn" : ""}
                   </span>
                   <div className="inline">
+                    <button onClick={() => openChatGPT(reading)}
+                      disabled={!!openingNode || reading.status !== "done" || !reading.response_conversation_url || !reading.response_position}
+                      title={reading.response_conversation_url && reading.response_position
+                        ? `Mở tab mới và cuộn tới câu trả lời thứ ${reading.response_position}`
+                        : "Bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT"}>
+                      {openingNode === reading.id ? <LoaderCircle className="spin" size={13} /> : <ExternalLink size={13} />}
+                      {openingNode === reading.id ? "Đang mở…" : "Mở trên ChatGPT"}
+                    </button>
                     <button disabled={changingBranch} onClick={() => changeBranch(reading, reading.hidden ? "show" : "hide")}
                       title="Áp dụng cho node này và toàn bộ node con">
                       {reading.hidden ? <Eye size={13} /> : <EyeOff size={13} />}

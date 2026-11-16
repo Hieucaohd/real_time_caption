@@ -40,6 +40,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Mỗi node có biểu tượng **Mở trên ChatGPT** ở góc phải; nút có chữ cũng nằm trên khung đọc. App mở một tab Chrome 9222 mới bằng link đã lưu, lấy lịch sử hội thoại để xác định câu trả lời theo số thứ tự rồi cuộn tới đúng response, kể cả khi câu trả lời cũ chưa được tải vào màn hình. Node thiếu link hoặc số thứ tự cần **Cập nhật nguồn** trước. Nếu không xác định được response, app báo lỗi và giữ tab mới để bạn kiểm tra; thao tác này không gửi câu hỏi hay tạo nhánh ChatGPT.
+
 Trong cài đặt **Tạo nhánh con**, nút **Mở tab ChatGPT mới** mở sẵn `https://chatgpt.com/` trong Chrome 9222, refresh danh sách và tự chọn tab mới. Nút dùng được cả khi node cha chưa có nguồn ChatGPT. Câu hỏi đang soạn và các file đã đính kèm được giữ nguyên; bấm **Xếp hàng** khi muốn gửi.
 
 Trong **Tạo nhánh con**, bật **Đính kèm ngữ cảnh tổ tiên** và chọn **Lấy ngữ cảnh ngược tới**: chỉ cha, tới ông/bà, cụ, một tổ tiên cụ thể (hiện tên node), hoặc toàn bộ về node gốc. App đính kèm `research-ancestors.md` chứa đầy đủ các cặp câu hỏi–câu trả lời trên đúng đường dẫn đó, theo thứ tự cũ → mới; không lấy nhánh anh em. Mặc định tùy chọn này tắt. **Lưu cài đặt** ghi nhớ độ sâu cho lần sau. Khi xếp hàng, lựa chọn, danh sách node và nội dung file được chụp lại trong SQLite, nên retry vẫn dùng ngữ cảnh ban đầu dù node tổ tiên đã được sửa hoặc file cache mất. Tùy chọn này độc lập với **Đính kèm lịch sử chat**.

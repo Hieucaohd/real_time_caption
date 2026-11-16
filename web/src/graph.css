@@ -118,6 +118,20 @@
 }
 .graph-canvas .research-node {
   cursor: move;
+  padding-right: 34px;
+}
+.graph-canvas .research-open-chatgpt {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 4px;
+  background: #333e4a;
+  color: #dce5ef;
+  border-color: #586675;
+  cursor: pointer;
+}
+.graph-canvas .research-open-chatgpt:hover:not(:disabled) {
+  background: #48566a;
 }
 .graph-canvas .research-node.selected {
   border-color: #a0a5b3;

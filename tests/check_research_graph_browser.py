@@ -28,6 +28,7 @@ def main():
     for child in children: store.update(fixture.cid, child['id'], status='done', answer='A complete explanation.')
     c = fixture.service.research.children(fixture.cid, a, {'questions':['A deeper example'], 'config':{'selected_tab':'test'}})[0]['id']
     store.update(fixture.cid, c, status='done', answer='A concrete example.')
+    store.update_response_source(fixture.cid, {'response_conversation_url':'https://chatgpt.com/c/source', 'response_position':2}, nid=root['id'])
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
     deadline=time.monotonic()+10
@@ -40,6 +41,14 @@ def main():
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width':1600,'height':1050})
             errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+            opened=[]
+            def open_response(route):
+                opened.append(route.request.url)
+                if len(opened) == 2:
+                    route.fulfill(status=400, json={'detail':'Response unavailable'})
+                else:
+                    route.fulfill(json={'key':'opened-tab', 'response_position':2})
+            page.route('**/research/*/open-chatgpt', open_response)
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(2).click()
             canvas=page.locator('.graph-canvas')
@@ -57,6 +66,18 @@ def main():
             def close(actual,expected,tolerance=.02):assert abs(actual-expected)<=tolerance,(actual,expected)
             def fit():page.get_by_title('Vừa khung',exact=True).click()
             saved()
+
+            # The graph icon opens its own source without moving/selecting the node.
+            expect(node(a).get_by_role('button',name='Mở trên ChatGPT: Limits',exact=True)).to_be_disabled()
+            before_open=xy(root['id'])
+            node(root['id']).get_by_role('button',name='Mở trên ChatGPT: Explore calculus',exact=True).click()
+            expect(page.locator('.research-notice')).to_contain_text('câu trả lời thứ 2')
+            assert xy(root['id']) == before_open
+            assert len(opened) == 1 and root['id'] in opened[0]
+            page.get_by_role('button',name='Mở trên ChatGPT',exact=True).click()
+            expect(page.get_by_text('Response unavailable',exact=True)).to_be_visible()
+            expect(page.get_by_role('button',name='Mở trên ChatGPT',exact=True)).to_be_enabled()
+            assert len(opened) == 2
 
             # Unbounded panning with each supported mouse/keyboard gesture.
             for button,hold in [('left',False),('middle',False),('right',False),('left',True)]:

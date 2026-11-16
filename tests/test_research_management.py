@@ -217,6 +217,28 @@ class ResearchManagementTests(unittest.TestCase):
             self.assertEqual(self.post(endpoint).status_code, 400)
             self.assertFalse(self.service.busy)
 
+    def test_open_response_uses_saved_source_and_does_not_change_node_or_busy_work(self):
+        url = 'https://chatgpt.com/g/project/c/source?keep=yes#saved'
+        nid = self.root_node['id']
+        endpoint = self.base + '/' + nid + '/open-chatgpt'
+        self.assertEqual(self.post(endpoint).status_code, 400)  # No saved source.
+        self.store.update_response_source(self.cid, {'response_conversation_url': url, 'response_position': 3}, nid=nid)
+        before = self.store.get(self.cid, nid)
+        self.service.busy = True
+        other = self.post('/api/conversations', {'title': 'Other'}).json()['id']
+        with patch('caption.chatgpt_navigation.open_response', return_value={'key': 'new', 'url': url, 'response_position': 3}) as opened:
+            self.assertEqual(self.client.post(endpoint).status_code, 403)
+            self.assertEqual(self.post(endpoint.replace(self.cid, other)).status_code, 404)
+            child = self.child()[0]
+            self.assertEqual(self.post(self.base + '/' + child['id'] + '/open-chatgpt').status_code, 400)
+            opened.assert_not_called()
+            result = self.post(endpoint)
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['response_position'], 3)
+            opened.assert_called_once_with(url, 3)
+        self.assertTrue(self.service.busy)
+        self.assertEqual(self.store.get(self.cid, nid), before)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronDown,
   LoaderCircle,
+  ExternalLink,
 } from "lucide-react";
 import {
   WIDTH,
@@ -67,6 +68,8 @@ export default function ResearchGraph({
   rootId,
   selected,
   onSelect,
+  onOpenChatGPT,
+  openingNode,
   statusOf,
   api,
   base,
@@ -870,6 +873,15 @@ export default function ResearchGraph({
                         )}
                         {statusOf(n)}
                       </span>
+                    </button>
+                    <button data-graph-control className="research-open-chatgpt"
+                      aria-label={"Mở trên ChatGPT: " + n.title}
+                      title={n.response_conversation_url && n.response_position
+                        ? `Mở ChatGPT · câu trả lời thứ ${n.response_position}`
+                        : "Bổ sung link và số thứ tự trong Nguồn ChatGPT của node"}
+                      disabled={!!openingNode || n.status !== "done" || !n.response_conversation_url || !n.response_position}
+                      onClick={() => onOpenChatGPT(n)}>
+                      {openingNode === n.id ? <LoaderCircle className="spin" size={13} /> : <ExternalLink size={13} />}
                     </button>
                     {parentsWithChildren.has(n.id) && (
                       <button

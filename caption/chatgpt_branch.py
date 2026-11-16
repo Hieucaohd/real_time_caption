@@ -68,7 +68,7 @@ def _find_response_turn(page, snapshot, message_id):
                 return turn
         page.evaluate(SCROLL_TOWARD_RESPONSE, {'ranks': ranks, 'target': ranks[message_id]})
         page.wait_for_timeout(200)
-    raise chatgpt.ChatGPTError('Không tìm thấy câu trả lời đã lưu trên giao diện ChatGPT. Chưa bấm tạo nhánh.')
+    raise chatgpt.ChatGPTError('Không tìm thấy câu trả lời đã lưu trên giao diện ChatGPT.')
 
 
 def _branch_menu_item(page, turn):
@@ -110,7 +110,7 @@ def source_conversation_id(url, position):
     if (parsed.scheme != 'https' or parsed.hostname not in ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com')
             or parsed.username or parsed.password or parsed.port not in (None, 443) or not match
             or type(position) is not int or position < 1):
-        raise ValueError('Hãy cập nhật link hội thoại ChatGPT và số thứ tự câu trả lời ở Nguồn ChatGPT của node cha.')
+        raise ValueError('Hãy cập nhật link hội thoại ChatGPT và số thứ tự câu trả lời ở Nguồn ChatGPT của node.')
     return match[1]
 
 
