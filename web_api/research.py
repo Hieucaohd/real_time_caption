@@ -98,7 +98,7 @@ class Research:
                     excerpt=payload.get('excerpt', ''), config=config,
                     request=dict(prompt=prompt, attachments=attachments,
                                  ancestor_ids=[node['id'] for node in ancestors])))
-            return self.store.add_children(cid, parent, prepared)
+            return self.store.add_children(cid, parent, prepared, parent_reading_mark=payload.get('parent_reading_mark'))
 
     def create_chatgpt_branch(self, cid, nid):
         from caption.chatgpt_branch import create_branch, source_conversation_id

@@ -241,9 +241,10 @@ export default function ResearchTab({
     });
     setChangingBranch(false);
   }
-  async function createDraft(excerpt = "") {
-    if (detail?.status !== "done") return;
-    if (excerpt.length > 20000) {
+  async function createDraft(excerpt = "", mark = selectedReadingMark(answer.current)) {
+    if (detail?.status !== "done" || detail.id !== selectedRef.current) return;
+    if (mark && !excerpt) excerpt = mark.text.trim();
+    if (excerpt.length > 20000 || (mark && mark.text.length > 20000)) {
       setMenu(null);
       setError("Chọn một đoạn ngắn hơn 20.000 ký tự để tạo nhánh.");
       return;
@@ -257,6 +258,7 @@ export default function ResearchTab({
         parent: detail,
         ancestors: pathTo(nodes, detail.id),
         excerpt,
+        parent_reading_mark: mark,
         question: excerpt,
         config: { ...currentDefaults(), ...saved },
       });
@@ -296,6 +298,7 @@ export default function ResearchTab({
       x: Math.max(8, Math.min(e.clientX, window.innerWidth - 282)),
       y: Math.max(8, Math.min(e.clientY, window.innerHeight - 118)),
       excerpt,
+      mark: selectedReadingMark(answer.current),
     });
   }
   const reading = detail?.id === selected && (showHidden || !detail.hidden) ? detail : null;
@@ -601,7 +604,7 @@ export default function ResearchTab({
                 <div className="research-reader-actions">
                   {reading.status === "done" ? (
                     <>
-                      <button className="primary" onClick={() => createDraft()}>
+                      <button className="primary" onMouseDown={(e) => e.preventDefault()} onClick={() => createDraft()}>
                         <Plus size={15} />
                         Tạo nhánh con
                       </button>
@@ -667,7 +670,7 @@ export default function ResearchTab({
           <button
             ref={contextButton}
             role="menuitem"
-            onClick={() => createDraft(menu.excerpt)}
+            onClick={() => createDraft(menu.excerpt, menu.mark)}
           >
             <GitBranch size={16} />
             Tạo nhánh từ đoạn đã chọn
@@ -691,8 +694,9 @@ export default function ResearchTab({
           cid={cid}
           close={() => setDraft(null)}
           created={async (children) => {
+            window.getSelection()?.removeAllRanges();
             setDraft(null);
-            setNotice(`Đã xếp hàng ${children.length} nhánh`);
+            setNotice(`Đã xếp hàng ${children.length} nhánh${draft.parent_reading_mark ? " và tô vàng đoạn đã chọn ở node cha" : ""}.`);
             await refresh();
           }}
         />

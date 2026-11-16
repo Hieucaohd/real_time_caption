@@ -313,7 +313,7 @@ class ResearchStore:
             db.execute('DELETE FROM research_assets WHERE NOT EXISTS (SELECT 1 FROM research_node_assets n WHERE n.asset_id=research_assets.id)')
         return dict(ids=sorted(ids))
 
-    def add_children(self, cid, parent, children):
+    def add_children(self, cid, parent, children, parent_reading_mark=None):
         with self.conversations._connect() as db:
             db.execute('BEGIN IMMEDIATE')
             parent = self.row(db.execute('SELECT * FROM research_nodes WHERE id=? AND conversation_id=?', (parent['id'], cid)).fetchone())
@@ -328,6 +328,9 @@ class ResearchStore:
                 self._archive_assets(db, child['id'], child['request'], known_assets)
                 if parent['hidden']:
                     db.execute('UPDATE research_nodes SET hidden=1 WHERE id=?', (child['id'],))
+            if parent_reading_mark is not None:
+                db.execute('UPDATE research_nodes SET reading_mark=?, updated_at=? WHERE id=? AND conversation_id=?',
+                           (json.dumps(parent_reading_mark, ensure_ascii=False), now(), parent['id'], cid))
         return [self.get(cid, child['id']) for child in children]
 
     def progress(self, cid, nid, **values):

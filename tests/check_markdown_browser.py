@@ -177,6 +177,30 @@ def main():
             assert saved_mark and 'Ý tưởng chính' in saved_mark['text']
             assert page.evaluate("[...CSS.highlights.get('rtc-reading-mark')][0].toString()") == saved_mark['text']
             assert root['answer'] == ANSWER
+            # Selection is captured before the context menu/composer takes focus.
+            def branch_from_heading():
+                branch.locator('h2').first.evaluate('el=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)}')
+                branch.locator('h2').first.click(button='right')
+                page.get_by_role('menuitem', name='Tạo nhánh từ đoạn đã chọn', exact=True).click()
+            branch_from_heading()
+            mark_dialog = page.locator('.branch-composer')
+            expect(mark_dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value(branch.locator('h2').first.inner_text())
+            mark_dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            assert fixture.service.research.store.get(fixture.cid, root['id'])['reading_mark'] == saved_mark
+            branch_from_heading()
+            mark_dialog.get_by_role('button', name='Mở tab ChatGPT mới', exact=True).click()
+            expect(mark_dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-empty-tab')
+            mark_dialog.get_by_label('Auto screenshot', exact=True).uncheck()
+            mark_dialog.get_by_label('Đính kèm transcript', exact=True).uncheck()
+            mark_dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Explain selected heading')
+            mark_dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True).click()
+            expect(mark_dialog).to_have_count(0)
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1 && [...CSS.highlights.get('rtc-reading-mark')][0].toString() === document.querySelector('.research-answer h2').textContent")
+            saved_mark = fixture.service.research.store.get(fixture.cid, root['id'])['reading_mark']
+            assert saved_mark['text'] == branch.locator('h2').first.inner_text()
+            auto_child = next(n for n in fixture.service.research.store.list(fixture.cid) if n['question'] == 'Explain selected heading')
+            assert auto_child['excerpt'] == saved_mark['text']
+            assert auto_child['reading_mark'] is None
             child = fixture.service.research.children(fixture.cid, root['id'],
                 {'questions': ['Child mark test'], 'config': {'selected_tab': 'fake-tab'}})[0]
             fixture.service.research.store.update(fixture.cid, child['id'], status='done', answer='A different answer')

@@ -28,13 +28,6 @@ class BranchConfig(BaseModel):
     new_chat: bool | None = None
 
 
-class ChildrenInput(BaseModel):
-    questions: list[Question] = Field(min_length=1, max_length=20)
-    excerpt: str = Field(default='', max_length=20_000)
-    config: BranchConfig = Field(default_factory=BranchConfig)
-    files: list[str] = Field(default_factory=list, max_length=20)
-
-
 @preferences_router.get('/defaults')
 def defaults(request: Request):
     return request.app.state.service.research.store.defaults()
@@ -79,6 +72,20 @@ class ReadingMark(BaseModel):
 class ReadingMarkInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mark: ReadingMark | None
+
+
+class ChildrenInput(BaseModel):
+    questions: list[Question] = Field(min_length=1, max_length=20)
+    excerpt: str = Field(default='', max_length=20_000)
+    config: BranchConfig = Field(default_factory=BranchConfig)
+    files: list[str] = Field(default_factory=list, max_length=20)
+    parent_reading_mark: ReadingMark | None = None
+
+    @model_validator(mode='after')
+    def mark_matches_excerpt(self):
+        if self.parent_reading_mark and self.parent_reading_mark.text.strip() != self.excerpt.strip():
+            raise ValueError('Đoạn đánh dấu phải khớp đoạn trích tạo nhánh.')
+        return self
 
 
 class GraphCamera(BaseModel):

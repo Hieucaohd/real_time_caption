@@ -173,6 +173,7 @@ export default function BranchComposer({
         {
           questions,
           excerpt: draft.excerpt,
+          parent_reading_mark: draft.parent_reading_mark,
           config,
           files: files.map((f) => f.path),
         },
