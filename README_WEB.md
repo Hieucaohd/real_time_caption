@@ -38,6 +38,8 @@ Log build: `build\web-exe\build.log`; báo cáo kiểm tra: `build\web-exe\selft
 
 Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chrome nếu cửa sổ đang ở phía trước là tab Real-time Caption. Khi đã đính kèm ảnh, ảnh đó được ưu tiên. Nút Screenshot dùng bộ chọn màn hình/cửa sổ của Chrome để bạn chọn nội dung muốn gửi.
 
+Ảnh dán bằng Ctrl+V, chọn từ thiết bị hoặc chụp bằng **Screenshot** hiện ảnh thu nhỏ trong Chat và hộp **Tạo nhánh con** sau khi tải lên. Bấm ảnh để xem lớn, chọn **Kích thước gốc** để đọc chi tiết hoặc **Vừa khung** để xem toàn ảnh. Đóng bằng **Esc** hoặc nút **×**; câu hỏi và file đang đính kèm được giữ nguyên. Mỗi ảnh có nút **×** riêng để bỏ trước khi gửi. Ảnh trong lịch sử Chat cũng có thể bấm để xem lớn và tải xuống.
+
 ## Nghiên cứu theo nhánh
 
 Các đoạn dùng để tạo node con có **dấu nhánh màu xanh, gạch chân** riêng với dấu đọc màu vàng. Di chuột lên đoạn để xem tên node con, hoặc mở **Các đoạn đã tạo nhánh** dưới câu trả lời để xem danh sách. Một đoạn tạo nhiều node sẽ liệt kê đủ các node; nhiều đoạn được giữ đồng thời. Dấu nhánh chỉ để xem, không có thao tác sửa/xóa riêng và không dùng làm vị trí tự cuộn. Bỏ/đổi dấu đọc không xóa dấu nhánh. Vị trí trích dẫn lưu ở từng node con trong SQLite; tên/ẩn/xóa node con tự cập nhật danh sách. Nhánh cũ chỉ có đoạn trích sẽ tô xanh khi tìm được duy nhất một vị trí khớp; nếu trùng nhiều chỗ thì chỉ hiện trong danh sách để tránh đánh dấu nhầm.

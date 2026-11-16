@@ -1,0 +1,75 @@
+.attachment-card {
+  position: relative;
+  flex: 0 0 112px;
+  width: 112px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+.attachment-card .attachment-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 84px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-raised, #f0f5f1);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.attachment-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.attachment-card .attachment-name {
+  display: block;
+  font-size: 10px;
+  padding-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-card .attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface, #fff);
+}
+.attachment-card .attachment-preview-error { display: grid; justify-items: center; gap: 4px; font-size: 10px; }
+.attachment-file { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.composer-files { max-height: 230px; overflow-y: auto; }
+.image-viewer {
+  width: calc(100vw - 32px);
+  height: calc(100dvh - 32px);
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #182b22);
+}
+.image-viewer[open] { display: flex; flex-direction: column; }
+.image-viewer::backdrop { background: #000b; }
+.image-viewer-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.image-viewer-header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-viewer-header button, .image-viewer-header a { flex-shrink: 0; }
+.image-viewer-stage { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; align-items: center; justify-content: center; }
+.image-viewer-stage img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.image-viewer-stage.actual-size { display: block; }
+.image-viewer-stage.actual-size img { max-width: none; max-height: none; margin: auto; }
+@media (max-width: 500px) {
+  .image-viewer { width: calc(100vw - 12px); height: calc(100dvh - 12px); }
+  .image-viewer-header { flex-wrap: wrap; }
+  .image-viewer-header strong { flex-basis: 100%; }
+}

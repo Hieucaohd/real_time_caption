@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import Md from "./MarkdownResponse";
 import ResearchTab from "./ResearchTab";
 import ResponseSource from "./ResponseSource";
+import AttachmentList from "./AttachmentList";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import {
@@ -321,7 +322,7 @@ function App() {
         const body = new FormData();
         body.append("file", file);
         const result = await post("/conversations/" + target + "/files", body);
-        if (cidRef.current === target) setFiles((old) => [...old, result]);
+        if (cidRef.current === target) setFiles((old) => [...old, { ...result, type: file.type }]);
       }
     } catch (e) {
       setError(e.message);
@@ -940,22 +941,8 @@ function App() {
                   <div ref={chatEnd} />
                 </div>
                 <div className="composer chat-composer">
-                  <div className="composer-files">
-                    {files.map((f) => (
-                      <span key={f.path}>
-                        {f.name}
-                        <button
-                          onClick={() =>
-                            setFiles((old) =>
-                              old.filter((x) => x.path !== f.path),
-                            )
-                          }
-                        >
-                          <X size={13} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
+                  <AttachmentList files={files} cid={cid}
+                    onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />
                   <textarea
                     ref={messageInput}
                     rows={1}
@@ -1440,27 +1427,8 @@ function Attachments({ message, cid }) {
     ...(message.files || []),
     ...(message.attachment ? [message.attachment] : []),
   ];
-  return (
-    <div className="attachments">
-      {files.map((p, i) => {
-        const url =
-          "/api/conversations/" +
-          cid +
-          "/files/" +
-          p.replaceAll("\\", "/").split("/").map(encodeURIComponent).join("/");
-        return (
-          <a key={i} href={url} download>
-            {/\.(png|jpe?g|webp)$/i.test(p) && (
-              <img src={url} alt="Attachment" />
-            )}
-            <span>
-              <Paperclip size={13} /> {p.split(/[\\/]/).at(-1)}
-            </span>
-          </a>
-        );
-      })}
-    </div>
-  );
+  return <AttachmentList cid={cid} className="attachments"
+    files={[...new Set(files)].map((path) => ({ path, name: path.split(/[\\/]/).at(-1) }))} />;
 }
 
 function SettingsModal({ settings, boot, close, save, run, canRun }) {

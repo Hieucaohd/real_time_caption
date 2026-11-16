@@ -1,5 +1,6 @@
 """Real Chrome composer checks against temporary data; never sends to ChatGPT."""
 import json
+from io import BytesIO
 import re
 from pathlib import Path
 import sys
@@ -9,6 +10,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from playwright.sync_api import sync_playwright, expect
+from PIL import Image
 from test_web_api import WebApiTests
 from web_api.server import create_app
 from caption.settings import Settings
@@ -19,7 +21,11 @@ def main():
     fixture.service.busy = True
     settings = Settings.load(); settings.chatgpt_selected_tab = 'existing'; settings.chat_chatgpt_power = 2; settings.save()
     store = fixture.service.research.store
-    fixture.service.store.add_message(fixture.cid, 'user', 'You', 'Question')
+    image_data = BytesIO()
+    Image.new('RGB', (2400, 1600), '#247b59').save(image_data, format='PNG')
+    saved_image = fixture.service.store.get(fixture.cid).folder / 'saved-image.png'
+    saved_image.write_bytes(image_data.getvalue())
+    fixture.service.store.add_message(fixture.cid, 'user', 'You', 'Question', attachment=saved_image)
     mid = fixture.service.store.add_message(fixture.cid, 'bot', 'ChatGPT', 'An explanation of limits.')
     root = store.import_answer(fixture.cid, mid)
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
@@ -38,6 +44,43 @@ def main():
             page.route('**/api/chrome-tabs', lambda route: route.fulfill(json=tabs))
             page.goto(f'http://127.0.0.1:{port}')
             page.locator('nav button').nth(1).click()
+            # Saved chat images and new device uploads share the same full-size viewer.
+            viewer = page.get_by_role('dialog', name='Xem ảnh đính kèm', exact=True)
+            page.locator('.attachments .attachment-preview').click()
+            expect(viewer).to_be_visible()
+            page.wait_for_function("document.querySelector('.image-viewer img')?.naturalWidth === 2400")
+            dimensions = viewer.locator('img').evaluate('el => ({width: el.width, height: el.height})')
+            assert dimensions['width'] < 1440 and dimensions['height'] < 1000, dimensions
+            viewer.get_by_role('button', name='Kích thước gốc', exact=True).click()
+            assert viewer.locator('img').evaluate('el => el.width') == 2400
+            viewer.get_by_role('button', name='Vừa khung', exact=True).click()
+            page.keyboard.press('Escape')
+            expect(viewer).to_have_count(0)
+            chat_question = page.locator('.composer textarea')
+            chat_question.fill('Keep chat draft')
+            page.locator('input[type=file]').set_input_files([
+                {'name': 'chosen image.png', 'mimeType': 'image/png', 'buffer': image_data.getvalue()},
+                {'name': 'notes.txt', 'mimeType': 'text/plain', 'buffer': b'context'},
+            ])
+            expect(page.locator('.composer-files .attachment-card')).to_have_count(1)
+            expect(page.locator('.composer-files')).to_contain_text('notes.txt')
+            page.locator('.composer-files .attachment-preview').click()
+            expect(viewer).to_be_visible()
+            # The overlay stays usable in dark mode and on a narrow viewport.
+            page.evaluate("document.documentElement.dataset.theme = 'dark'")
+            page.set_viewport_size({'width': 390, 'height': 760})
+            bounds = viewer.bounding_box()
+            assert bounds['x'] >= 0 and bounds['width'] <= 390, bounds
+            expect(viewer.get_by_role('button', name='Đóng xem ảnh', exact=True)).to_be_in_viewport()
+            viewer.get_by_role('button', name='Đóng xem ảnh', exact=True).click()
+            page.set_viewport_size({'width': 1440, 'height': 1000})
+            page.evaluate("document.documentElement.dataset.theme = 'light'")
+            expect(chat_question).to_have_value('Keep chat draft')
+            page.get_by_role('button', name=re.compile(r'^Bỏ .*chosen image\.png$')).click()
+            expect(page.locator('.composer-files')).to_contain_text('notes.txt')
+            page.get_by_role('button', name=re.compile(r'^Bỏ .*notes\.txt$')).click()
+            expect(page.locator('.composer-files')).to_be_empty()
+            assert len(fixture.service.store.messages(fixture.cid)) == 2
             page.locator('.chat-settings > summary').click()
             chat_prompts = page.get_by_label('chat Prompt', exact=True).locator('option').all_text_contents()
             expect(page.get_by_label('chat Power', exact=True)).to_have_value('2')
@@ -79,6 +122,14 @@ def main():
               el.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, clipboardData:transfer}));
             }''')
             expect(dialog.locator('.composer-files')).to_contain_text('pasted.png')
+            dialog.locator('.attachment-preview').click()
+            expect(viewer).to_be_visible()
+            page.wait_for_function("document.querySelector('.image-viewer img')?.naturalWidth === 8")
+            page.keyboard.press('Escape')
+            expect(viewer).to_have_count(0)
+            expect(dialog).to_be_visible()
+            expect(question).to_have_value('Keep this draft')
+            assert len(store.list(fixture.cid)) == 1
             # Exercise screenshot selection without displaying the OS picker.
             page.evaluate('''() => {
               navigator.mediaDevices.getDisplayMedia = async () => {
@@ -90,8 +141,24 @@ def main():
             }''')
             dialog.get_by_role('button', name='Screenshot', exact=True).click()
             expect(dialog.locator('.composer-files')).to_contain_text('screen.png')
+            dialog.get_by_role('button', name=re.compile(r'^Xem ảnh .*screen\.png$')).click()
+            expect(viewer).to_be_visible()
+            page.wait_for_function("document.querySelector('.image-viewer img')?.naturalWidth === 24")
+            viewer.get_by_role('button', name='Đóng xem ảnh', exact=True).click()
+            expect(dialog.locator('.attachment-card')).to_have_count(2)
             dialog.get_by_role('button', name=re.compile(r'^Bỏ .*screen\.png$')).click()
             expect(dialog.locator('.composer-files')).not_to_contain_text('screen.png')
+            # An unreadable image stays attached and can still be downloaded or removed.
+            dialog.locator('input[type=file]').set_input_files({
+                'name': 'broken.png', 'mimeType': 'image/png', 'buffer': b'not an image',
+            })
+            expect(dialog.locator('.attachment-preview-error')).to_contain_text('Không tải được ảnh')
+            dialog.get_by_role('button', name=re.compile(r'^Xem ảnh .*broken\.png$')).click()
+            expect(viewer).to_contain_text('Không hiển thị được ảnh này')
+            expect(viewer.get_by_role('link', name='Tải ảnh xuống', exact=True)).to_be_visible()
+            page.keyboard.press('Escape')
+            expect(dialog.locator('.composer-files')).to_contain_text('broken.png')
+            dialog.get_by_role('button', name=re.compile(r'^Bỏ .*broken\.png$')).click()
             # Saving preferences keeps the question/files intact and never sends a branch.
             page.route('**/api/research/defaults', lambda route: route.fulfill(status=500, json={'detail':'Save failed'}))
             dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
@@ -215,7 +282,7 @@ def main():
             page.get_by_role('button', name='Hiện lại nhánh', exact=True).click()
             expect(page.get_by_label('Hiện node đã ẩn (0)', exact=True)).to_be_visible()
             assert not errors, errors
-            print('Composer browser checks passed: refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite defaults, save failure/retry, reload.')
+            print('Composer browser checks passed: image previews/full-size/Escape/mobile/dark mode, device upload, refresh, shared prompts/editor, paste, screenshot, Enter, batch, SQLite defaults, save failure/retry, reload.')
             browser.close()
     finally:
         server.should_exit = True; thread.join(timeout=10)

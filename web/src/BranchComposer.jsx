@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Camera, GitBranch, Paperclip, Plus, Save, Send, X } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
+import AttachmentList from "./AttachmentList";
 
 export default function BranchComposer({
   draft,
@@ -122,7 +123,7 @@ export default function BranchComposer({
         const body = new FormData();
         body.append("file", file);
         const result = await post("/conversations/" + cid + "/files", body);
-        setFiles((old) => [...old, result]);
+        setFiles((old) => [...old, { ...result, type: file.type }]);
       }
     } catch (e) {
       setError(e.message);
@@ -284,23 +285,8 @@ export default function BranchComposer({
               </details>
             )}
             <div className="composer">
-              <div className="composer-files">
-                {files.map((f) => (
-                  <span key={f.path}>
-                    {f.name}
-                    <button
-                      type="button"
-                      aria-label={"Bỏ " + f.name}
-                      disabled={sending}
-                      onClick={() =>
-                        setFiles((old) => old.filter((x) => x.path !== f.path))
-                      }
-                    >
-                      <X size={13} />
-                    </button>
-                  </span>
-                ))}
-              </div>
+              <AttachmentList files={files} cid={cid} disabled={sending}
+                onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />
               <textarea
                 ref={area}
                 aria-label="Câu hỏi nhánh"
