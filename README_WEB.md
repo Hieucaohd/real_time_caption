@@ -13,6 +13,18 @@ Bản web chạy trên chính máy Windows có native app. Chỉ **Windows Live 
 
 Port 9222 dành cho Chrome automation; giao diện/API dùng port 8765. Server chỉ bind `127.0.0.1`, không cung cấp truy cập từ máy khác trên LAN.
 
+## Chuyển hội thoại sang thiết bị khác
+
+1. Chọn hội thoại ở máy nguồn, bấm **Export** bên dưới **New conversation**. App tải file `tên-hội-thoại.rtc-conversation.zip`.
+2. Chép file ZIP sang thiết bị khác (không cần giải nén).
+3. Mở bản web của app trên thiết bị đó, bấm **Import** và chọn file ZIP. Hội thoại được thêm vào danh sách và tự mở.
+
+Gói chứa transcript (kể cả nhiều phần), chat, summary, từ vựng đã lưu, lịch sử dịch, ảnh/file đính kèm, toàn bộ cây nghiên cứu, nguồn ChatGPT/link/số thứ tự response, dấu đọc/dấu nhánh, trạng thái ẩn/đã hiểu và bố cục đồ thị. File ngữ cảnh đã đóng băng của node cũng được mang theo để Retry vẫn dùng đúng nội dung. Dữ liệu import được lưu vào SQLite và thư mục hội thoại dùng chung với native app.
+
+Mỗi lần import tạo một bản sao với ID mới, không ghi đè hội thoại hiện có. Hội thoại được đặt ở trạng thái tạm dừng; node đang chạy/xếp hàng chuyển sang chưa hoàn tất để thử lại thủ công, không tự gửi ChatGPT. Chọn lại tab ChatGPT trên máy mới trước khi Retry vì ID tab Chrome của máy cũ không còn dùng được. Cài đặt chung, mẫu prompt toàn cục và phiên đăng nhập Chrome không bị thay thế.
+
+Export lấy dữ liệu đã lưu tại thời điểm đóng gói. Pause Live Captions trước khi export; chờ dấu **Đã lưu DB** nếu vừa kéo đồ thị. Giới hạn gói ZIP 512 MB, dữ liệu giải nén 2 GB. App kiểm tra đường dẫn, cấu trúc và mã kiểm tra của file; gói hỏng hoặc không hợp lệ bị từ chối và không tạo hội thoại dở dang. Hai thiết bị cần phiên bản app có chức năng export/import này.
+
 ## Đóng gói thành EXE
 
 Bấm đúp **`build_web_exe.bat`** tại thư mục dự án. Script cài dependency cần thiết, chạy `npm ci` + build React, đóng gói và tự kiểm tra file EXE. Máy build cần Python và Node.js/npm; máy chạy bản đóng gói chỉ cần Windows và Google Chrome.

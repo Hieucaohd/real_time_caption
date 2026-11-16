@@ -14,6 +14,7 @@ import {
   Play,
   Pause,
   Download,
+  Upload,
   Copy,
   MessageSquare,
   BookOpen,
@@ -49,7 +50,7 @@ import "./theme.css";
 const appTabId = crypto.randomUUID();
 document.documentElement.dataset.rtcTabId = appTabId;
 
-async function api(path, options = {}) {
+async function api(path, options = {}, raw = false) {
   const headers = { "X-RTC-Client": "web", "X-RTC-Tab": appTabId, ...options.headers };
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
@@ -69,7 +70,7 @@ async function api(path, options = {}) {
     throw new Error(typeof detail === "string" ? detail
       : [...new Set(messages)].join(" · ") || "Yêu cầu không hợp lệ. Vui lòng kiểm tra lại thông tin.");
   }
-  return response.json();
+  return raw ? response : response.json();
 }
 const post = (path, body = {}) => api(path, { method: "POST", body });
 const tabs = [
@@ -140,6 +141,8 @@ function App() {
     [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false),
     [promptKind, setPromptKind] = useState(null);
+  const [transferring, setTransferring] = useState("");
+  const transferRef = useRef(false), importInput = useRef(null);
   const [researchFocus, setResearchFocus] = useState(null);
   const [sidebarHidden, setSidebarHidden] = useState(false),
     [readingFocus, setReadingFocus] = useState(false);
@@ -298,6 +301,36 @@ function App() {
       await action(() =>
         api("/conversations/" + cid, { method: "PATCH", body: { title } }),
       );
+  }
+  async function exportConversation() {
+    if (!cid || transferRef.current) return;
+    transferRef.current = true;
+    setTransferring("export"); setError("");
+    try {
+      const response = await api(`/conversations/${cid}/export`, {}, true);
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const filename = encoded ? decodeURIComponent(encoded) : disposition.match(/filename="([^"]+)"/)?.[1] || "conversation.rtc-conversation.zip";
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setNotice("Đã export hội thoại. Chép file ZIP sang thiết bị khác rồi chọn Import hội thoại.");
+    } catch (e) { setError(e.message); }
+    finally { transferRef.current = false; setTransferring(""); }
+  }
+  async function importConversation(file) {
+    if (!file || transferRef.current) return;
+    transferRef.current = true;
+    setTransferring("import"); setError("");
+    try {
+      const body = new FormData(); body.append("file", file);
+      const item = await post("/conversations/import", body);
+      choose(item.id); setQuery(""); setTab("transcript");
+      await refresh();
+      setNotice("Đã import bản sao hội thoại: " + item.title);
+    } catch (e) { setError(e.message); }
+    finally { transferRef.current = false; setTransferring(""); }
   }
   async function scanTabs() {
     setLoadingTabs(true);
@@ -610,6 +643,18 @@ function App() {
         <Button className="primary new" icon={Plus} onClick={create}>
           New conversation
         </Button>
+        <div className="conversation-transfer">
+          <Button icon={Download} onClick={exportConversation} disabled={!cid || !!transferring}
+            aria-label="Export hội thoại" title="Export toàn bộ hội thoại thành ZIP">
+            {transferring === "export" ? "Đang export…" : "Export"}
+          </Button>
+          <Button icon={Upload} onClick={() => importInput.current.click()} disabled={!!transferring}
+            aria-label="Import hội thoại" title="Import hội thoại từ file ZIP">
+            {transferring === "import" ? "Đang import…" : "Import"}
+          </Button>
+          <input ref={importInput} hidden type="file" accept=".zip" aria-label="Chọn file hội thoại để import"
+            onChange={(e) => { importConversation(e.target.files[0]); e.target.value = ""; }} />
+        </div>
         <div className="search">
           <Search size={15} />
           <input

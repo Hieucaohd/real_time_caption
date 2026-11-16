@@ -58,7 +58,7 @@ def main():
             expect(viewer).to_have_count(0)
             chat_question = page.locator('.composer textarea')
             chat_question.fill('Keep chat draft')
-            page.locator('input[type=file]').set_input_files([
+            page.locator('.chat-composer input[type=file]').set_input_files([
                 {'name': 'chosen image.png', 'mimeType': 'image/png', 'buffer': image_data.getvalue()},
                 {'name': 'notes.txt', 'mimeType': 'text/plain', 'buffer': b'context'},
             ])

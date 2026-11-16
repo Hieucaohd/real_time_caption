@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, create_model, ConfigDict
 
 from caption import paths, prompt_versions, chatgpt
@@ -165,6 +166,34 @@ def create_app(service=None):
     def create(body: ConversationInput, request: Request):
         from caption.livecaptions import LABEL
         return asdict(svc(request).store.create(LABEL, body.title))
+
+    @app.get('/api/conversations/{cid}/export')
+    def export_conversation(cid: str, request: Request):
+        from .conversation_archive import export_conversation as pack
+        from caption.conversations import _safe_name
+        service = svc(request)
+        title = service.conversation(cid).title
+        temporary = tempfile.TemporaryDirectory(prefix='rtc-export-')
+        try:
+            destination = Path(temporary.name) / 'conversation.zip'
+            pack(service, cid, destination)
+            return FileResponse(destination, media_type='application/zip',
+                filename=_safe_name(title) + '.rtc-conversation.zip', background=BackgroundTask(temporary.cleanup))
+        except Exception:
+            temporary.cleanup()
+            raise
+
+    @app.post('/api/conversations/import')
+    def import_conversation(request: Request, file: UploadFile):
+        from .conversation_archive import import_conversation as unpack, MAX_ARCHIVE
+        try:
+            file.file.seek(0, 2)
+            if file.file.tell() > MAX_ARCHIVE:
+                raise ValueError('File import vượt giới hạn 512 MB.')
+            file.file.seek(0)
+            return asdict(unpack(svc(request), file.file))
+        finally:
+            file.file.close()
 
     @app.patch('/api/conversations/{cid}')
     def rename(cid: str, body: ConversationInput, request: Request):

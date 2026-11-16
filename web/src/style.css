@@ -612,6 +612,14 @@ pre {
   flex-wrap: wrap;
   gap: 10px;
 }
+.conversation-transfer { display: flex; gap: 6px; margin: 0 0 12px; }
+.conversation-transfer button { flex: 1; min-width: 0; padding: 8px 4px; }
+@media (max-width: 900px) {
+  .conversation-transfer { flex-wrap: wrap; }
+}
+@media (max-width: 760px) {
+  .conversation-transfer button { flex: 0 0 100%; font-size: 0; gap: 0; }
+}
 .attachments a {
   max-width: 240px;
   font-size: 10px;
