@@ -97,7 +97,7 @@ class TranslationStore:
                 (conversation_id, config.fingerprint))]
             sources = {row['id']: row['source_text'] for row in db.execute(
                 'SELECT id, source_text FROM translation_lines WHERE conversation_id=? ORDER BY id', (conversation_id,))}
-        latest, legacy_counts = {}, {}
+        latest, legacy_counts, group_members = {}, {}, {}
         for row in rows:
             group = row['batch_id'] or str(row['id'])
             if not row['batch_id'] and row['batch_size'] > 1:
@@ -108,6 +108,8 @@ class TranslationStore:
                 count = legacy_counts.get(signature, 0)
                 legacy_counts[signature] = count + 1
                 group = ('legacy', signature, count // row['batch_size'])
+            if row['source_text'] == sources.get(row['line_id']):
+                group_members.setdefault(group, []).append(row['line_id'])
             if row['status'] == 'done' and row['source_text'] == sources.get(row['line_id']):
                 latest[row['line_id']] = (group, row['translated_text'])
         segments, seen = [], set()
@@ -117,7 +119,7 @@ class TranslationStore:
             group, text = latest[line_id]
             if group not in seen:
                 seen.add(group)
-                segments.append({'line_id': line_id, 'text': text})
+                segments.append({'line_id': line_id, 'line_ids': group_members[group], 'text': text})
         return {'segments': segments, 'translated_lines': len(latest), 'total_lines': len(sources)}
 
     def missing(self, conversation_id, config):

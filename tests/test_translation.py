@@ -128,6 +128,7 @@ class TranslationPersistenceTests(unittest.TestCase):
         a, b = self.store.begin(first, config), self.store.begin(second, config)
         self.store.finish(b, 'done', 'Second translated')
         self.assertEqual([s['text'] for s in self.store.reading(self.item.id, config)['segments']], ['Second translated'])
+        self.assertEqual(self.store.reading(self.item.id, config)['segments'][0]['line_ids'], [second['id']])
         self.store.finish(a, 'done', 'First translated')
         self.store.finish(self.store.begin(first, config), 'error', error='Retry failed')
         self.assertEqual([s['text'] for s in self.store.reading(self.item.id, config)['segments']], ['First translated', 'Second translated'])
@@ -144,6 +145,7 @@ class TranslationPersistenceTests(unittest.TestCase):
         result = self.store.reading(self.item.id, config)
         self.assertEqual(result['translated_lines'], 4)
         self.assertEqual([s['text'] for s in result['segments']], ['Hello world translated'] * 2)
+        self.assertEqual([s['line_ids'] for s in result['segments']], [[1, 2], [3, 4]])
         with self.store.connect() as db:
             db.execute("UPDATE line_translations SET batch_id='',created_at='same-second'")
         self.assertEqual(self.store.reading(self.item.id, config), result)

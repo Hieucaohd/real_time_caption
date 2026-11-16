@@ -49,18 +49,41 @@ def main():
             for attempt in store.begin_batch(batch, config):
                 store.finish(attempt, 'done', 'One translated batch.')
             expect(right.locator('p')).to_have_text('First translated sentence. Second translated sentence. One translated batch.')
+            shared_scroll = page.get_by_label('Cuộn nguyên văn và bản dịch', exact=True)
+            expect(page.locator('.translation-reading .scroll')).to_have_count(1)
+            source_first = left.locator(f'[data-line-id="{first["id"]}"]')
+            target_first = right.locator(f'[data-line-id="{first["id"]}"]')
+            source_first.hover()
+            expect(target_first).to_have_class('translation-sentence is-highlighted')
+            expect(right.locator('.is-highlighted')).to_have_count(1)
+            right.locator(f'[data-line-id="{second["id"]}"]').hover()
+            expect(left.locator(f'[data-line-id="{second["id"]}"]')).to_have_class('translation-sentence is-highlighted')
+            expect(source_first).to_have_class('translation-sentence')
+            left.locator(f'[data-line-id="{batch[1]["id"]}"]').hover()
+            expect(right.locator(f'[data-line-id="{batch[0]["id"]}"]')).to_have_class('translation-sentence is-highlighted')
+            right.locator(f'[data-line-id="{batch[0]["id"]}"]').hover()
+            expect(left.locator('.is-highlighted')).to_have_count(2)
+            page.locator('.translation-reading-head').hover()
+            expect(page.locator('.translation-reading .is-highlighted')).to_have_count(0)
+            target_first.focus()
+            expect(source_first).to_have_class('translation-sentence is-highlighted')
+            target_first.evaluate('e => e.blur()')
             for i in range(5, 80):
                 item = line(i, f'Source sentence {i} with enough text to test scrolling.')
                 store.finish(store.begin(item, config), 'done', f'Translated sentence {i} with enough text to test scrolling.')
             expect(left).to_contain_text('Source sentence 79')
-            page.wait_for_function("[...document.querySelectorAll('.translation-reading-text')].every(e => e.scrollHeight - e.clientHeight - e.scrollTop < 3)")
+            page.wait_for_function("(() => { const e = document.querySelector('.translation-reading-scroll'); return e.scrollHeight - e.clientHeight - e.scrollTop < 3; })()")
             page.get_by_role('checkbox', name='Tự cuộn xuống cuối', exact=True).uncheck()
-            left.evaluate('e => e.scrollTop = 50'); right.evaluate('e => e.scrollTop = 50')
+            shared_scroll.evaluate('e => e.scrollTop = 0')
+            before = [left.bounding_box()['y'], right.bounding_box()['y']]
+            shared_scroll.evaluate('e => e.scrollTop = 50')
+            after = [left.bounding_box()['y'], right.bounding_box()['y']]
+            assert all(abs(start - end - 50) < 2 for start, end in zip(before, after))
             tail = line(80, 'Realtime tail.')
             store.finish(store.begin(tail, config), 'done', 'Realtime translation.')
             expect(right).to_contain_text('Realtime translation.')
-            assert abs(left.evaluate('e => e.scrollTop') - 50) < 2
-            assert abs(right.evaluate('e => e.scrollTop') - 50) < 2
+            assert abs(shared_scroll.evaluate('e => e.scrollTop') - 50) < 2
+            assert left.evaluate('e => e.scrollTop') == right.evaluate('e => e.scrollTop') == 0
             with fixture.service.lock:
                 fixture.service.capture.update(active=True, conversation_id=fixture.cid, partial='Still speaking')
                 fixture.service.translation_preview = 'Temporary translation'
