@@ -158,13 +158,13 @@ Log backend: `caption-web.log`. Sửa backend cần restart tiến trình `web_m
 
 API mutation yêu cầu header `X-RTC-Client: web` và cùng origin. Upload tối đa 50 MB/file; API phục vụ attachment chỉ đọc file nằm trong conversation được chọn. Trang có thể đọc các cài đặt nhạy cảm trên localhost, vì vậy không mở port backend ra Internet.
 
-## C?i ??t Windows Live Captions
+## Cài đặt Windows Live Captions
 
-Trong **Settings ? Windows Live Captions**, b?m **T?i l?i ng?n ng? v? tr?ng th?i t? Windows** ?? ??c danh s?ch th?c t?. Ch?n **Nh?n gi?ng n?i t? micro**, ng?n ng? ph? ??, r?i b?m **L?u v? ?p d?ng cho Windows**. N?t n?y l?u ri?ng ph?n Live Captions; ng?n ng? ? ph?n Translation l? t?y ch?n kh?c.
+Trong **Settings → Windows Live Captions**, bấm **Tải lại ngôn ngữ và trạng thái từ Windows** để đọc danh sách thực tế. Chọn **Nhận giọng nói từ micro**, ngôn ngữ phụ đề, rồi bấm **Lưu và áp dụng cho Windows**. Nút này lưu riêng phần Live Captions; ngôn ngữ ở phần Translation là tùy chọn khác.
 
-L?a ch?n l?u trong b?ng `livecaptions_preferences` c?a SQLite, d?ng chung v?i native app v? ???c ?p d?ng l?i khi b?t ??u l?y transcript. Khi ch?a l?u l?a ch?n, app gi? nguy?n c?i ??t Windows. Backend ?i?u khi?n c?c n?t Windows qua UI Automation, ??c l?i ?? x?c nh?n; giao di?n Windows c? th? hi?n trong l?c thao t?c. Ng?n ng? ch?a s?n s?ng s? b?o c?n ho?n t?t thi?t l?p/t?i g?i trong Live Captions, kh?ng b?o ?p d?ng th?nh c?ng. Danh s?ch ph? thu?c Windows tr?n m?y, kh?ng b?o ??m m?i ng?n ng? ??u ???c h? tr?.
+Lựa chọn lưu trong bảng `livecaptions_preferences` của SQLite, dùng chung với native app. **Chỉ nút Lưu và áp dụng mới thay đổi cài đặt Windows.** Tạo conversation, Start / Continue và Pause không mở menu hay áp dụng lại cài đặt; app đọc phụ đề theo cấu hình Windows đang dùng. Nếu đổi thiết bị hoặc muốn khôi phục lựa chọn đã lưu, vào Settings và bấm Lưu và áp dụng. Lỗi thao tác cài đặt chỉ hiện trong Settings, không biến thành lỗi của bộ đọc phụ đề.
 
-Live Captions: b? ??c gi? Unicode ?? kh?ng b? nh?m c?c c?u ti?ng Nh?t/Trung ho?c ch? c? d?u l? n?i dung tr?ng. N?u ph?n t? ch? tr?ng sau khi Windows d?ng l?i giao di?n, app ??c t? v?ng ch?a ph? ??. L?i ?p d?ng c?i ??t ch? hi?n c?nh b?o, kh?ng d?ng b? ??c. Thao t?c c?i ??t x?c nh?n l?a ch?n tr??c Continue, kh?ng m? l?i b? ch?n ng?n ng? l?n hai; danh s?ch ?? ??c ???c d?ng l?i trong c?ng phi?n Windows, v? hi?u khi ng?n ng? ho?c phi?n thay ??i.
+Backend điều khiển các nút qua UI Automation và xác nhận trạng thái thực tế. Giao diện Windows có thể hiện khi bạn chủ động tải danh sách hoặc áp dụng cài đặt. Ngôn ngữ chưa sẵn sàng sẽ báo cần hoàn tất thiết lập/tải gói trong Live Captions. Danh sách ngôn ngữ được dùng lại theo cửa sổ, tiến trình và ngôn ngữ Windows hiện tại, không phụ thuộc khóa AppSessionId. Bộ đọc giữ Unicode và đọc từ vùng chứa phụ đề nếu phần tử chữ tạm thời trống. Lỗi đọc thật vẫn hiển thị; nút đóng thông báo không để cùng lỗi xuất hiện lại ở mỗi lần cập nhật giao diện.
 
 ## T? ch?n tab ChatGPT
 

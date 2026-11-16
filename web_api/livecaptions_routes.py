@@ -27,6 +27,7 @@ def apply(body: Preferences, request: Request):
     result = livecaptions_settings.apply_windows(service.store, body.model_dump(), save=True)
     if result['ready']:
         with service.lock:
+            service.capture['warning'] = ''
             if service.capture['error'].startswith('Không áp dụng được cài đặt Live Captions:'):
                 service.capture['error'] = ''
     return result

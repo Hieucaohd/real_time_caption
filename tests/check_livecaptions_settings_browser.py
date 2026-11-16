@@ -55,7 +55,8 @@ def main():
             panel.get_by_role('checkbox').check()
             with patch.object(captions, 'apply_windows', side_effect=captions.CaptionsSettingsError('Windows chưa sẵn sàng')):
                 panel.get_by_role('button', name='Lưu và áp dụng cho Windows').click()
-                expect(panel.get_by_role('alert')).to_have_text('Windows chưa sẵn sàng')
+                expect(panel.get_by_role('alert')).to_contain_text('Windows chưa sẵn sàng')
+                expect(panel.get_by_role('alert')).to_contain_text('không dừng việc đọc phụ đề')
             assert fixture.service.store.livecaptions_preferences()['microphone'] is False
             controls.ready = False
             panel.get_by_role('button', name='Lưu và áp dụng cho Windows').click()
@@ -64,6 +65,20 @@ def main():
             page.evaluate("document.documentElement.dataset.theme = 'dark'")
             page.screenshot(path='cache/livecaptions-settings-dark.png')
             assert not errors, errors
+            page.get_by_role('button', name='Close settings', exact=True).click()
+            # A settings notice belongs in Settings; it is not a capture failure.
+            fixture.service.capture['warning'] = 'Settings verification unavailable'
+            page.reload()
+            expect(page.get_by_role('alert')).to_have_count(0)
+            # Actual errors remain visible, can be dismissed across polling, and
+            # a different error is shown again instead of being permanently hidden.
+            fixture.service.capture['error'] = 'First capture error'
+            expect(page.get_by_role('alert')).to_contain_text('First capture error')
+            page.get_by_role('button', name='Close error').click()
+            page.wait_for_timeout(1500)
+            expect(page.get_by_role('alert')).to_have_count(0)
+            fixture.service.capture['error'] = 'Second capture error'
+            expect(page.get_by_role('alert')).to_contain_text('Second capture error')
             browser.close()
             print('Live Captions settings UI: scan, apply, SQLite reload, errors and setup-required state passed.')
     finally:

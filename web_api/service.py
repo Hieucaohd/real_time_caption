@@ -31,7 +31,7 @@ class Service:
         self.worker = TranslationWorker(self.translations)
         self.lock = threading.RLock()
         self.reader = self.transcript = None
-        self.capture = dict(active=False, conversation_id=None, partial='', status='Ready', error='')
+        self.capture = dict(active=False, conversation_id=None, partial='', status='Ready', error='', warning='')
         self.jobs = {}
         self.job_cancel = {}
         self.busy = False
@@ -84,10 +84,8 @@ class Service:
             try:
                 self.store.set_status(cid, 'recording')
                 self.transcript = transcript
-                self.capture = dict(active=True, conversation_id=cid, partial='', status='Connecting to Windows Live Captions…', error='')
+                self.capture = dict(active=True, conversation_id=cid, partial='', status='Connecting to Windows Live Captions…', error='', warning='')
                 self.reader = livecaptions.LiveCaptionsReader(self.on_caption)
-                from caption.livecaptions_settings import apply_saved
-                self.reader.configure = lambda: apply_saved(self.store)
                 self.reader.start()
             except Exception:
                 transcript.close()
@@ -109,7 +107,7 @@ class Service:
                 if event.kind in ('ready', 'status'):
                     self.capture['status'] = event.text
                 elif event.kind == 'warning':
-                    self.capture['error'] = event.text
+                    self.capture['warning'] = event.text
                 elif event.kind == 'error':
                     self.capture['error'] = event.text
                     self.capture['status'] = event.text

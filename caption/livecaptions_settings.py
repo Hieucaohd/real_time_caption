@@ -1,6 +1,7 @@
 """Control Live Captions through its accessible controls, never screen coordinates."""
 from contextlib import contextmanager
 import ctypes
+import logging
 import os
 from pathlib import Path
 import subprocess
@@ -9,16 +10,34 @@ import time
 from .shared_access import ProcessLock
 
 WINDOW_CLASS = 'LiveCaptionsDesktopWindow'
-# Read-only session/language fingerprint invalidates this cache after an external
-# language change or Windows restart. Unknown Windows versions simply bypass it.
+log = logging.getLogger(__name__)
+# Read-only window/language fingerprint invalidates this cache after an external
+# language change or Windows restart. AppSessionId is absent on some builds.
 _language_cache = None
+
+
+def window_session():
+    """Identify the running window without activating it or opening any menu."""
+    if os.name != 'nt':
+        return None
+    user32 = ctypes.windll.user32
+    user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+    user32.FindWindowW.restype = ctypes.c_void_p
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    handle = user32.FindWindowW(WINDOW_CLASS, None)
+    if not handle:
+        return None
+    process_id = ctypes.c_ulong()
+    user32.GetWindowThreadProcessId(handle, ctypes.byref(process_id))
+    return (handle, process_id.value) if process_id.value else None
 
 
 def language_fingerprint():
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\LiveCaptions') as key:
-            session = winreg.QueryValueEx(key, 'AppSessionId')[0]
+        session = window_session()
+        if not session:
+            return None
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\LiveCaptions\UI') as key:
             language = winreg.QueryValueEx(key, 'CaptionLanguage')[0]
         return session, language
@@ -69,7 +88,10 @@ class WindowsControls:
         if self.exists('MenuItemControl', 'PreferencesButton'):
             pref = self.control('MenuItemControl', 'PreferencesButton')
             pref.GetExpandCollapsePattern().Collapse()
-            self.invoke('ButtonControl', 'SettingsButton')
+            # Some Windows builds dismiss the whole flyout on Collapse. Clicking
+            # Settings in that case would open it again instead of cleaning up.
+            if self.exists('MenuItemControl', 'PreferencesButton'):
+                self.invoke('ButtonControl', 'SettingsButton')
 
     def microphone(self, desired=None):
         self.menu()
@@ -90,7 +112,12 @@ class WindowsControls:
             current = self.control('MenuItemControl', 'MicrophoneMenuFlyoutItem').GetTogglePattern().ToggleState
             if current != int(desired):
                 raise CaptionsSettingsError('Windows chưa áp dụng tùy chọn micro. Hãy kiểm tra quyền truy cập micro.')
-        self.dismiss_menu()
+        try:
+            self.dismiss_menu()
+        except Exception:
+            # The toggle was read back successfully above. A disappearing flyout
+            # during cleanup must not turn that verified result into a failure.
+            log.debug('Live Captions menu already changed during cleanup', exc_info=True)
         return bool(current)
 
     def language_picker(self):
@@ -219,12 +246,3 @@ def apply_windows(store, preferences, *, save=False):
         if save:
             store.save_livecaptions_preferences(preferences)
         return result
-
-
-def apply_saved(store):
-    preferences = store.livecaptions_preferences()
-    if preferences['microphone'] is None and not preferences['language']:
-        return
-    result = apply_windows(store, preferences)
-    if not result['ready']:
-        raise CaptionsSettingsError('Đã chọn ngôn ngữ; hãy hoàn tất tải gói ngôn ngữ/thiết lập trong Windows Live Captions, rồi bấm Start / Continue lại.')

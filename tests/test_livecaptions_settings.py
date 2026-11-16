@@ -1,11 +1,11 @@
 from contextlib import contextmanager
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import test_web_api as fixtures
 from caption import livecaptions_settings as captions
 from caption.conversations import ConversationStore
-from caption.livecaptions import LiveCaptionsReader
+from caption.transcriber import Event
 
 
 class FakeControls:
@@ -58,7 +58,6 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
     def test_read_does_not_apply_or_save_and_does_not_launch_on_settings_get(self):
         with patch.object(captions, 'windows_controls') as windows:
             self.assertEqual(self.client.get('/api/livecaptions/settings').json(), {'microphone': None, 'language': ''})
-            captions.apply_saved(self.service.store)
             windows.assert_not_called()
         controls = FakeControls()
         with self.controller(controls):
@@ -68,7 +67,7 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
         self.assertEqual(result.json()['languages'], controls.available)
         self.assertEqual(self.service.store.livecaptions_preferences(), {'microphone': None, 'language': ''})
 
-    def test_apply_verifies_persists_and_reapplies_after_reopen(self):
+    def test_explicit_apply_verifies_persists_and_can_reapply_saved_preferences(self):
         controls = FakeControls()
         desired = {'microphone': False, 'language': 'Japanese (Japan)'}
         self.service.capture['error'] = 'Không áp dụng được cài đặt Live Captions: previous menu failure'
@@ -83,7 +82,7 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
             reloaded = ConversationStore(self.service.store.db_path)
             self.assertEqual(reloaded.livecaptions_preferences(), desired)
             controls.language = 'English (United States)'; controls.mic = True
-            captions.apply_saved(reloaded)
+            captions.apply_windows(reloaded, reloaded.livecaptions_preferences())
             self.assertEqual(controls.language, desired['language'])
             self.assertFalse(controls.mic)
 
@@ -107,8 +106,6 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
             self.assertFalse(response.json()['ready'])
             self.assertEqual(response.json()['status'], 'setup_required')
             self.assertIsNone(response.json()['microphone'])
-            with self.assertRaises(captions.CaptionsSettingsError):
-                captions.apply_saved(self.service.store)
         self.assertEqual(controls.mic_calls, 0)
         self.assertEqual(self.service.store.livecaptions_preferences(), desired)
 
@@ -128,18 +125,71 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
         self.assertEqual(controls.language, 'English (United States)')
         self.assertFalse(controls.mic)
 
-    def test_reader_runs_saved_preferences_before_attaching(self):
-        reader = LiveCaptionsReader(lambda _: None)
-        events = []
-        reader.configure = lambda: events.append('configure')
-        def attach(*args, **kwargs):
-            events.append('attach'); reader.stop()
-        with patch.object(reader, '_find_text', side_effect=attach):
-            reader._loop(object())
-        self.assertEqual(events, ['configure', 'attach'])
+    def test_create_start_resume_and_switch_never_automate_windows_settings(self):
+        self.service.store.save_livecaptions_preferences({'microphone': True, 'language': 'Japanese (Japan)'})
+        with patch.object(captions, 'windows_controls') as windows:
+            for index in range(2):
+                cid = self.post('/api/conversations', {'title': f'Conversation {index}'}).json()['id']
+                for _ in range(2):
+                    self.assertEqual(self.post(f'/api/conversations/{cid}/capture').status_code, 200)
+                    self.assertFalse(hasattr(self.service.reader, 'configure'))
+                    self.service.on_caption(Event('final', 'Caption keeps flowing.', end_of_utterance=True))
+                    self.assertEqual(self.post('/api/capture/pause').status_code, 200)
+                    self.assertEqual(self.service.capture['error'], '')
+            windows.assert_not_called()
+
+    def test_settings_failure_is_local_and_caption_reader_keeps_running(self):
+        self.post(f'/api/conversations/{self.cid}/capture')
+        with patch.object(captions, 'apply_windows', side_effect=captions.CaptionsSettingsError('Microphone menu unavailable')):
+            response = self.put({'microphone': True, 'language': ''})
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(self.service.capture['active'])
+        self.assertEqual(self.service.capture['error'], '')
+        self.service.on_caption(Event('final', 'Still reading.', end_of_utterance=True))
+        self.assertEqual(self.service.translations.lines(self.cid)[0]['source_text'], 'Still reading.')
+
+    def test_nonfatal_warning_does_not_become_capture_error_or_paused_status(self):
+        self.post(f'/api/conversations/{self.cid}/capture')
+        self.service.on_caption(Event('warning', 'Could not confirm settings'))
+        self.assertEqual(self.service.capture['warning'], 'Could not confirm settings')
+        self.assertEqual(self.service.capture['error'], '')
+        self.assertTrue(self.service.capture['active'])
+        self.post('/api/capture/pause')
+        self.assertEqual(self.service.capture['status'], 'Paused')
+
+    def test_real_capture_error_is_still_visible_and_stops_reader(self):
+        self.post(f'/api/conversations/{self.cid}/capture')
+        self.service.on_caption(Event('error', 'Reader disconnected'))
+        self.assertEqual(self.service.capture['error'], 'Reader disconnected')
+        self.assertFalse(self.service.capture['active'])
 
 
 class MicrophoneControlTests(unittest.TestCase):
+    def test_dismiss_does_not_reopen_menu_after_collapse_closed_it(self):
+        windows = captions.WindowsControls(Mock())
+        windows.exists = Mock(side_effect=[True, False])
+        windows.control = Mock()
+        windows.invoke = Mock()
+        windows.dismiss_menu()
+        windows.invoke.assert_not_called()
+
+    def test_cleanup_failure_does_not_discard_confirmed_microphone_state(self):
+        windows = captions.WindowsControls(Mock())
+        mic = Mock(); mic.GetTogglePattern.return_value.ToggleState = 1
+        windows.menu = Mock()
+        windows.control = lambda kind, identity: mic if identity == 'MicrophoneMenuFlyoutItem' else Mock()
+        windows.dismiss_menu = Mock(side_effect=RuntimeError('Menu disappeared'))
+        self.assertTrue(windows.microphone(True))
+        mic.GetTogglePattern.return_value.Toggle.assert_not_called()
+
+    def test_language_cache_fingerprint_needs_no_app_session_registry_value(self):
+        registry = MagicMock()
+        registry.QueryValueEx.return_value = ('en-US', 1)
+        with patch.dict('sys.modules', {'winreg': registry}), patch.object(captions, 'window_session', return_value=(10, 20)):
+            self.assertEqual(captions.language_fingerprint(), ((10, 20), 'en-US'))
+        self.assertEqual(registry.QueryValueEx.call_args.args[1], 'CaptionLanguage')
+        self.assertEqual(registry.OpenKey.call_count, 1)
+
     def test_same_session_and_language_skip_picker_but_external_change_invalidates_cache(self):
         windows = captions.WindowsControls(Mock())
         windows.exists = Mock(return_value=False)

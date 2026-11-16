@@ -42,11 +42,10 @@ class UnicodeCaptionTests(unittest.TestCase):
 
 
 class LiveCaptionsReconnectTests(unittest.TestCase):
-    def test_settings_failure_does_not_stop_caption_reader(self):
+    def test_reader_only_reads_captions_without_settings_callback(self):
         events = []
         reader = livecaptions.LiveCaptionsReader(events.append)
-        def failed_settings(): raise ValueError('Settings menu unavailable')
-        reader.configure = failed_settings
+        self.assertFalse(hasattr(reader, 'configure'))
         def emit(event):
             events.append(event)
             if event.kind == 'final': reader.stop()
@@ -54,7 +53,7 @@ class LiveCaptionsReconnectTests(unittest.TestCase):
         with (patch.object(reader, '_find_text', return_value=_TextControl('字幕は引き続き表示されます。')),
               patch.object(livecaptions, 'POLL_S', .001), patch.object(livecaptions, 'FLUSH_AFTER_S', .002)):
             reader._loop(object())
-        self.assertTrue(any(e.kind == 'warning' for e in events))
+        self.assertFalse(any(e.kind == 'warning' for e in events))
         self.assertFalse(any(e.kind == 'error' for e in events))
         self.assertEqual([e.text for e in events if e.kind == 'final'], ['字幕は引き続き表示されます。'])
     def test_ready_window_without_text_waits_for_first_caption(self) -> None:

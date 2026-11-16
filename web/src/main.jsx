@@ -183,6 +183,10 @@ function App() {
     area.style.height = Math.min(140, Math.max(36, area.scrollHeight)) + "px";
   }, [message, tab, readingFocus, sidebarHidden]);
   const jobSeen = useRef(new Set());
+  const [dismissedCaptureError, setDismissedCaptureError] = useState("");
+  const captureError = boot?.capture?.error || "";
+  useEffect(() => { setDismissedCaptureError(""); }, [captureError, boot?.capture?.conversation_id]);
+  const visibleError = error || (captureError !== dismissedCaptureError ? captureError : "");
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
   useLayoutEffect(() => {
@@ -852,10 +856,10 @@ function App() {
             </button>
           </div>
         )}
-        {(error || boot.capture.error) && (
+        {visibleError && (
           <div role="alert" className="alert">
-            {error || boot.capture.error}
-            <button onClick={() => setError("")} aria-label="Close error">
+            {visibleError}
+            <button onClick={() => { setError(""); setDismissedCaptureError(captureError); }} aria-label="Close error">
               <X size={16} />
             </button>
           </div>
@@ -1556,7 +1560,7 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
               <option value="dark">Tối</option>
             </select>
           </Field>
-          <LiveCaptionsSettings api={api} />
+          <LiveCaptionsSettings api={api} warning={boot.capture.warning} />
           <h3>Translation</h3>
           <div className="form-grid">
             <Field label="Engine">

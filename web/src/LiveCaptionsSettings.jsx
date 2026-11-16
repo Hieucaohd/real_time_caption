@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-export default function LiveCaptionsSettings({ api }) {
+export default function LiveCaptionsSettings({ api, warning = "" }) {
   const [draft, setDraft] = useState({ microphone: null, language: "" });
   const [languages, setLanguages] = useState([]);
   const [actual, setActual] = useState(null);
@@ -34,7 +34,8 @@ export default function LiveCaptionsSettings({ api }) {
   }
   return <section className="livecaptions-settings" aria-label="Cài đặt Windows Live Captions">
     <h3>Windows Live Captions</h3>
-    <p>Điều khiển micro và ngôn ngữ phụ đề của Windows. Lựa chọn được lưu và áp dụng lại khi bắt đầu lấy transcript.</p>
+    <p>Điều khiển micro và ngôn ngữ phụ đề của Windows. App chỉ thay đổi cài đặt khi bạn bấm Lưu và áp dụng cho Windows. Tạo cuộc hội thoại hoặc Start / Continue giữ nguyên cài đặt hiện tại của Windows.</p>
+    {warning && <p role="status">{warning}</p>}
     <button type="button" disabled={!!busy} onClick={() => run(false)}>
       {busy === "reading" ? "Đang đọc từ Windows…" : "Tải lại ngôn ngữ và trạng thái từ Windows"}
     </button>
@@ -58,6 +59,6 @@ export default function LiveCaptionsSettings({ api }) {
       {busy === "saving" ? "Đang áp dụng…" : "Lưu và áp dụng cho Windows"}
     </button></div>
     {notice && <p role="status">{notice}</p>}
-    {error && <p className="alert" role="alert">{error}</p>}
+    {error && <p className="alert" role="alert">{error} Lỗi thao tác cài đặt không dừng việc đọc phụ đề; hãy kiểm tra trạng thái hiện tại trong Windows trước khi thử lại.</p>}
   </section>;
 }

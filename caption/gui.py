@@ -814,8 +814,6 @@ class App:
                 return
             tfile, sink = session
             self.transcriber = LiveCaptionsReader(sink)
-            from .livecaptions_settings import apply_saved
-            self.transcriber.configure = lambda: apply_saved(self.store)
             self._capture_file = tfile
             self.transcriber.start()
             self.session_file = tfile
