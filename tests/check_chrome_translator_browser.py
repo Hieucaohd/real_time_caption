@@ -26,6 +26,11 @@ FAKE_API = """(() => {
       await new Promise(resolve => setTimeout(resolve, 100));
       return {translate: async (text, {signal}) => {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+        if (window.holdTranslations) return new Promise((resolve, reject) => {
+          window.pendingTranslations ??= {};
+          window.pendingTranslations[text] = () => resolve('Bản dịch: ' + text);
+          signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        });
         return 'Bản dịch: ' + text;
       }};
     }
@@ -91,6 +96,26 @@ def main():
             assert len(fixture.service.translations.lines(fixture.cid)) == 1  # No finalized caption emitted.
             fixture.post('/api/capture/pause')
             expect(preview).to_have_count(0)
+            # Three independent requests reach the browser before any resolves.
+            page.evaluate('window.holdTranslations = true')
+            slow = fixture.service.translations.line(fixture.cid, 'parallel:slow', 'now', 'Slow final')
+            fast = fixture.service.translations.line(fixture.cid, 'parallel:fast', 'now', 'Fast final')
+            fixture.service.worker.submit(slow, config)
+            fixture.service.worker.submit(fast, config)
+            fixture.service.worker.preview(fixture.cid, 'Concurrent preview', config, 100)
+            page.wait_for_function('Object.keys(window.pendingTranslations || {}).length === 3', timeout=15000)
+            page.evaluate("window.pendingTranslations['Fast final']()")
+            deadline = time.monotonic() + 5
+            while fixture.service.translations.history(fast['id'])[-1]['status'] != 'done':
+                if time.monotonic() > deadline: raise AssertionError('Fast result blocked behind slow request')
+                page.wait_for_timeout(50)
+            assert fixture.service.translations.history(slow['id'])[-1]['status'] == 'working'
+            fixture.service.worker.cancel_all()
+            deadline = time.monotonic() + 5
+            while fixture.service.translations.history(slow['id'])[-1]['status'] != 'cancelled':
+                if time.monotonic() > deadline: raise AssertionError('Stop did not cancel active request')
+                page.wait_for_timeout(50)
+            page.evaluate('window.holdTranslations = false')
             page.get_by_role('button', name='Settings', exact=True).click()
             expect(panel.get_by_role('status')).to_contain_text('Sẵn sàng')
             expect(page.locator('.modal').get_by_role('checkbox', name='Dịch ngay khi đang nói', exact=True)).to_be_checked()

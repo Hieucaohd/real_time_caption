@@ -8,6 +8,21 @@ from caption.translation import Config, Translator, TranslationError
 
 
 class ChromeTranslationTests(unittest.TestCase):
+    def test_client_reuses_connection_and_disconnects_without_closing_browser(self):
+        driver = Mock()
+        browser = driver.chromium.connect_over_cdp.return_value
+        browser.is_connected.return_value = True
+        with patch('playwright.sync_api.sync_playwright') as playwright, \
+                patch.object(chrome, '_choose_tab'), patch.object(chrome, '_translate_page', return_value='translated'):
+            playwright.return_value.start.return_value = driver
+            client = chrome.Client()
+            self.assertEqual(client.translate('one', 'en', 'vi'), 'translated')
+            self.assertEqual(client.translate('two', 'en', 'vi'), 'translated')
+            driver.chromium.connect_over_cdp.assert_called_once()
+            client.close()
+            driver.stop.assert_called_once()
+            browser.close.assert_not_called()
+
     def test_engine_needs_no_key_and_has_distinct_cache(self):
         config = Config.from_settings(Settings(translation_engine="chrome"))
         config.validate()

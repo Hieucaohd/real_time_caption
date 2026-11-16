@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
 
 from .paths import MODELS_DIR
@@ -106,10 +107,30 @@ class Translator:
         self._offline = None
         self._offline_device = None
         self._lock = threading.RLock()
+        self._chrome_worker = threading.local()
+
+    @contextmanager
+    def worker_session(self):
+        """Reuse CDP in a worker lane; utility calls still disconnect per call."""
+        self._chrome_worker.enabled = True
+        try:
+            yield
+        finally:
+            client = getattr(self._chrome_worker, 'client', None)
+            if client is not None:
+                client.close()
+            self._chrome_worker.client = None
+            self._chrome_worker.enabled = False
 
     def translate(self, text, config: Config, cancel=None):
         config.validate()
         if config.engine == "chrome":
+            if getattr(self._chrome_worker, 'enabled', False):
+                from .chrome_translate import Client
+                client = getattr(self._chrome_worker, 'client', None)
+                if client is None:
+                    client = self._chrome_worker.client = Client()
+                return client.translate(text.strip(), config.source, config.target, cancel)
             from .chrome_translate import translate
             return translate(text.strip(), config.source, config.target, cancel)
         if config.engine == "google_web":

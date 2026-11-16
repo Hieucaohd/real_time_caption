@@ -135,7 +135,7 @@ class TranslationPersistenceTests(unittest.TestCase):
     def tearDown(self):
         for worker in self.workers:
             worker.close()
-            worker._thread.join(2)
+            worker.join(2)
         self.patch.stop()
         self.temp.cleanup()
 
@@ -247,29 +247,86 @@ class TranslationPersistenceTests(unittest.TestCase):
             worker.preview(self.item.id, 'draft', translation.Config(key='key'), 1)
         adapter.translate.assert_not_called()
 
-    def test_preview_coalesces_and_runs_between_finalized_lines(self):
-        entered, release = threading.Event(), threading.Event()
+    def test_two_chrome_finals_and_preview_run_together_with_bounded_backlog(self):
+        first, second, release = threading.Event(), threading.Event(), threading.Event()
         def translate(text, config, cancel):
             if text == 'First final':
-                entered.set(); release.wait(3)
-            if text == 'Latest draft':
-                worker.preview(self.item.id, 'Next draft', config, 1)
+                first.set(); release.wait(3)
+            if text == 'Second final':
+                second.set(); release.wait(3)
             return text
+        adapter = SimpleNamespace(translate=Mock(side_effect=translate))
+        worker = self.worker(adapter)
+        config = translation.Config(engine='chrome')
+        try:
+            line = self.line('1', 'First final')
+            worker.submit(line, config)
+            self.assertTrue(first.wait(2))
+            worker.submit(self.line('2', 'Second final'), config)
+            self.assertTrue(second.wait(2))
+            worker.submit(self.line('3', 'Third final'), config)
+            self.assertFalse(worker.submit(line, config))
+            with worker._condition:
+                worker.preview(self.item.id, 'Old draft', config, 1)
+                worker.preview(self.item.id, 'Latest draft', config, 1)
+            preview = worker.results.get(timeout=2)
+            self.assertEqual(preview[1:], ('done', 'Latest draft'))
+            self.assertTrue(preview[0].preview)
+            self.assertEqual(adapter.translate.call_count, 3)  # Third final still queued.
+        finally:
+            release.set()
+        outcomes = [worker.results.get(timeout=3) for _ in range(3)]
+        self.assertCountEqual([result[2] for result in outcomes], ['First final', 'Second final', 'Third final'])
+        self.assertEqual(len(self.store.lines(self.item.id)), 3)
+        for line in self.store.lines(self.item.id):
+            self.assertEqual(self.store.history(line['id'])[0]['translated_text'], line['source_text'])
+
+    def test_parallel_finals_complete_out_of_order_without_mixing_database_rows(self):
+        entered, release = threading.Event(), threading.Event()
+        def translate(text, config, cancel):
+            if text == 'Slow':
+                entered.set(); release.wait(3)
+            return 'Translated ' + text
+        worker = self.worker(SimpleNamespace(translate=Mock(side_effect=translate)))
+        config = translation.Config(engine='chrome')
+        slow, fast = self.line('slow', 'Slow'), self.line('fast', 'Fast')
+        try:
+            worker.submit(slow, config)
+            self.assertTrue(entered.wait(2))
+            worker.submit(fast, config)
+            task, status, result = worker.results.get(timeout=2)
+            self.assertEqual((task.line['id'], status, result), (fast['id'], 'done', 'Translated Fast'))
+            self.assertEqual(self.store.history(slow['id'])[0]['status'], 'working')
+        finally:
+            release.set()
+        self.assertEqual(worker.results.get(timeout=2)[2], 'Translated Slow')
+        self.assertEqual(self.store.history(slow['id'])[0]['translated_text'], 'Translated Slow')
+        self.assertEqual(self.store.history(fast['id'])[0]['translated_text'], 'Translated Fast')
+
+    def test_stop_cancels_all_active_lanes_and_queued_work(self):
+        active = {text: threading.Event() for text in ('One', 'Two', 'Preview')}
+        release = threading.Event()
+        cancels = []
+        def translate(text, config, cancel):
+            cancels.append(cancel); active[text].set(); release.wait(3)
+            return 'Late result'
         worker = self.worker(SimpleNamespace(translate=Mock(side_effect=translate)))
         config = translation.Config(engine='chrome')
         try:
-            worker.submit(self.line('1', 'First final'), config)
-            self.assertTrue(entered.wait(2))
-            worker.submit(self.line('2', 'Second final'), config)
-            worker.submit(self.line('3', 'Third final'), config)
-            worker.preview(self.item.id, 'Old draft', config, 1)
-            worker.preview(self.item.id, 'Latest draft', config, 1)
+            worker.submit(self.line('1', 'One'), config)
+            worker.submit(self.line('2', 'Two'), config)
+            worker.preview(self.item.id, 'Preview', config, 1)
+            for event in active.values(): self.assertTrue(event.wait(2))
+            queued = self.line('3', 'Queued')
+            worker.submit(queued, config)
+            worker.cancel_all()
+            self.assertTrue(all(cancel.is_set() for cancel in cancels))
+            self.assertEqual(self.store.history(queued['id'])[0]['status'], 'cancelled')
         finally:
             release.set()
-        outcomes = [worker.results.get(timeout=3) for _ in range(5)]
-        self.assertEqual([result[2] for result in outcomes],
-                         ['First final', 'Latest draft', 'Second final', 'Next draft', 'Third final'])
-        self.assertEqual(len(self.store.lines(self.item.id)), 3)
+        for _ in range(4): self.assertEqual(worker.results.get(timeout=2)[1], 'cancelled')
+        self.assertTrue(all(self.store.history(line['id'])[0]['translated_text'] == ''
+                            for line in self.store.lines(self.item.id)))
 
     def test_queued_requests_keep_their_engine_and_source_snapshot(self):
         entered, release = threading.Event(), threading.Event()

@@ -49,7 +49,9 @@ export function createChromeTranslator(getAPI = () => globalThis.Translator) {
   async function ready(source, target) {
     const id = key(source, target);
     if (models.has(id)) return models.get(id);
-    if (preparing.has(id)) throw problem("preparing");
+    // Concurrent worker lanes share model initialization. A second request must
+    // not fail just because the first is restoring an already downloaded model.
+    if (preparing.has(id)) return preparing.get(id);
     const available = await api(source, target).availability(options(source, target));
     if (available === "unavailable") throw problem("unavailable");
     if (available !== "available") throw problem("setup");

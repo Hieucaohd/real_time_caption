@@ -75,3 +75,30 @@ test("cancelling an in-flight translation aborts it and discards late output", a
   await tick();
   assert.equal(bridge.read("a"), null);
 });
+
+test("concurrent jobs share initialization and keep independent results and cancellation", async () => {
+  let creates = 0, initialize;
+  const running = new Map();
+  const model = { translate(text, { signal }) {
+    return new Promise(resolve => running.set(text, { resolve, signal }));
+  } };
+  const bridge = createChromeTranslator(() => ({
+    availability: async () => "available",
+    create() { creates++; return new Promise(resolve => { initialize = () => resolve(model); }); },
+  }));
+  bridge.start({ id: "one", text: "slow", source: "ja", target: "vi" });
+  await tick();
+  bridge.start({ id: "two", text: "fast", source: "ja", target: "vi" });
+  bridge.start({ id: "three", text: "cancelled", source: "ja", target: "vi" });
+  initialize(); await tick();
+  assert.equal(creates, 1);
+  assert.equal(running.size, 3);
+  running.get("fast").resolve("Fast result"); await tick();
+  assert.equal(bridge.read("two").text, "Fast result");
+  assert.equal(bridge.read("one").status, "working");
+  bridge.release("three");
+  assert.equal(running.get("cancelled").signal.aborted, true);
+  assert.equal(running.get("slow").signal.aborted, false);
+  running.get("slow").resolve("Slow result"); await tick();
+  assert.equal(bridge.read("one").text, "Slow result");
+});

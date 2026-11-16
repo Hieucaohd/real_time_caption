@@ -1,10 +1,11 @@
-"""Bounded serial worker with immutable request configs and coalesced previews."""
+"""Bounded translation lanes: two Chrome finals, one latest-only live preview."""
 
 from __future__ import annotations
 
 import queue
 import threading
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 from .translation import Config, TranslationError, Translator
@@ -36,12 +37,16 @@ class TranslationWorker:
         self._tasks = deque()
         self._keys = set()
         self._preview = None
-        self._active = None
-        self._last_was_preview = False
+        self._active = {}
         self._closed = False
         self._paused = False
-        self._thread = threading.Thread(target=self._run, name="transcript-translation", daemon=True)
-        self._thread.start()
+        # Only Chrome gets an extra final lane. UI-based translation and cloud
+        # providers retain their existing serialized behavior/rate of requests.
+        self._threads = [threading.Thread(target=self._run, args=(lane,),
+                         name=f'transcript-translation-{lane}', daemon=True)
+                         for lane in ('final', 'chrome-final', 'preview')]
+        for thread in self._threads:
+            thread.start()
 
     @staticmethod
     def _key(line, config):
@@ -79,7 +84,7 @@ class TranslationWorker:
             task = Task(pending[0], config, attempts[0], lines=tuple(pending), attempts=attempts)
             self._tasks.append(task)
             self._keys.update(self._key(line, config) for line in pending)
-            self._condition.notify()
+            self._condition.notify_all()
             return True
 
     def preview(self, conversation_id, text, config, revision):
@@ -91,13 +96,13 @@ class TranslationWorker:
                 if self._paused:
                     raise TranslationError("Translation paused after an error. Check settings and enable it again.")
                 self._preview = Task({"conversation_id": conversation_id, "source_text": text}, config, preview=True, revision=revision)
-                self._condition.notify()
+                self._condition.notify_all()
 
     def cancel_preview(self):
         with self._condition:
             self._preview = None
-            if self._active and self._active.preview:
-                self._active.cancel.set()
+            if task := self._active.get('preview'):
+                task.cancel.set()
 
     def resume(self):
         with self._condition:
@@ -106,8 +111,8 @@ class TranslationWorker:
     def cancel_all(self):
         with self._condition:
             self.cancel_preview()
-            if self._active:
-                self._active.cancel.set()
+            for task in self._active.values():
+                task.cancel.set()
             while self._tasks:
                 task = self._tasks.popleft()
                 try:
@@ -123,22 +128,40 @@ class TranslationWorker:
         with self._condition:
             self._closed = True
             self.cancel_all()
-            self._condition.notify()
+            self._condition.notify_all()
 
-    def _run(self):
+    def join(self, timeout=None):
+        """Wait for lane cleanup, including thread-owned Chrome connections."""
+        import time
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for thread in self._threads:
+            thread.join(None if deadline is None else max(0, deadline - time.monotonic()))
+
+    def _eligible(self, lane):
+        if lane == 'preview':
+            return self._preview is not None
+        return any(lane == 'final' or task.config.engine == 'chrome' for task in self._tasks)
+
+    def _run(self, lane):
+        session = getattr(self.translator, 'worker_session', nullcontext)
+        with session():
+            self._run_lane(lane)
+
+    def _run_lane(self, lane):
         while True:
             with self._condition:
-                self._condition.wait_for(lambda: self._closed or self._tasks or self._preview)
+                self._condition.wait_for(lambda: self._closed or self._eligible(lane))
                 if self._closed:
                     return
-                # Alternate when both queues have work: drafts must not wait for
-                # the entire transcript backlog, and finals must still be saved.
-                use_preview = self._preview is not None and (not self._tasks or not self._last_was_preview)
-                task = self._preview if use_preview else self._tasks.popleft()
-                if task is self._preview:
+                if lane == 'preview':
+                    task = self._preview
                     self._preview = None
-                self._last_was_preview = task.preview
-                self._active = task
+                else:
+                    index = next(i for i, candidate in enumerate(self._tasks)
+                                 if lane == 'final' or candidate.config.engine == 'chrome')
+                    task = self._tasks[index]
+                    del self._tasks[index]
+                self._active[lane] = task
             status, value = "done", ""
             try:
                 if not task.preview:
@@ -165,7 +188,7 @@ class TranslationWorker:
                     if not task.preview:
                         for line in task.members:
                             self._keys.discard(self._key(line, task.config))
-                    self._active = None
+                    self._active.pop(lane, None)
                     if status == "error":
                         self._paused = True
                         self.cancel_all()

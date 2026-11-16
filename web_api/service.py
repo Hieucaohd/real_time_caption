@@ -390,6 +390,7 @@ class Service:
             self.worker.close()
             self._stop.set()
             self.hide_overlay()
+        self.worker.join(timeout=2)
 
     def hide_overlay(self):
         if self.overlay_process and self.overlay_process.poll() is None:

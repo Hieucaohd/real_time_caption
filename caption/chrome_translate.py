@@ -83,22 +83,47 @@ def _translate_page(page, text, source, target, cancel=None, timeout_s=30):
             pass  # Reload/close also destroys the document's model and requests.
 
 
-def translate(text, source, target, cancel=None):
-    from playwright.sync_api import sync_playwright
+class Client:
+    """A CDP connection owned and reused exclusively by one translation thread."""
+    def __init__(self):
+        self.playwright = self.browser = None
 
-    _check_cancel(cancel)
-    if not text:
-        raise TranslationError("Nhập nội dung cần dịch.")
-    try:
-        with sync_playwright() as playwright:
+    def close(self):
+        # Stop the driver to disconnect CDP; never call browser.close().
+        if self.playwright is not None:
             try:
-                browser = playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+                self.playwright.stop()
             except Exception:
-                raise TranslationError("Không kết nối được Chrome 9222. Chạy launch_chrome.bat rồi thử lại.") from None
-            page = _choose_tab(browser, source, target)
+                pass
+        self.playwright = self.browser = None
+
+    def translate(self, text, source, target, cancel=None):
+        from playwright.sync_api import sync_playwright
+
+        _check_cancel(cancel)
+        if not text:
+            raise TranslationError("Nhập nội dung cần dịch.")
+        try:
+            if self.browser is None or not self.browser.is_connected():
+                self.close()
+                try:
+                    self.playwright = sync_playwright().start()
+                    self.browser = self.playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+                except Exception:
+                    self.close()
+                    raise TranslationError("Không kết nối được Chrome 9222. Chạy launch_chrome.bat rồi thử lại.") from None
+            page = _choose_tab(self.browser, source, target)
             return " ".join(_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text))
-        # Disconnect Playwright only: never close the user's browser or app tab.
-    except TranslationError:
-        raise
-    except Exception:
-        raise TranslationError("Mất kết nối với tab ứng dụng khi dịch. Mở lại app trong Chrome và Retry.") from None
+        except TranslationError:
+            raise
+        except Exception:
+            self.close()
+            raise TranslationError("Mất kết nối với tab ứng dụng khi dịch. Mở lại app trong Chrome và Retry.") from None
+
+
+def translate(text, source, target, cancel=None):
+    client = Client()
+    try:
+        return client.translate(text, source, target, cancel)
+    finally:
+        client.close()
