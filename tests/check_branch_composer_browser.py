@@ -90,7 +90,7 @@ def main():
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             dialog = page.locator('.branch-composer')
             expect(page.get_by_label('research ChatGPT tab', exact=True).locator('option:checked')).to_have_text('Updated conversation title')
-            expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(dialog.get_by_label('Tạo cuộc hội thoại ChatGPT mới', exact=True)).not_to_be_checked()
             expect(page.get_by_label('research Power', exact=True)).to_have_value('2')
             assert page.get_by_label('research Prompt', exact=True).locator('option').all_text_contents() == chat_prompts
             assert not page.get_by_text('Yêu cầu cách giải thích', exact=True).count()
@@ -221,7 +221,7 @@ def main():
             dialog.get_by_label('Tạo nhiều nhánh: mỗi dòng là một câu hỏi', exact=True).check()
             question.fill('First'); question.press('Enter'); question.type('Second')
             expect(question).to_have_value('First\nSecond')
-            expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(dialog.get_by_label('Tạo cuộc hội thoại ChatGPT mới', exact=True)).not_to_be_checked()
             dialog.get_by_role('button', name='Xếp hàng 2 nhánh', exact=True).click()
             expect(dialog).to_have_count(0)
             assert len(store.list(fixture.cid)) == 4

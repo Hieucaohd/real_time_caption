@@ -260,10 +260,9 @@ def main():
             expect(missing_source_dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True)).to_be_disabled()
             expect(missing_source_dialog).to_contain_text('Hãy bổ sung link và số thứ tự câu trả lời')
             missing_source_dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Keep draft while opening tab')
-            missing_source_dialog.get_by_label('New ChatGPT chat', exact=True).check()
             missing_source_dialog.get_by_role('button', name='Mở tab ChatGPT mới', exact=True).click()
             expect(missing_source_dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-empty-tab')
-            expect(missing_source_dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(missing_source_dialog.get_by_label('Tạo cuộc hội thoại ChatGPT mới', exact=True)).not_to_be_checked()
             expect(missing_source_dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep draft while opening tab')
             assert tab_events[-2:] == ['new-tab', 'scan']
             expect(missing_source_dialog.get_by_label('Đính kèm ngữ cảnh tổ tiên', exact=True)).not_to_be_checked()
@@ -354,7 +353,6 @@ def main():
                     return
                 route.fulfill(json={'key': 'fresh-branch-tab', 'title': 'Branch from parent', 'url': 'https://chatgpt.com/c/fresh-branch'})
             page.route('**/api/conversations/*/research/*/chatgpt-branch', create_branch)
-            dialog.get_by_label('New ChatGPT chat', exact=True).check()
             dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Keep this draft question')
             dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True).click()
             expect(dialog.get_by_role('alert')).to_contain_text('Branch unavailable')
@@ -363,7 +361,7 @@ def main():
             dialog.get_by_role('button', name='Tạo nhánh ChatGPT', exact=True).click()
             expect(dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-branch-tab')
             assert tab_events[-2:] == ['branch', 'scan']
-            expect(dialog.get_by_label('New ChatGPT chat', exact=True)).not_to_be_checked()
+            expect(dialog.get_by_label('Tạo cuộc hội thoại ChatGPT mới', exact=True)).not_to_be_checked()
             expect(dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep this draft question')
             expect(dialog).to_contain_text('Đã mở nhánh ChatGPT trong tab mới')
             assert len(branch_requests) == 2 and all(root['id'] in url for url in branch_requests)

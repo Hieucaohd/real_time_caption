@@ -26,6 +26,7 @@ class BranchConfig(BaseModel):
     attach_history: bool | None = None
     ancestor_depth: int | None = Field(default=None, ge=-1, le=10000, strict=True)
     new_chat: bool | None = None
+    tab_mode: Literal['existing', 'new', 'branch'] | None = None
 
 
 @preferences_router.get('/defaults')

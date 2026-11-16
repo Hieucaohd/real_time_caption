@@ -12,6 +12,8 @@ export default function ChatOptions({
   editPrompt,
   scope = "chat",
   disabled = false,
+  tabDisabled = false,
+  showNewChat = true,
 }) {
   const set = (key, next) => onChange({ [key]: next });
   return (
@@ -22,6 +24,7 @@ export default function ChatOptions({
           <select
             aria-label={scope + " ChatGPT tab"}
             value={value.selected_tab || ""}
+            disabled={tabDisabled}
             onChange={(e) => set("selected_tab", e.target.value)}
           >
             <option value="">Chọn tab Chrome…</option>
@@ -100,7 +103,7 @@ export default function ChatOptions({
         ["attach_history", "Đính kèm lịch sử chat"],
         ["screenshot", "Auto screenshot"],
         ["new_chat", "New ChatGPT chat"],
-      ].map(([key, label]) => (
+      ].filter(([key]) => key !== "new_chat" || showNewChat).map(([key, label]) => (
         <label className="toggle" key={key}>
           <input
             type="checkbox"

@@ -20,6 +20,8 @@ export default function BranchComposer({
   const [question, setQuestion] = useState(draft.question);
   const ancestors = draft.ancestors || [draft.parent];
   const [config, setConfig] = useState(() => ({ ...draft.config,
+    tab_mode: draft.config.tab_mode || (draft.config.new_chat ? "new" : "existing"),
+    new_chat: false,
     ancestor_depth: draft.config.ancestor_depth > 0 ? Math.min(draft.config.ancestor_depth, ancestors.length) : (draft.config.ancestor_depth ?? 0),
   }));
   const ancestorDepth = config.ancestor_depth ?? 0;
@@ -31,6 +33,9 @@ export default function BranchComposer({
   const [saving, setSaving] = useState(false);
   const [tabAction, setTabAction] = useState("");
   const branching = !!tabAction;
+  const tabMode = config.tab_mode;
+  const automaticTab = tabMode !== "existing";
+  const [preparedMode, setPreparedMode] = useState("existing");
   const [openedTab, setOpenedTab] = useState(null);
   const [tabNotice, setTabNotice] = useState("");
   const branchingRef = useRef(false);
@@ -54,6 +59,7 @@ export default function BranchComposer({
     questions.length > 0 &&
     questions.length <= 20 &&
     !!config.selected_tab &&
+    (!automaticTab || (preparedMode === tabMode && (tabMode !== "branch" || hasSource))) &&
     !sending &&
     !saving &&
     !branching &&
@@ -74,6 +80,15 @@ export default function BranchComposer({
     };
   }, []);
 
+  useEffect(() => {
+    setPreparedMode("existing");
+    setTabNotice("");
+    if (automaticTab) {
+      setPreparedMode("");
+      openChatGPTTab(tabMode, true);
+    }
+  }, [tabMode]);
+
   async function saveSettings() {
     if (savingRef.current || sendingRef.current || branchingRef.current) return;
     savingRef.current = true;
@@ -91,8 +106,12 @@ export default function BranchComposer({
     }
   }
 
-  async function openChatGPTTab(kind) {
-    if ((kind === "branch" && !hasSource) || branchingRef.current || sendingRef.current || savingRef.current) return;
+  async function openChatGPTTab(kind, automatic = false) {
+    if (branchingRef.current || sendingRef.current || savingRef.current) return;
+    if (kind === "branch" && !hasSource) {
+      setError("Node cha chưa có link và số thứ tự câu trả lời. Hãy bổ sung Nguồn ChatGPT hoặc chọn chế độ khác.");
+      return;
+    }
     branchingRef.current = true;
     setTabAction(kind);
     setOpenedTab(null);
@@ -101,9 +120,11 @@ export default function BranchComposer({
     setError("");
     try {
       const tab = await post(kind === "branch" ? `/conversations/${cid}/research/${draft.parent.id}/chatgpt-branch` : "/chrome-tabs", {});
+      if (!tab?.key) throw new Error("Không xác định được tab ChatGPT vừa tạo. Hãy kiểm tra Chrome rồi thử lại.");
       await scanTabs().catch(() => {});
       setOpenedTab(tab);
       setConfig((old) => ({ ...old, selected_tab: tab.key, new_chat: false }));
+      if (automatic) setPreparedMode(kind);
       setTabNotice(kind === "branch" ? "Đã mở nhánh ChatGPT trong tab mới, refresh danh sách và chọn tab nhánh để gửi câu hỏi."
         : "Đã mở ChatGPT trong tab mới, refresh danh sách và chọn tab đó để gửi câu hỏi.");
     } catch (e) {
@@ -214,11 +235,28 @@ export default function BranchComposer({
           </div>
           <div className="modal-body">
             <p className="muted">Node cha: {draft.parent.title}</p>
+            <div className="branch-ancestor-options">
+              {[
+                ["new", "Tạo cuộc hội thoại ChatGPT mới"],
+                ["branch", "Tạo nhánh từ cuộc hội thoại của node cha"],
+              ].map(([mode, label]) => <label className="toggle" key={mode}>
+                <input type="checkbox" checked={tabMode === mode} disabled={sending || saving || branching}
+                  onChange={(e) => {
+                    setError("");
+                    setConfig((old) => ({ ...old, tab_mode: e.target.checked ? mode : "existing", new_chat: false }));
+                  }} />
+                {label}
+              </label>)}
+              <p className="muted">Chỉ chọn một chế độ. Khi bật hoặc mở lại hộp tạo node con với chế độ đã lưu,
+                app tự mở và chọn tab mới. Bỏ cả hai để chọn tab thủ công.</p>
+              {automaticTab && preparedMode !== tabMode && !branching && (tabMode !== "branch" || hasSource) &&
+                <button type="button" disabled={sending || saving} onClick={() => openChatGPTTab(tabMode, true)}>Thử tạo tab lại</button>}
+            </div>
             <div className="branch-save-settings">
-              <button type="button" onClick={() => openChatGPTTab("new")} disabled={sending || saving || branching}>
+              <button type="button" onClick={() => openChatGPTTab("new")} disabled={automaticTab || sending || saving || branching}>
                 <Plus size={15} />{tabAction === "new" ? "Đang mở tab ChatGPT…" : "Mở tab ChatGPT mới"}
               </button>
-              <button type="button" onClick={() => openChatGPTTab("branch")} disabled={!hasSource || sending || saving || branching}>
+              <button type="button" onClick={() => openChatGPTTab("branch")} disabled={automaticTab || !hasSource || sending || saving || branching}>
                 <GitBranch size={15} />{tabAction === "branch" ? "Đang tạo nhánh ChatGPT…" : "Tạo nhánh ChatGPT"}
               </button>
               <span role="status">
@@ -242,6 +280,8 @@ export default function BranchComposer({
               editPrompt={() => setEditingPrompt(true)}
               scope="research"
               disabled={sending || saving || branching}
+              tabDisabled={automaticTab}
+              showNewChat={false}
             />
             <div className="branch-ancestor-options">
               <label className="toggle">
@@ -361,8 +401,8 @@ export default function BranchComposer({
               Tạo nhiều nhánh: mỗi dòng là một câu hỏi
             </label>
             <p className="branch-explanation">
-              {config.new_chat
-                ? "Bạn đã bật tạo cuộc chat mới cho mỗi câu hỏi."
+              {automaticTab
+                ? "Gửi vào tab mới do chế độ đã chọn tạo ra. Nếu tạo nhiều nhánh cùng lúc, các câu hỏi dùng chung tab này."
                 : "Gửi vào cuộc hội thoại đang mở trong tab ChatGPT đã chọn."}{" "}
               Dùng mẫu prompt của Chat. Các node dùng tab ChatGPT khác nhau chạy song song;
               cùng một tab thì gửi lần lượt. Ngữ cảnh

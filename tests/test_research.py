@@ -60,6 +60,23 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(self.client.put(url, json={**config, 'power': 9}, headers=self.headers).status_code, 422)
         self.assertEqual(self.client.get(url).json(), config)
 
+    def test_tab_modes_persist_and_reject_unknown_modes(self):
+        self.service.busy = True
+        url = '/api/research/defaults'
+        for mode in ('new', 'branch', 'existing'):
+            config = {'selected_tab': 'prepared-tab', 'tab_mode': mode, 'new_chat': False}
+            response = self.client.put(url, json=config, headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(ResearchStore(self.service.store).defaults(), config)
+            node = self.child(config=config)[0]
+            saved = self.store.get(self.cid, node['id'])['config']
+            self.assertEqual(saved['tab_mode'], mode)
+            self.assertEqual(saved['selected_tab'], 'prepared-tab')
+            self.assertFalse(saved['new_chat'])
+        response = self.client.put(url, json={'tab_mode': 'both'}, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.client.get(url).json()['tab_mode'], 'existing')
+
     def test_import_is_idempotent_snapshot_and_scoped_to_conversation(self):
         again = self.post(self.base + '/import', {'message_id': self.mid}).json()
         self.assertEqual(again['id'], self.root_node['id'])
