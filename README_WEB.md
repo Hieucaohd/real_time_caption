@@ -43,7 +43,15 @@ Log build: `build\web-exe\build.log`; báo cáo kiểm tra: `build\web-exe\selft
 - **Chat:** chọn tab ChatGPT, prompt có phiên bản, Power, giới hạn transcript, đính kèm transcript/lịch sử, tự chụp màn hình, chọn màn hình/cửa sổ để chụp, upload file/ảnh và Ctrl+V ảnh. Kết quả hỗ trợ Markdown, bảng, code, công thức, copy và tải MD/DOCX/PDF. Có streaming preview, Cancel và Retry.
 - **Nghiên cứu theo nhánh:** chuyển một câu trả lời Chat thành cây hỏi–đáp; bôi đen/chuột phải để hỏi sâu hơn, tạo nhiều nhánh độc lập, thu gọn, tìm node, zoom, đọc Markdown/công thức và đánh dấu đã hiểu.
 - **Summary:** tab Chrome và cài đặt riêng, chọn prompt/version, bật/tắt transcript, tạo chat mới, xem lịch sử và xuất kết quả.
-- **Translation:** Azure, Google API, Gemini, Google Translate web, VinAI offline; tự dịch câu đã chốt, tùy chọn dịch tạm, nhóm câu, dịch phần còn thiếu hoặc câu được chọn, Stop/Retry, lịch sử theo engine, kiểm tra cấu hình và tải model offline. VinAI cần `requirements-translation.txt`, giống native.
+- **Translation:** Azure, Google API, Chrome Translator API (trên máy), Gemini, Google Translate web, VinAI offline; tự dịch câu đã chốt, tùy chọn dịch tạm, nhóm câu, dịch phần còn thiếu hoặc câu được chọn, Stop/Retry, lịch sử theo engine, kiểm tra cấu hình và tải model offline. VinAI cần `requirements-translation.txt`, giống native.
+
+### Chrome Translator API
+
+Mở app bằng `launch_chrome.bat`. Trong **Settings → Translation**, chọn **Chrome Translator API (trên máy)**, chọn ngôn ngữ nguồn/đích, rồi bấm **Tải / khởi tạo gói ngôn ngữ**. Chờ báo **Sẵn sàng**, bấm **Save settings**, sau đó bật **Auto translate** trong tab Translation. Đặt số câu mỗi nhóm bằng 1 để dịch ngay khi câu được chốt; bật dịch preview nếu muốn dịch cả câu đang nói.
+
+Không cần API key, không tính phí theo ký tự. Lần đầu Chrome có thể cần tải mô hình qua Internet; tiến trình hiển thị trong Settings. Giữ tab ứng dụng mở trong Chrome 9222: mô hình chạy trong tab này, backend lấy kết quả qua CDP và lưu vào cùng SQLite/lịch sử dịch của native app. Stop/Retry và dịch phần còn thiếu vẫn dùng cơ chế hiện tại. Native cũng dùng được engine này khi tab web đã sẵn sàng. Sau khi tải lại trang, app dùng lại gói đã sẵn có nếu Chrome cho phép; nếu Chrome yêu cầu khởi tạo lại, mở Settings và bấm khởi tạo. App không tự chuyển sang dịch vụ trả phí khi Chrome gặp lỗi.
+
+Khả năng hỗ trợ tùy phiên bản Chrome desktop và cặp ngôn ngữ; Settings kiểm tra trực tiếp trên trình duyệt. Tham khảo [tài liệu Translator API](https://developer.chrome.com/docs/ai/translator-api).
 - **New words:** tìm ngữ cảnh trong transcript, dịch bằng ChatGPT, chọn Power, lưu vào Voca và chọn collection. Lịch sử thẻ từ được lưu chung trong SQLite và hiển thị ở hai giao diện.
 - **Prompt editor / Settings:** sửa phiên bản hiện tại hoặc lưu phiên bản mới, dùng chung file với native app. API key được lưu tại `settings.json` trên máy này.
 - **Caption overlay:** dùng lại overlay Windows của native app để luôn nổi trên các ứng dụng khác, kéo vị trí, chỉnh cỡ chữ, số dòng, nền trong suốt và click-through. Đây là cửa sổ Windows riêng; tab Chrome không thể tự áp dụng click-through.

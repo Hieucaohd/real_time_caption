@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .paths import MODELS_DIR
 
-ENGINES = {"azure": "Azure Translator", "google": "Google Cloud Translation", "google_web": "Google Translate (Chrome)", "gemini": "Gemini API", "vinai": "VinAI offline"}
+ENGINES = {"azure": "Azure Translator", "google": "Google Cloud Translation", "chrome": "Chrome Translator API (trên máy)", "google_web": "Google Translate (Chrome)", "gemini": "Gemini API", "vinai": "VinAI offline"}
 LANGUAGES = {"en": "English", "vi": "Vietnamese", "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "fr": "French", "de": "German", "es": "Spanish"}
 OFFLINE_REPO = "vinai/vinai-translate-en2vi-v2"
 OFFLINE_DIR = MODELS_DIR / "translation" / "vinai-en2vi-v2"
@@ -109,6 +109,9 @@ class Translator:
 
     def translate(self, text, config: Config, cancel=None):
         config.validate()
+        if config.engine == "chrome":
+            from .chrome_translate import translate
+            return translate(text.strip(), config.source, config.target, cancel)
         if config.engine == "google_web":
             from .google_translate import translate
             return translate(text.strip(), config.source, config.target, cancel)

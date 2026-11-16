@@ -7,6 +7,8 @@ import AttachmentList from "./AttachmentList";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
+import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
+import { chromeTranslator } from "./chromeTranslator";
 import { createChatGPTTabLoader } from "./chatGPTTabs";
 import {
   AudioLines,
@@ -51,6 +53,7 @@ import "./theme.css";
 // marker to return to the exact caller without reloading its draft or modal.
 const appTabId = crypto.randomUUID();
 document.documentElement.dataset.rtcTabId = appTabId;
+window.__rtcChromeTranslator = chromeTranslator;
 
 async function api(path, options = {}, raw = false) {
   const headers = { "X-RTC-Client": "web", "X-RTC-Tab": appTabId, ...options.headers };
@@ -1607,6 +1610,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             checked={draft.translation_partial}
             onChange={(v) => set("translation_partial", v)}
           />
+          {draft.translation_engine === "chrome" && <ChromeTranslatorSettings
+            source={draft.translation_source} target={draft.translation_target} />}
           <div className="form-grid">
             {input("translation_azure_key", "Azure API key", "password")}
             {input("translation_azure_region", "Azure region")}
