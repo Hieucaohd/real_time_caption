@@ -58,6 +58,7 @@ class JobInput(BaseModel):
     max_lines: int | None = Field(default=None, ge=0, le=1_000_000)
     attach_transcript: bool | None = None
     attach_history: bool | None = None
+    screenshot: bool | None = None
     new_chat: bool | None = None
     files: list[str] = Field(default_factory=list, max_length=20)
     words: list[dict] = Field(default_factory=list, max_length=100)

@@ -1,4 +1,4 @@
-"""Automatic first-tab selection/new-tab fallback in Chat and child composer."""
+"""Saved Chat preferences, manual refresh, and independent child tab defaults."""
 from pathlib import Path
 import sys
 import threading
@@ -32,9 +32,10 @@ def main():
             page = browser.new_page(viewport={'width':1440, 'height':1000})
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
             available = [{'key':'first', 'title':'First ChatGPT'}, {'key':'second', 'title':'Second ChatGPT'}]
-            opened = []; failure = False
+            opened = []; scans = []; sent = []; failure = False
             def tabs(route):
                 if route.request.method == 'GET':
+                    scans.append(True)
                     route.fulfill(json=available)
                 else:
                     if failure:
@@ -43,18 +44,72 @@ def main():
                         opened.append(route.request.headers.get('x-rtc-tab'))
                         route.fulfill(json={'key':f'created-{len(opened)}', 'title':'New ChatGPT'})
             page.route('**/api/chrome-tabs', tabs)
+            def send(route):
+                sent.append(route.request.post_data_json)
+                route.fulfill(json={'id': 'mock-job', 'status': 'queued'})
+            page.route('**/api/conversations/*/jobs', send)
             page.goto(f'http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}')
             page.locator('nav button').nth(1).click()
             page.locator('.chat-settings summary').click()
             chat = page.get_by_label('chat ChatGPT tab', exact=True)
-            expect(chat).to_have_value('first')
-            assert Settings.load().chatgpt_selected_tab == 'first'
-            assert not opened
-            chat.select_option('second')
-            page.wait_for_timeout(1200)  # Bootstrap polling must not override an intentional selection.
             expect(chat).to_have_value('second')
+            assert Settings.load().chatgpt_selected_tab == 'second'
+            assert not scans
+            assert not opened
             page.get_by_role('button', name='Refresh Chrome tabs', exact=True).click()
+            expect(chat.locator('option[value="first"]')).to_have_count(1)
+            expect(chat).to_have_value('second')
+            assert len(scans) == 1
+            chat.select_option('first')
+            page.get_by_label('chat Power', exact=True).select_option('2')
+            page.get_by_label('chat transcript lines', exact=True).fill('42')
+            page.get_by_role('checkbox', name='Đính kèm transcript', exact=True).uncheck()
+            page.get_by_role('checkbox', name='Đính kèm lịch sử chat', exact=True).check()
+            page.get_by_role('checkbox', name='Auto screenshot', exact=True).check()
+            page.get_by_role('checkbox', name='New ChatGPT chat', exact=True).check()
+            page.wait_for_timeout(1200)  # Bootstrap polling must not override an intentional selection.
             expect(chat).to_have_value('first')
+            assert Settings.load().chatgpt_selected_tab == 'second'  # Still a draft.
+            page.locator('nav button').nth(0).click()
+            page.locator('nav button').nth(1).click()
+            page.locator('.chat-settings summary').click()
+            expect(chat).to_have_value('first')
+            assert len(scans) == 1
+            # Sending uses all current draft options, without silently saving them.
+            page.locator('.chat-composer textarea').fill('Use these draft options')
+            page.get_by_role('button', name='Send', exact=True).click()
+            page.wait_for_timeout(200)
+            assert sent[-1]['selected_tab'] == 'first'
+            assert sent[-1]['power'] == 2 and sent[-1]['max_lines'] == 42
+            assert sent[-1]['attach_transcript'] is False
+            assert sent[-1]['attach_history'] and sent[-1]['screenshot'] and sent[-1]['new_chat']
+            assert Settings.load().chatgpt_selected_tab == 'second'
+            page.get_by_role('button', name='Lưu cài đặt Chat', exact=True).click()
+            expect(page.locator('.toast')).to_contain_text('Đã lưu cài đặt Chat')
+            saved = Settings.load()
+            assert saved.chatgpt_selected_tab == 'first' and saved.chatgpt_selected_tab_title == 'First ChatGPT'
+            assert saved.chat_chatgpt_power == 2 and saved.chat_max_lines == 42
+            assert saved.chat_attach_transcript is False and saved.chat_attach_history is True
+            assert saved.chat_screenshot is True and saved.chat_new_chat is True
+            assert saved.chat_prompt
+            page.reload()
+            page.locator('nav button').nth(1).click()
+            page.locator('.chat-settings summary').click()
+            expect(chat).to_have_value('first')
+            expect(chat.locator('option:checked')).to_have_text('First ChatGPT')
+            expect(page.get_by_label('chat Power', exact=True)).to_have_value('2')
+            expect(page.get_by_label('chat transcript lines', exact=True)).to_have_value('42')
+            expect(page.get_by_role('checkbox', name='Đính kèm transcript', exact=True)).not_to_be_checked()
+            expect(page.get_by_role('checkbox', name='New ChatGPT chat', exact=True)).to_be_checked()
+            assert len(scans) == 1
+            # A new local conversation also keeps the saved ChatGPT tab.
+            page.once('dialog', lambda dialog: dialog.accept('Another conversation'))
+            page.get_by_role('button', name='New conversation', exact=True).click()
+            page.wait_for_timeout(300)
+            expect(chat).to_have_value('first')
+            assert len(scans) == 1
+            # Return to the original conversation, which has a research root.
+            page.get_by_role('button', name='Shared lesson', exact=False).click()
             available.clear()
             page.get_by_role('button', name='Refresh Chrome tabs', exact=True).click()
             expect(chat).to_have_value('created-1')
@@ -84,9 +139,22 @@ def main():
             expect(child).to_have_value('created-3')
             expect(dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Keep this question')
             assert len(opened) == 3
+            dialog.get_by_role('button', name='Đóng tạo nhánh', exact=True).click()
+            # A first-time Chat with no saved tab still discovers/creates once.
+            defaults = Settings.load(); defaults.chatgpt_selected_tab = ''; defaults.save()
+            page.reload()
+            page.locator('nav button').nth(1).click()
+            page.locator('.chat-settings summary').click()
+            expect(chat).to_have_value('created-4')
+            scan_count = len(scans)
+            page.locator('nav button').nth(0).click()
+            page.locator('nav button').nth(1).click()
+            page.locator('.chat-settings summary').click()
+            expect(chat).to_have_value('created-4')
+            assert len(scans) == scan_count and len(opened) == 4
             assert not errors, errors
             browser.close()
-            print('Automatic ChatGPT tabs: first tab, manual choice, refresh, empty-list creation, no duplicates, child defaults and retry passed.')
+            print('Chat settings: draft send, explicit save, reload, no navigation rescans, manual refresh/fallback; child defaults and retry passed.')
     finally:
         server.should_exit = True; thread.join(timeout=10); fixture.tearDown()
 

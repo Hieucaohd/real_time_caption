@@ -208,6 +208,17 @@ class WebApiTests(unittest.TestCase):
         messages=self.service.store.messages(self.cid)
         self.assertEqual([m.role for m in messages],['user','bot'])
 
+    def test_chat_screenshot_uses_request_option_without_overwriting_saved_default(self):
+        current = settings.Settings.load()
+        current.chat_screenshot = True
+        current.save()
+        with patch('web_api.screen.capture') as capture, patch('web_api.service.chatgpt.ask', return_value='Answer'):
+            job = self.post(f'/api/conversations/{self.cid}/jobs',
+                {'message': 'No screenshot this time', 'selected_tab': 'tab', 'screenshot': False}).json()
+            self.assertEqual(self.wait_job(job['id'])['status'], 'done')
+            capture.assert_not_called()
+        self.assertTrue(settings.Settings.load().chat_screenshot)
+
     def test_prompt_versions_share_native_directory_and_reject_traversal(self):
         result=self.post('/api/prompts/chat',{'name':'Web version','text':'New {message}'}).json()
         self.assertIn(result['name'],prompt_versions.list_versions(prompt_versions.CHAT_DIR))

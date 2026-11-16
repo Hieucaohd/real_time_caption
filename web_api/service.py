@@ -303,7 +303,7 @@ class Service:
                     attachments.append(history)
             for name in payload.get('files', []):
                 attachments.append(self.file_path(cid, name))
-            if kind == 'chat' and settings.chat_screenshot and not any(p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp') for p in attachments):
+            if kind == 'chat' and payload.get('screenshot', settings.chat_screenshot) and not any(p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp') for p in attachments):
                 from .screen import capture
                 shot = capture(self.conversation(cid).screenshots_dir)
                 relative = shot.relative_to(self.conversation(cid).folder).as_posix()

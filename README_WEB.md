@@ -166,6 +166,10 @@ Lựa chọn lưu trong bảng `livecaptions_preferences` của SQLite, dùng ch
 
 Backend điều khiển các nút qua UI Automation và xác nhận trạng thái thực tế. Giao diện Windows có thể hiện khi bạn chủ động tải danh sách hoặc áp dụng cài đặt. Ngôn ngữ chưa sẵn sàng sẽ báo cần hoàn tất thiết lập/tải gói trong Live Captions. Danh sách ngôn ngữ được dùng lại theo cửa sổ, tiến trình và ngôn ngữ Windows hiện tại, không phụ thuộc khóa AppSessionId. Bộ đọc giữ Unicode và đọc từ vùng chứa phụ đề nếu phần tử chữ tạm thời trống. Lỗi đọc thật vẫn hiển thị; nút đóng thông báo không để cùng lỗi xuất hiện lại ở mỗi lần cập nhật giao diện.
 
-## T? ch?n tab ChatGPT
+## Lưu cài đặt Chat và chọn tab ChatGPT
 
-Khi m? Chat ho?c h?p t?o node con ? ch? ?? d?ng tab c? s?n, app t? t?i danh s?ch v? ch?n tab ChatGPT ??u ti?n; tab ?? l?u tr??c ?? kh?ng ghi ?? l?a ch?n m?c ??nh n?y. N?u danh s?ch tr?ng, app t? m? `https://chatgpt.com/` trong m?t tab Chrome 9222 v? ch?n tab v?a m?. B?m Refresh th?c hi?n l?i vi?c ch?n m?c ??nh. Ng??i d?ng v?n c? th? ch?n tab kh?c th? c?ng. C?c ch? ?? t?o cu?c h?i tho?i m?i/t?o nh?nh t? node cha gi? tab ri?ng v?a t?o. C?c l??t t?i ??ng th?i d?ng chung y?u c?u ?? tr?nh m? tr?ng; l?i k?t n?i ho?c m? tab hi?n th?ng b?o v? kh?ng g?i c?u h?i t?i tab c?.
+Trong **Chat → Tùy chọn Chat**, bấm **Lưu cài đặt Chat** để lưu tab ChatGPT đang chọn (mã tab và tên hiển thị), prompt, Power, số dòng transcript, đính kèm transcript/lịch sử, Auto screenshot và New ChatGPT chat vào `settings.json` dùng chung với native. Các tùy chọn đang chỉnh được dùng ngay khi gửi và giữ lại khi chuyển tab/conversation; chỉ bấm Lưu mới thay đổi mặc định cho lần mở app tiếp theo. Việc sửa/lưu nội dung mẫu prompt vẫn thực hiện trong trình chỉnh sửa prompt.
+
+Mở lại Chat hoặc chuyển conversation không tải lại danh sách Chrome và không đổi tab đã chọn. Khi có tab đã lưu, F5 cũng khôi phục lựa chọn mà không quét Chrome. Bấm **Refresh** để tải lại danh sách: giữ tab đang chọn nếu còn tồn tại, nếu không thì chọn tab đầu tiên; nếu không có tab ChatGPT nào thì mở một tab mới. Bấm Lưu để ghi nhớ lựa chọn mới. Lần đầu chưa có tab đã lưu, app tự tìm/tạo tab một lần. Nếu tab đã lưu bị đóng, yêu cầu gửi có thể báo không tìm thấy tab; dùng Refresh để chọn lại.
+
+Hộp tạo node con vẫn tự tải danh sách và chọn tab đầu tiên khi dùng tab có sẵn; các chế độ tạo cuộc hội thoại mới/tạo nhánh từ node cha giữ tab riêng vừa tạo. Các lượt tải đồng thời dùng chung yêu cầu để tránh mở trùng.

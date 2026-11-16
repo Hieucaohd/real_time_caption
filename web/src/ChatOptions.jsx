@@ -1,5 +1,5 @@
 import React from "react";
-import { Pencil, RefreshCw } from "lucide-react";
+import { Pencil, RefreshCw, Save } from "lucide-react";
 
 // Chat and research deliberately share the same controls and prompt catalogue.
 export default function ChatOptions({
@@ -14,6 +14,8 @@ export default function ChatOptions({
   disabled = false,
   tabDisabled = false,
   showNewChat = true,
+  onSave,
+  saving = false,
 }) {
   const set = (key, next) => onChange({ [key]: next });
   return (
@@ -36,7 +38,7 @@ export default function ChatOptions({
             {value.selected_tab &&
               !tabs.some((t) => t.key === value.selected_tab) && (
                 <option value={value.selected_tab}>
-                  Tab đã lưu — Refresh để xem
+                  {value.selected_tab_title || "Tab đã lưu — Refresh để xem"}
                 </option>
               )}
           </select>
@@ -113,6 +115,9 @@ export default function ChatOptions({
           {label}
         </label>
       ))}
+      {onSave && <button type="button" onClick={onSave} disabled={saving || loadingTabs}>
+        <Save size={16} /> {saving ? "Đang lưu…" : "Lưu cài đặt Chat"}
+      </button>}
     </fieldset>
   );
 }

@@ -10,6 +10,7 @@ import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import { chromeTranslator } from "./chromeTranslator";
 import { createChatGPTTabLoader } from "./chatGPTTabs";
+import { chatPreferences, savedChatPreferences } from "./chatPreferences";
 import {
   AudioLines,
   Plus,
@@ -155,13 +156,14 @@ function App() {
     [loadingTabs, setLoadingTabs] = useState(false);
   const tabLoader = useRef(null), tabLoads = useRef(0), chatPreparation = useRef(0);
   if (!tabLoader.current) tabLoader.current = createChatGPTTabLoader(api, post);
-  const [chatSelectedTab, setChatSelectedTab] = useState("");
+  const [chatDraft, setChatDraft] = useState(null);
+  const chatTabInitialized = useRef(false);
+  const [savingChat, setSavingChat] = useState(false);
   const [preparingChatTab, setPreparingChatTab] = useState(false);
   const [message, setMessage] = useState(""),
     [files, setFiles] = useState([]),
     [uploading, setUploading] = useState(false);
-  const [attach, setAttach] = useState(true),
-    [newChat, setNewChat] = useState(false),
+  const [newChat, setNewChat] = useState(false),
     [summaryId, setSummaryId] = useState(null);
   const [words, setWords] = useState(""),
     [saveVoca, setSaveVoca] = useState(false),
@@ -189,6 +191,13 @@ function App() {
   const visibleError = error || (captureError !== dismissedCaptureError ? captureError : "");
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
+  const chatConfig = chatDraft || chatPreferences(settings);
+  const chatSelectedTab = chatConfig.selected_tab;
+  const chatConfigRef = useRef(chatConfig);
+  chatConfigRef.current = chatConfig;
+  useEffect(() => {
+    if (boot) setChatDraft((old) => old || chatPreferences(boot.settings));
+  }, [!!boot]);
   useLayoutEffect(() => {
     if (!boot) return;
     const theme = settings.web_theme === "dark" ? "dark" : "light";
@@ -267,9 +276,11 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
-    if (tab !== "chat" || !boot || !cid) return;
-    prepareChatTab();
-    return () => { chatPreparation.current += 1; };
+    if (tab !== "chat" || !boot || !cid || chatTabInitialized.current) return;
+    chatTabInitialized.current = true;
+    // A saved selection is usable without opening Chrome's tab list. Only a
+    // first-time setup with no saved tab discovers/creates a default once.
+    if (!chatConfigRef.current.selected_tab) prepareChatTab();
   }, [tab, cid, !!boot]);
   useEffect(() => {
     if (follow && tab === "transcript")
@@ -368,16 +379,28 @@ function App() {
   async function prepareChatTab() {
     const revision = ++chatPreparation.current;
     setPreparingChatTab(true);
-    setChatSelectedTab("");
     try {
       const tabs = await scanTabs({ ensure: true });
       if (revision !== chatPreparation.current) return;
       if (!Array.isArray(tabs)) return; // scanTabs already displays the connection error.
-      const key = tabs[0].key;
-      setChatSelectedTab(key);
-      await changeSettings({ chatgpt_selected_tab: key });
+      const chosen = tabs.find((t) => t.key === chatConfigRef.current.selected_tab) || tabs[0];
+      setChatDraft((old) => ({ ...(old || chatConfigRef.current),
+        selected_tab: chosen.key, selected_tab_title: chosen.title }));
     } catch (e) { setError(e.message); }
     finally { if (revision === chatPreparation.current) setPreparingChatTab(false); }
+  }
+  async function saveChatSettings() {
+    if (savingChat) return;
+    setSavingChat(true);
+    try {
+      const value = { ...chatConfigRef.current };
+      value.prompt ||= boot.prompts.chat?.at(-1) || "";
+      value.selected_tab_title = chromeTabs.find((t) => t.key === value.selected_tab)?.title || value.selected_tab_title;
+      await changeSettings(savedChatPreferences(value));
+      setChatDraft(value);
+      setNotice("Đã lưu cài đặt Chat và tab ChatGPT đã chọn");
+    } catch (e) { setError(e.message); }
+    finally { setSavingChat(false); }
   }
   async function copy(text) {
     try {
@@ -433,10 +456,8 @@ function App() {
     const payload = { kind };
     if (kind === "chat")
       Object.assign(payload, {
+        ...chatConfig,
         message,
-        selected_tab: chatSelectedTab,
-        attach_transcript: attach,
-        new_chat: newChat,
         files: files.map((f) => f.path),
       });
     if (kind === "summary")
@@ -492,42 +513,14 @@ function App() {
     if (kind === "chat")
       return (
         <ChatOptions
-          value={{
-            selected_tab: chatSelectedTab,
-            prompt: settings.chat_prompt,
-            power: settings.chat_chatgpt_power,
-            max_lines: settings.chat_max_lines,
-            attach_transcript: attach,
-            attach_history: settings.chat_attach_history,
-            screenshot: settings.chat_screenshot,
-            new_chat: newChat,
-          }}
+          value={chatConfig}
           onChange={(patch) => {
             if ("selected_tab" in patch) {
               chatPreparation.current += 1;
-              setChatSelectedTab(patch.selected_tab);
               setPreparingChatTab(false);
+              patch = { ...patch, selected_tab_title: chromeTabs.find((t) => t.key === patch.selected_tab)?.title || "" };
             }
-            if ("attach_transcript" in patch)
-              setAttach(patch.attach_transcript);
-            else if ("new_chat" in patch) setNewChat(patch.new_chat);
-            else {
-              const keys = {
-                selected_tab: "chatgpt_selected_tab",
-                prompt: "chat_prompt",
-                power: "chat_chatgpt_power",
-                max_lines: "chat_max_lines",
-                attach_history: "chat_attach_history",
-                screenshot: "chat_screenshot",
-              };
-              action(() =>
-                changeSettings(
-                  Object.fromEntries(
-                    Object.entries(patch).map(([k, v]) => [keys[k], v]),
-                  ),
-                ),
-              );
-            }
+            setChatDraft((old) => ({ ...(old || chatConfigRef.current), ...patch }));
           }}
           tabs={chromeTabs}
           scanTabs={prepareChatTab}
@@ -535,6 +528,9 @@ function App() {
           tabDisabled={preparingChatTab}
           prompts={boot.prompts.chat || []}
           editPrompt={() => setPromptKind("chat")}
+          onSave={saveChatSettings}
+          saving={savingChat}
+          disabled={savingChat}
         />
       );
     return (
@@ -887,7 +883,7 @@ function App() {
                 settings={settings}
                 prompts={boot.prompts.chat || []}
                 refreshPrompts={refresh}
-                chatAttach={attach}
+                chatAttach={chatConfig.attach_transcript}
                 chromeTabs={chromeTabs}
                 scanTabs={scanTabs}
                 loadingTabs={loadingTabs}
@@ -976,17 +972,17 @@ function App() {
                     >
                       {chromeTabs.find(
                         (t) => t.key === chatSelectedTab,
-                      )?.title ||
+                      )?.title || chatConfig.selected_tab_title ||
                         (preparingChatTab
                           ? "Đang chọn tab ChatGPT…"
-                          : "Chọn tab ChatGPT")}
+                          : chatSelectedTab ? "Tab ChatGPT đã lưu" : "Chọn tab ChatGPT")}
                     </span>
                     <span
-                      title={settings.chat_prompt || boot.prompts.chat?.at(-1)}
+                      title={chatConfig.prompt || boot.prompts.chat?.at(-1)}
                     >
-                      {settings.chat_prompt || boot.prompts.chat?.at(-1)}
+                      {chatConfig.prompt || boot.prompts.chat?.at(-1)}
                     </span>
-                    {newChat && <b className="new-chat-indicator">Chat mới</b>}
+                    {chatConfig.new_chat && <b className="new-chat-indicator">Chat mới</b>}
                     <ChevronRight size={14} className="settings-chevron" />
                   </summary>
                   {options("chat")}
@@ -1502,11 +1498,12 @@ function App() {
           api={api}
           post={post}
           kind={promptKind}
-          selected={settings[promptKind + "_prompt"]}
+          selected={promptKind === "chat" ? chatConfig.prompt : settings[promptKind + "_prompt"]}
           close={() => setPromptKind(null)}
           done={(name) =>
             action(async () => {
-              await changeSettings({ [promptKind + "_prompt"]: name });
+              if (promptKind === "chat") setChatDraft((old) => ({ ...old, prompt: name }));
+              else await changeSettings({ [promptKind + "_prompt"]: name });
               setPromptKind(null);
             })
           }

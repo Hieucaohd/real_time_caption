@@ -36,7 +36,10 @@ class Settings:
     chat_chatgpt_power: int = -1
     vocab_chatgpt_power: int = -1
     chat_attach_history: bool = False  # local history is large and normally unnecessary
+    chat_attach_transcript: bool = True
+    chat_new_chat: bool = False
     chatgpt_selected_tab: str = ""  # invisible window.name key assigned to the chosen Chrome tab
+    chatgpt_selected_tab_title: str = ""  # display saved selection without scanning Chrome
     summary_chatgpt_selected_tab: str = ""  # independently selected Chrome tab for summaries
     chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
     research_selected_tab: str = ""
