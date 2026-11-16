@@ -60,6 +60,20 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(self.client.put(url, json={**config, 'power': 9}, headers=self.headers).status_code, 422)
         self.assertEqual(self.client.get(url).json(), config)
 
+    def test_child_names_persist_and_blank_names_fall_back_to_question(self):
+        self.service.busy = True
+        questions = ['Explain alpha in detail', 'Explain beta', 'Explain gamma']
+        nodes = self.child(questions=questions, titles=['  Alpha overview  ', '   '])
+        reopened = ResearchStore(self.service.store)
+        saved = [reopened.get(self.cid, node['id'], private=True) for node in nodes]
+        self.assertEqual([node['title'] for node in saved], ['Alpha overview', 'Explain beta', 'Explain gamma'])
+        self.assertEqual([node['question'] for node in saved], questions)
+        self.assertEqual(saved[0]['request']['prompt'], 'Question: Explain alpha in detail')
+        response = self.post(self.base + '/' + self.root_node['id'] + '/children', {
+            'questions': ['Question'], 'titles': ['x' * 101], 'config': {'selected_tab': 'existing'},
+        })
+        self.assertEqual(response.status_code, 422)
+
     def test_tab_modes_persist_and_reject_unknown_modes(self):
         self.service.busy = True
         url = '/api/research/defaults'

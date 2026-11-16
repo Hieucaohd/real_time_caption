@@ -18,6 +18,7 @@ export default function BranchComposer({
   created,
 }) {
   const [question, setQuestion] = useState(draft.question);
+  const [titles, setTitles] = useState([]);
   const ancestors = draft.ancestors || [draft.parent];
   const [config, setConfig] = useState(() => ({ ...draft.config,
     tab_mode: draft.config.tab_mode || (draft.config.new_chat ? "new" : "existing"),
@@ -202,6 +203,7 @@ export default function BranchComposer({
         `/conversations/${cid}/research/${draft.parent.id}/children`,
         {
           questions,
+          titles: questions.map((_, index) => (titles[index] || "").trim()),
           excerpt: draft.excerpt,
           parent_reading_mark: draft.parent_reading_mark,
           config,
@@ -333,6 +335,24 @@ export default function BranchComposer({
                 <blockquote>{draft.excerpt}</blockquote>
               </details>
             )}
+            {(batch ? questions : [question]).map((q, index) => (
+              <label className="field" key={index}>
+                <span>{batch ? `Tên node con ${index + 1}` : "Tên node con"}</span>
+                <input
+                  aria-label={batch ? `Tên node con ${index + 1}` : "Tên node con"}
+                  value={titles[index] || ""}
+                  maxLength={100}
+                  disabled={sending}
+                  placeholder="Để trống để dùng câu hỏi làm tên"
+                  onChange={(e) => setTitles((old) => {
+                    const next = [...old];
+                    next[index] = e.target.value;
+                    return next;
+                  })}
+                />
+                {batch && <small className="muted">Câu hỏi {index + 1}: {q}</small>}
+              </label>
+            ))}
             <div className="composer">
               <AttachmentList files={files} cid={cid} disabled={sending}
                 onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />

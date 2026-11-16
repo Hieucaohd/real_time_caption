@@ -86,6 +86,7 @@ class ChildLinkInput(BaseModel):
 
 class ChildrenInput(BaseModel):
     questions: list[Question] = Field(min_length=1, max_length=20)
+    titles: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]] = Field(default_factory=list, max_length=20)
     excerpt: str = Field(default='', max_length=20_000)
     config: BranchConfig = Field(default_factory=BranchConfig)
     files: list[str] = Field(default_factory=list, max_length=20)

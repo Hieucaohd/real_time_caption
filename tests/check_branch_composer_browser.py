@@ -175,12 +175,15 @@ def main():
             assert saved['prompt'] == 'v2 - Composer test'
             assert 'question' not in saved and 'files' not in saved
             question.fill('Explain limits')
+            dialog.get_by_label('Tên node con', exact=True).fill('Explain limits - custom name')
             question.press('Shift+Enter'); question.type('With examples')
             expect(question).to_have_value('Explain limits\nWith examples')
             page.screenshot(path='cache/branch-composer.png')
             question.press('Enter')
             expect(dialog).to_have_count(0)
             nodes = [n for n in store.list(fixture.cid) if n['parent_id']]
+            assert nodes[0]['title'] == 'Explain limits - custom name'
+            assert nodes[0]['question'] == 'Explain limits\nWith examples'
             assert len(nodes) == 1
             node = store.get(fixture.cid, nodes[0]['id'], private=True)
             assert node['request']['prompt'] == 'Shared template: Explain limits\nWith examples'
@@ -220,11 +223,14 @@ def main():
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             dialog.get_by_label('Tạo nhiều nhánh: mỗi dòng là một câu hỏi', exact=True).check()
             question.fill('First'); question.press('Enter'); question.type('Second')
+            dialog.get_by_label('Tên node con 1', exact=True).fill('First custom name')
+            expect(dialog.get_by_label('Tên node con 2', exact=True)).to_have_value('')
             expect(question).to_have_value('First\nSecond')
             expect(dialog.get_by_label('Tạo cuộc hội thoại ChatGPT mới', exact=True)).not_to_be_checked()
             dialog.get_by_role('button', name='Xếp hàng 2 nhánh', exact=True).click()
             expect(dialog).to_have_count(0)
             assert len(store.list(fixture.cid)) == 4
+            assert [n['title'] for n in store.list(fixture.cid)[-2:]] == ['First custom name', 'Second']
             # Reload restores prompt defaults and selects the first current tab, not the saved target.
             page.reload()
             page.locator('nav button').nth(2).click()

@@ -91,10 +91,12 @@ class Research:
                 context_file.write_text('\n\n---\n\n'.join(sections) + '\n', encoding='utf-8')
                 attachments.append(str(context_file))
             prepared = []
-            for question in payload['questions']:
+            titles = payload.get('titles', [])
+            for index, question in enumerate(payload['questions']):
+                title = titles[index].strip() if index < len(titles) else ''
                 prompt = chatgpt.build_prompt(upload, transcript.source, transcript.started,
                     prompt_versions.path_for(version, prompt_versions.CHAT_DIR), question)
-                prepared.append(dict(id=uuid.uuid4().hex, title=question.splitlines()[0][:100], question=question,
+                prepared.append(dict(id=uuid.uuid4().hex, title=title or question.splitlines()[0][:100], question=question,
                     excerpt=payload.get('excerpt', ''), config=config,
                     request=dict(prompt=prompt, attachments=attachments,
                                  ancestor_ids=[node['id'] for node in ancestors])))
