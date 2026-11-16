@@ -660,7 +660,7 @@ pre {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .translation-reading-head { flex-shrink: 0; }
-.translation-reading-scroll { flex: 1; min-height: 0; scrollbar-gutter: stable; }
+.translation-reading-scroll { flex: 1; min-height: 0; scrollbar-gutter: stable; overflow-anchor: none; }
 .translation-reading-columns { min-height: 100%; }
 .translation-reading-text + .translation-reading-text,
 .translation-reading-head > header + header { border-left: 1px solid var(--line); }
@@ -671,7 +671,13 @@ pre {
 .translation-reading-head h3 { margin: 0; font-size: 15px; }
 .translation-reading-head header small,
 .translation-reading-head header > span { font-size: 12px; color: var(--muted); font-weight: 400; }
-.translation-reading-text { min-width: 0; padding: 20px clamp(14px, 2.5vw, 40px) 40px; }
+.translation-reading-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 20px clamp(14px, 2.5vw, 40px) 40px;
+}
 .translation-reading-text p { margin: 0; font-size: 18px; line-height: 1.9; overflow-wrap: anywhere; white-space: normal; }
 .translation-sentence { border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .translation-sentence.is-highlighted { background: #fff0ad; color: #352b0a; }
