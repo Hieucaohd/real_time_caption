@@ -78,6 +78,12 @@ class ReadingMarkInput(BaseModel):
     mark: ReadingMark | None
 
 
+class ChildLinkInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    excerpt: Question
+    mark: ReadingMark
+
+
 class ChildrenInput(BaseModel):
     questions: list[Question] = Field(min_length=1, max_length=20)
     excerpt: str = Field(default='', max_length=20_000)
@@ -158,6 +164,11 @@ def attachment(cid: str, nid: str, position: int, request: Request):
 @router.put('/{nid}/reading-mark')
 def save_reading_mark(cid: str, nid: str, body: ReadingMarkInput, request: Request):
     return research(request, cid).store.update(cid, nid, reading_mark=body.mark.model_dump() if body.mark else None)
+
+
+@router.put('/{nid}/child-links/{child_id}')
+def link_child(cid: str, nid: str, child_id: str, body: ChildLinkInput, request: Request):
+    return research(request, cid).store.link_child(cid, nid, child_id, body.excerpt, body.mark.model_dump())
 
 @router.put('/{nid}/source')
 def save_source(cid: str, nid: str, body: ResponseSourceInput, request: Request):

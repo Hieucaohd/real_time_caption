@@ -22,6 +22,7 @@ import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
 import ResponseSource from "./ResponseSource";
 import BranchMarks from "./BranchMarks";
+import ChildLinkPicker from "./ChildLinkPicker";
 import AttachmentList from "./AttachmentList";
 import { selectedReadingMark, readingMarkRange, scrollToReadingMark } from "./readingMark";
 
@@ -91,6 +92,7 @@ export default function ResearchTab({
   const [readerExpanded, setReaderExpanded] = useState(false);
   const [menu, setMenu] = useState(null),
     [draft, setDraft] = useState(null);
+  const [linkSelection, setLinkSelection] = useState(null);
   const answer = useRef(null),
     contextButton = useRef(null),
     focusSeen = useRef(null);
@@ -121,6 +123,7 @@ export default function ResearchTab({
     setOpenRevision((value) => value + 1);
     localStorage.setItem(storageKey, JSON.stringify(id));
     setMenu(null);
+    setLinkSelection(null);
   }
   async function refresh() {
     const list = await api(base);
@@ -303,7 +306,7 @@ export default function ResearchTab({
     e.preventDefault();
     setMenu({
       x: Math.max(8, Math.min(e.clientX, window.innerWidth - 282)),
-      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 118)),
+      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 170)),
       excerpt,
       mark: selectedReadingMark(answer.current),
     });
@@ -713,11 +716,31 @@ export default function ResearchTab({
             <GitBranch size={16} />
             Tạo nhánh từ đoạn đã chọn
           </button>
+          <button role="menuitem" disabled={!menu.mark} onClick={() => {
+            if (menu.excerpt.length > 20000 || menu.mark.text.length > 20000) {
+              setError("Đoạn đã chọn quá dài. Hãy chọn tối đa 20.000 ký tự.");
+              return;
+            }
+            setLinkSelection({ parentId: selected, excerpt: menu.excerpt, mark: menu.mark });
+            setMenu(null);
+          }}>
+            <GitBranch size={16} />Chọn node con để liên kết
+          </button>
           <button role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => saveReadingMark()}>
             <Highlighter size={16} />Đánh dấu đã đọc tới đây
           </button>
         </div>
       )}
+      {linkSelection && <ChildLinkPicker selection={linkSelection} nodes={nodes}
+        close={() => setLinkSelection(null)} onSave={async childId => {
+          await api(`${base}/${linkSelection.parentId}/child-links/${childId}`, {
+            method: "PUT", body: { excerpt: linkSelection.excerpt, mark: linkSelection.mark },
+          });
+          window.getSelection()?.removeAllRanges();
+          setLinkSelection(null);
+          setNotice("Đã lưu liên kết tới node con.");
+          await refresh();
+        }} />}
       {draft && (
         <BranchComposer
           key={draft.parent.id}

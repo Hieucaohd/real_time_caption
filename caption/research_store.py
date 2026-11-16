@@ -214,6 +214,22 @@ class ResearchStore:
             return [dict(id=row['id'], title=row['title'], hidden=bool(row['hidden']), excerpt=row['excerpt'],
                          mark=json.loads(row['excerpt_mark']) if row['excerpt_mark'] else None) for row in rows]
 
+    def link_child(self, cid, nid, child_id, excerpt, mark):
+        """Move a direct child's source link without changing its frozen request."""
+        with self.conversations._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            parent = self.row(db.execute('SELECT * FROM research_nodes WHERE id=? AND conversation_id=?',
+                                        (nid, cid)).fetchone())
+            child = self.row(db.execute('SELECT * FROM research_nodes WHERE id=? AND conversation_id=?',
+                                       (child_id, cid)).fetchone())
+            if parent['status'] != 'done':
+                raise ValueError('Chờ câu trả lời của node cha hoàn tất trước khi liên kết.')
+            if child['parent_id'] != nid:
+                raise ValueError('Chỉ có thể liên kết tới node con trực tiếp của node đang đọc.')
+            db.execute('UPDATE research_nodes SET excerpt=?, excerpt_mark=?, updated_at=? WHERE id=? AND conversation_id=?',
+                       (excerpt, json.dumps(mark, ensure_ascii=False), now(), child_id, cid))
+            return self.row(db.execute('SELECT * FROM research_nodes WHERE id=?', (child_id,)).fetchone())
+
     def import_answer(self, cid, mid):
         messages = self.conversations.messages(cid)
         source = next((m for m in messages if m.id == mid and m.role == 'bot' and m.kind == 'chat'), None)
