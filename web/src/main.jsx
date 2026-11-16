@@ -6,6 +6,7 @@ import ResponseSource from "./ResponseSource";
 import AttachmentList from "./AttachmentList";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
+import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import {
   AudioLines,
   Plus,
@@ -1516,6 +1517,7 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
               <option value="dark">Tối</option>
             </select>
           </Field>
+          <LiveCaptionsSettings api={api} />
           <h3>Translation</h3>
           <div className="form-grid">
             <Field label="Engine">

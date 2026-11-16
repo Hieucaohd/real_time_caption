@@ -86,6 +86,8 @@ class Service:
                 self.transcript = transcript
                 self.capture = dict(active=True, conversation_id=cid, partial='', status='Connecting to Windows Live Captions…', error='')
                 self.reader = livecaptions.LiveCaptionsReader(self.on_caption)
+                from caption.livecaptions_settings import apply_saved
+                self.reader.configure = lambda: apply_saved(self.store)
                 self.reader.start()
             except Exception:
                 transcript.close()

@@ -141,6 +141,11 @@ class ConversationStore:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     theme TEXT NOT NULL CHECK (theme IN ('light', 'dark'))
                 );
+                CREATE TABLE IF NOT EXISTS livecaptions_preferences (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    microphone INTEGER CHECK (microphone IN (0, 1)),
+                    language TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
             db.execute('BEGIN IMMEDIATE')
@@ -173,6 +178,18 @@ class ConversationStore:
         with self._connect() as db:
             row = db.execute('SELECT theme FROM web_preferences WHERE id=1').fetchone()
         return row['theme'] if row else 'light'
+
+    def livecaptions_preferences(self):
+        with self._connect() as db:
+            row = db.execute('SELECT microphone, language FROM livecaptions_preferences WHERE id=1').fetchone()
+        return dict(microphone=bool(row['microphone']) if row and row['microphone'] is not None else None,
+                    language=row['language'] if row else '')
+
+    def save_livecaptions_preferences(self, preferences):
+        with self._connect() as db:
+            db.execute('''INSERT INTO livecaptions_preferences(id, microphone, language) VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET microphone=excluded.microphone, language=excluded.language''',
+                (preferences['microphone'], preferences['language']))
 
     def save_web_theme(self, theme: str) -> None:
         if theme not in ('light', 'dark'):

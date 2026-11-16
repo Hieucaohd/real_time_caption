@@ -149,3 +149,9 @@ Backend: `web_api/server.py`, `web_api/service.py`. Frontend: `web/src/main.jsx`
 Log backend: `caption-web.log`. Sửa backend cần restart tiến trình `web_main.py`; sửa frontend cần build lại và refresh tab. Để chạy foreground và dừng bằng Ctrl+C, dùng `python web_main.py` khi port 8765 chưa được dùng.
 
 API mutation yêu cầu header `X-RTC-Client: web` và cùng origin. Upload tối đa 50 MB/file; API phục vụ attachment chỉ đọc file nằm trong conversation được chọn. Trang có thể đọc các cài đặt nhạy cảm trên localhost, vì vậy không mở port backend ra Internet.
+
+## C?i ??t Windows Live Captions
+
+Trong **Settings ? Windows Live Captions**, b?m **T?i l?i ng?n ng? v? tr?ng th?i t? Windows** ?? ??c danh s?ch th?c t?. Ch?n **Nh?n gi?ng n?i t? micro**, ng?n ng? ph? ??, r?i b?m **L?u v? ?p d?ng cho Windows**. N?t n?y l?u ri?ng ph?n Live Captions; ng?n ng? ? ph?n Translation l? t?y ch?n kh?c.
+
+L?a ch?n l?u trong b?ng `livecaptions_preferences` c?a SQLite, d?ng chung v?i native app v? ???c ?p d?ng l?i khi b?t ??u l?y transcript. Khi ch?a l?u l?a ch?n, app gi? nguy?n c?i ??t Windows. Backend ?i?u khi?n c?c n?t Windows qua UI Automation, ??c l?i ?? x?c nh?n; giao di?n Windows c? th? hi?n trong l?c thao t?c. Ng?n ng? ch?a s?n s?ng s? b?o c?n ho?n t?t thi?t l?p/t?i g?i trong Live Captions, kh?ng b?o ?p d?ng th?nh c?ng. Danh s?ch ph? thu?c Windows tr?n m?y, kh?ng b?o ??m m?i ng?n ng? ??u ???c h? tr?.

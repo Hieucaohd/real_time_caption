@@ -1119,3 +1119,21 @@ footer {
 .chat-options .inline button {
   flex-shrink: 0;
 }
+.livecaptions-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  margin: 18px 0;
+  border: 1px solid var(--line, #d9e2dc);
+  border-radius: 10px;
+}
+.livecaptions-settings p { margin: 0; }
+.livecaptions-settings small { opacity: .8; }
+.livecaptions-settings .inline { justify-content: flex-start; }
+.livecaptions-settings input[type="checkbox"] { flex: none; width: auto; }
+.livecaptions-settings button:not(.primary) {
+  background: var(--surface-raised, #fff);
+  color: var(--text, #374b42);
+  white-space: normal;
+}

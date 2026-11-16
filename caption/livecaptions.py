@@ -130,6 +130,7 @@ class LiveCaptionsReader:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="livecaptions", daemon=True)
         self.level = 0.0  # no audio meter for this source
+        self.configure = None  # Optional shared preferences, applied on this COM thread.
 
     def start(self) -> None:
         self._thread.start()
@@ -180,6 +181,9 @@ class LiveCaptionsReader:
         return auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS).Exists(0.5)
 
     def _loop(self, auto) -> None:
+        if self.configure:
+            self._emit(Event('status', 'Applying Windows Live Captions settings…'))
+            self.configure()
         text_ctrl = self._find_text(auto, launch=True)
         if self._stop.is_set():
             return
