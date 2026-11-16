@@ -44,8 +44,13 @@ import "./reading-layout.css";
 import "./response-markdown.css";
 import "./theme.css";
 
+// Unique per document, including duplicated app tabs. Chrome automation uses this
+// marker to return to the exact caller without reloading its draft or modal.
+const appTabId = crypto.randomUUID();
+document.documentElement.dataset.rtcTabId = appTabId;
+
 async function api(path, options = {}) {
-  const headers = { "X-RTC-Client": "web", ...options.headers };
+  const headers = { "X-RTC-Client": "web", "X-RTC-Tab": appTabId, ...options.headers };
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(options.body);

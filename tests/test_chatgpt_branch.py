@@ -126,6 +126,9 @@ class NativeBranchUITests(unittest.TestCase):
         self.context.close()
 
     def serve(self, route):
+        if route.request.url.startswith('http://127.0.0.1:8765/'):
+            route.fulfill(content_type='text/html', body='<title>Real-time Caption</title><textarea>Keep draft</textarea><div style="height:3000px"></div>')
+            return
         path = route.request.url.removeprefix('https://chatgpt.com')
         if path == '/backend-api/conversation/source':
             route.fulfill(json={'mapping': conversation_mapping(), 'current_node': 'a4'})
@@ -201,6 +204,76 @@ class NativeBranchUITests(unittest.TestCase):
         self.assertEqual(selected.url, tab.url)
         self.assertEqual(len(self.context.pages), 2)
         self.assertEqual(self.requests, [])
+
+    def app_tab(self, marker):
+        page = self.context.new_page()
+        page.goto('http://127.0.0.1:8765/')
+        page.evaluate('(id) => { document.documentElement.dataset.rtcTabId = id; window.scrollTo(0, 400); }', marker)
+        return page
+
+    def assert_app_restored(self, app):
+        self.assertTrue(app.evaluate('document.hasFocus()'))
+        self.assertEqual(app.locator('textarea').input_value(), 'Keep draft')
+        self.assertEqual(app.evaluate('window.scrollY'), 400)
+
+    def test_new_tab_returns_to_exact_calling_app_without_reload(self):
+        app = self.app_tab('caller')
+        other = self.app_tab('other')  # Same URL/title; never restore by URL alone.
+        # Headless Chrome may report hasFocus() for multiple pages; spy on the
+        # actual activation call as well as checking the preserved DOM state.
+        with patch.object(app, 'bring_to_front', wraps=app.bring_to_front) as restore, \
+                patch.object(other, 'bring_to_front', wraps=other.bring_to_front) as wrong_tab:
+            tab = chatgpt._open_new_chatgpt_tab(self.browser, return_tab='caller')
+            restore.assert_called_once_with()
+            wrong_tab.assert_not_called()
+        self.assert_app_restored(app)
+        self.assertFalse(tab.focused)
+        selected, created = chatgpt._selected_chatgpt_tab(self.browser, tab.key)
+        self.assertFalse(created)
+        self.assertEqual(selected.url, 'https://chatgpt.com/')
+
+    def test_branch_popup_returns_to_caller_and_keeps_selected_branch(self):
+        app = self.app_tab('caller')
+        self.app_tab('other')
+        with patch.object(app, 'bring_to_front', wraps=app.bring_to_front) as restore:
+            result = chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2, return_tab='caller')
+            restore.assert_called_once_with()
+        self.assert_app_restored(app)
+        self.assertFalse(result['focused'])
+        selected, created = chatgpt._selected_chatgpt_tab(self.browser, result['key'])
+        self.assertFalse(created)
+        self.assertEqual(selected.url, result['url'])
+        self.assertEqual(len(self.requests), 1)
+
+    def test_failed_branch_also_returns_to_app_to_display_error(self):
+        app = self.app_tab('caller')
+        self.reject = True
+        with patch.object(app, 'bring_to_front', wraps=app.bring_to_front) as restore:
+            with self.assertRaises(chatgpt.ChatGPTError):
+                chatgpt_branch._branch_in_browser(self.browser, self.original.url, 2, return_tab='caller')
+            restore.assert_called_once_with()
+        self.assert_app_restored(app)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_closed_caller_or_unknown_marker_does_not_break_tab_creation(self):
+        app = self.app_tab('caller')
+        with chatgpt._return_to_web_tab(self.browser, 'caller') as focus:
+            app.close()
+            tab = chatgpt._open_new_chatgpt_tab(self.browser)
+        self.assertFalse(focus['restored'])
+        self.assertTrue(tab.key)
+        unknown = chatgpt._open_new_chatgpt_tab(self.browser, return_tab='missing')
+        self.assertTrue(unknown.key)
+        self.assertEqual(self.requests, [])
+
+    def test_focus_error_does_not_mask_successful_tab_creation(self):
+        app = self.app_tab('caller')
+        with patch.object(app, 'bring_to_front', side_effect=RuntimeError('window disappeared')), \
+                self.assertLogs('caption.chatgpt', level='WARNING'):
+            tab = chatgpt._open_new_chatgpt_tab(self.browser, return_tab='caller')
+        selected, created = chatgpt._selected_chatgpt_tab(self.browser, tab.key)
+        self.assertFalse(created)
+        self.assertEqual(selected.url, tab.url)
 
     def test_open_saved_response_scrolls_virtual_history_without_branching(self):
         url = 'https://chatgpt.com/g/project/c/source?keep=yes#saved'

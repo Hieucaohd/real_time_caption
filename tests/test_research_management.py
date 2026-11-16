@@ -188,12 +188,14 @@ class ResearchManagementTests(unittest.TestCase):
         self.store.update_response_source(self.cid, {'response_conversation_url': url, 'response_position': 3}, nid=self.root_node['id'])
         before = self.store.get(self.cid, self.root_node['id'])
         tab = {'key': 'branch-tab', 'title': 'Branch', 'label': 'Branch', 'url': 'https://chatgpt.com/c/new', 'focused': True}
-        def create(link, position):
+        def create(link, position, return_tab=''):
             self.assertTrue(self.service.busy)
             self.assertEqual((link, position), (url, 3))
+            self.assertEqual(return_tab, 'calling-app-tab')
             return tab
         with patch('caption.chatgpt_branch.create_branch', side_effect=create) as branch:
-            result = self.post(self.base + '/' + self.root_node['id'] + '/chatgpt-branch')
+            result = self.client.post(self.base + '/' + self.root_node['id'] + '/chatgpt-branch',
+                                     headers={**self.headers, 'X-RTC-Tab': 'calling-app-tab'})
             self.assertEqual(result.status_code, 200, result.text)
             self.assertEqual(result.json(), tab)
             branch.assert_called_once()

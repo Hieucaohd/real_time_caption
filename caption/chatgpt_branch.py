@@ -114,7 +114,15 @@ def source_conversation_id(url, position):
     return match[1]
 
 
-def _branch_in_browser(browser, url, position):
+def _branch_in_browser(browser, url, position, return_tab=''):
+    with chatgpt._return_to_web_tab(browser, return_tab) as focus:
+        tab = _branch_in_browser_impl(browser, url, position)
+    if focus['restored']:
+        tab['focused'] = False
+    return tab
+
+
+def _branch_in_browser_impl(browser, url, position):
     source_id = source_conversation_id(url, position)
     if not browser.contexts:
         raise chatgpt.ChatGPTError('Chrome chưa có cửa sổ để mở nhánh ChatGPT.')
@@ -205,7 +213,7 @@ def _branch_in_browser(browser, url, position):
 
 
 @chatgpt._shared_request
-def create_branch(url, position):
+def create_branch(url, position, return_tab=''):
     source_conversation_id(url, position)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -213,4 +221,4 @@ def create_branch(url, position):
             browser = p.chromium.connect_over_cdp(chatgpt.CDP_URL, timeout=10_000)
         except Exception as exc:
             raise chatgpt.ChatGPTError('Không kết nối được Chrome 9222. Hãy chạy launch_chrome.bat.') from exc
-        return _branch_in_browser(browser, url, position)
+        return _branch_in_browser(browser, url, position, return_tab)

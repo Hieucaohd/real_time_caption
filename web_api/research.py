@@ -100,7 +100,7 @@ class Research:
                                  ancestor_ids=[node['id'] for node in ancestors])))
             return self.store.add_children(cid, parent, prepared, parent_reading_mark=payload.get('parent_reading_mark'))
 
-    def create_chatgpt_branch(self, cid, nid):
+    def create_chatgpt_branch(self, cid, nid, return_tab=''):
         from caption.chatgpt_branch import create_branch, source_conversation_id
         with self.service.lock:
             node = self.store.get(cid, nid)
@@ -112,7 +112,7 @@ class Research:
                 raise BusyError('ChatGPT đang xử lý yêu cầu khác. Hãy đợi xong rồi tạo nhánh.')
             self.service.busy = True
         try:
-            return create_branch(url, position)
+            return create_branch(url, position, return_tab=return_tab)
         finally:
             with self.service.lock:
                 self.service.busy = False

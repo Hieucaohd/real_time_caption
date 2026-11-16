@@ -22,7 +22,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from functools import wraps
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -350,7 +350,43 @@ def _open_background_tab(browser):
         return context.new_page()
 
 
-def _open_new_chatgpt_tab(browser):
+@contextmanager
+def _return_to_web_tab(browser, tab_id):
+    """Restore only the app document that requested the action, even on failure."""
+    matches = []
+    if tab_id and len(tab_id) <= 100:
+        for context in browser.contexts:
+            for page in context.pages:
+                if urlsplit(page.url).hostname not in ('localhost', '127.0.0.1', '::1'):
+                    continue
+                try:
+                    if page.evaluate('(id) => document.documentElement?.dataset.rtcTabId === id', tab_id):
+                        matches.append(page)
+                except Exception:
+                    pass  # A page can close or navigate during discovery.
+    caller = matches[0] if len(matches) == 1 else None
+    state = {'restored': False}
+    try:
+        yield state
+    finally:
+        if caller:
+            try:
+                if not caller.is_closed():
+                    caller.bring_to_front()
+                    state['restored'] = True
+            except Exception:
+                # Focus restoration must not turn a successfully created tab into
+                # a failed request (which could cause duplicate branches on retry).
+                log.warning('Could not return to the calling app tab', exc_info=True)
+
+
+def _open_new_chatgpt_tab(browser, return_tab=''):
+    with _return_to_web_tab(browser, return_tab) as focus:
+        tab = _open_new_chatgpt_tab_impl(browser)
+    return replace(tab, focused=False) if focus['restored'] else tab
+
+
+def _open_new_chatgpt_tab_impl(browser):
     if not browser.contexts:
         raise ChatGPTError('Chrome chưa có cửa sổ để mở tab ChatGPT.')
     page = _open_background_tab(browser)
@@ -700,7 +736,7 @@ def _shared_request(function):
 
 
 @_shared_request
-def open_new_chatgpt_tab():
+def open_new_chatgpt_tab(return_tab=''):
     """Open a fresh ordinary ChatGPT tab in the same Chrome used by the app."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -708,7 +744,7 @@ def open_new_chatgpt_tab():
             browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
         except Exception as exc:
             raise ChatGPTError('Không kết nối được Chrome 9222. Hãy chạy launch_chrome.bat.') from exc
-        return _open_new_chatgpt_tab(browser)
+        return _open_new_chatgpt_tab(browser, return_tab)
 
 
 @contextmanager

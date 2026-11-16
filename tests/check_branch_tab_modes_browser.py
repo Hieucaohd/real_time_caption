@@ -31,18 +31,20 @@ def main():
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width':1440, 'height':1000})
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
-            calls = []; failed_branch = False
+            calls = []; caller_ids = []; failed_branch = False
 
             def chrome_tabs(route):
                 if route.request.method == 'GET':
                     # Deliberately stale scan: the returned tab must still appear and be selected.
                     route.fulfill(json=[{'key':'old-tab', 'title':'Existing tab'}])
                 else:
+                    caller_ids.append(route.request.headers.get('x-rtc-tab'))
                     calls.append('new')
                     route.fulfill(json={'key':f'new-{len(calls)}', 'title':'New conversation'})
 
             def branch_tab(route):
                 nonlocal failed_branch
+                caller_ids.append(route.request.headers.get('x-rtc-tab'))
                 assert f'/{root["id"]}/chatgpt-branch' in route.request.url
                 calls.append('branch')
                 if not failed_branch:
@@ -68,6 +70,7 @@ def main():
             new.check()
             expect(tabs).to_be_disabled()
             expect(tabs).to_have_value('new-1')
+            assert caller_ids[-1] == page.locator('html').get_attribute('data-rtc-tab-id')
             expect(branch).not_to_be_checked()
             save.click()
             expect(dialog).to_contain_text('Đã lưu vào database')
@@ -103,6 +106,7 @@ def main():
             page.get_by_role('button', name='Tạo nhánh con', exact=True).click()
             expect(branch).to_be_checked()
             expect(tabs).to_have_value('branch-5')
+            assert caller_ids[-1] == page.locator('html').get_attribute('data-rtc-tab-id')
             question.fill('Queued into the prepared branch')
             dialog.get_by_label('research Power', exact=True).select_option('2')
             with page.expect_response('**/research/*/children') as queued:
@@ -150,6 +154,7 @@ def main():
             expect(tabs).to_be_enabled()
             expect(tabs).to_have_value('old-tab')
             assert len(calls) == 6
+            assert all(caller_ids) and len(set(caller_ids)) == 3, caller_ids
             assert not errors, errors
             browser.close()
             print('Tab mode browser checks passed: exclusivity, automatic creation, locked dropdown, SQLite reload, stale scan, failure/retry, source validation, draft preservation, correct queued tab.')

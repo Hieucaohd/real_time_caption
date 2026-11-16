@@ -41,7 +41,10 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.json()['key'], tab.key)
             self.assertEqual(result.json()['url'], tab.url)
-            open_tab.assert_called_once_with()
+            open_tab.assert_called_once_with(return_tab='')
+            result = self.client.post('/api/chrome-tabs', headers={**self.headers, 'X-RTC-Tab': 'calling-app-tab'})
+            self.assertEqual(result.status_code, 200)
+            open_tab.assert_called_with(return_tab='calling-app-tab')
         with patch('web_api.server.chatgpt.open_new_chatgpt_tab', side_effect=chatgpt.ChatGPTError('Chrome unavailable')):
             self.assertEqual(self.post('/api/chrome-tabs').status_code, 400)
 

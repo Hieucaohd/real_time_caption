@@ -158,7 +158,7 @@ def children(cid: str, nid: str, body: ChildrenInput, request: Request):
 
 @router.post('/{nid}/chatgpt-branch')
 def create_chatgpt_branch(cid: str, nid: str, request: Request):
-    return research(request, cid).create_chatgpt_branch(cid, nid)
+    return research(request, cid).create_chatgpt_branch(cid, nid, return_tab=request.headers.get('x-rtc-tab', ''))
 
 
 @router.post('/{nid}/open-chatgpt')
