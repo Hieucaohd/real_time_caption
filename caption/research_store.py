@@ -75,7 +75,8 @@ class ResearchStore:
                                      ('response_turn_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('response_message_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('response_position', 'INTEGER CHECK(response_position >= 1)'),
-                                     ('reading_mark', 'TEXT')):
+                                     ('reading_mark', 'TEXT'),
+                                     ('excerpt_mark', 'TEXT')):
                 if name not in columns:
                     db.execute(f'ALTER TABLE research_nodes ADD COLUMN {name} {definition}')
             owners = db.execute("SELECT DISTINCT owner_pid FROM research_nodes WHERE status='working'").fetchall()
@@ -190,6 +191,7 @@ class ResearchStore:
         result['understood'] = bool(result['understood'])
         result['hidden'] = bool(result['hidden'])
         result['reading_mark'] = json.loads(result['reading_mark']) if result['reading_mark'] else None
+        result['excerpt_mark'] = json.loads(result['excerpt_mark']) if result['excerpt_mark'] else None
         if private:
             result['request'] = json.loads(result['request'])
         else:
@@ -203,6 +205,14 @@ class ResearchStore:
     def list(self, cid):
         with self.conversations._connect() as db:
             return [self.row(row) for row in db.execute('SELECT * FROM research_nodes WHERE conversation_id=? ORDER BY created_at, rowid', (cid,))]
+
+    def branch_marks(self, cid, nid):
+        """Read-only links to direct children; deleting/renaming children stays in sync."""
+        with self.conversations._connect() as db:
+            rows = db.execute('''SELECT id, title, hidden, excerpt, excerpt_mark FROM research_nodes
+                WHERE conversation_id=? AND parent_id=? AND excerpt != '' ORDER BY created_at, rowid''', (cid, nid))
+            return [dict(id=row['id'], title=row['title'], hidden=bool(row['hidden']), excerpt=row['excerpt'],
+                         mark=json.loads(row['excerpt_mark']) if row['excerpt_mark'] else None) for row in rows]
 
     def import_answer(self, cid, mid):
         messages = self.conversations.messages(cid)
@@ -326,6 +336,9 @@ class ResearchStore:
                     (child['id'], cid, parent['id'], parent['root_id'], child['title'], child['question'], child['excerpt'],
                      json.dumps(child['config'], ensure_ascii=False), json.dumps(child['request'], ensure_ascii=False), stamp, stamp))
                 self._archive_assets(db, child['id'], child['request'], known_assets)
+                if parent_reading_mark is not None:
+                    db.execute('UPDATE research_nodes SET excerpt_mark=? WHERE id=?',
+                               (json.dumps(parent_reading_mark, ensure_ascii=False), child['id']))
                 if parent['hidden']:
                     db.execute('UPDATE research_nodes SET hidden=1 WHERE id=?', (child['id'],))
             if parent_reading_mark is not None:

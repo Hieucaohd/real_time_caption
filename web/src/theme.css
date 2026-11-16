@@ -79,6 +79,8 @@
 :root[data-theme="dark"] ::selection { background: #547b65; color: #fff; }
 :root[data-theme="dark"] .research-answer ::selection { background: #655b92; color: #fff; }
 :root[data-theme="dark"] ::highlight(rtc-reading-mark) { background-color: #e4c65a; color: #201b05; }
+:root[data-theme="dark"] ::highlight(rtc-branch-marks) { background-color: #243e5b; color: #dbeafe; }
+:root[data-theme="dark"] .branch-mark-tooltip { background: #243e5b; color: #dbeafe; }
 
 /* Keep Markdown metrics and KaTeX layout identical in both themes. */
 :root[data-theme="dark"] .response-markdown {

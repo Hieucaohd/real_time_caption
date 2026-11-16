@@ -40,6 +40,8 @@ Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chr
 
 ## Nghiên cứu theo nhánh
 
+Các đoạn dùng để tạo node con có **dấu nhánh màu xanh, gạch chân** riêng với dấu đọc màu vàng. Di chuột lên đoạn để xem tên node con, hoặc mở **Các đoạn đã tạo nhánh** dưới câu trả lời để xem danh sách. Một đoạn tạo nhiều node sẽ liệt kê đủ các node; nhiều đoạn được giữ đồng thời. Dấu nhánh chỉ để xem, không có thao tác sửa/xóa riêng và không dùng làm vị trí tự cuộn. Bỏ/đổi dấu đọc không xóa dấu nhánh. Vị trí trích dẫn lưu ở từng node con trong SQLite; tên/ẩn/xóa node con tự cập nhật danh sách. Nhánh cũ chỉ có đoạn trích sẽ tô xanh khi tìm được duy nhất một vị trí khớp; nếu trùng nhiều chỗ thì chỉ hiện trong danh sách để tránh đánh dấu nhầm.
+
 Mỗi node có biểu tượng **Mở trên ChatGPT** ở góc phải; nút có chữ cũng nằm trên khung đọc. App mở một tab Chrome 9222 mới bằng link đã lưu, lấy lịch sử hội thoại để xác định câu trả lời theo số thứ tự rồi cuộn tới đúng response, kể cả khi câu trả lời cũ chưa được tải vào màn hình. Node thiếu link hoặc số thứ tự cần **Cập nhật nguồn** trước. Nếu không xác định được response, app báo lỗi và giữ tab mới để bạn kiểm tra; thao tác này không gửi câu hỏi hay tạo nhánh ChatGPT.
 
 Trong cài đặt **Tạo nhánh con**, nút **Mở tab ChatGPT mới** mở sẵn `https://chatgpt.com/` trong Chrome 9222, refresh danh sách và tự chọn tab mới. Nút dùng được cả khi node cha chưa có nguồn ChatGPT. Câu hỏi đang soạn và các file đã đính kèm được giữ nguyên; bấm **Xếp hàng** khi muốn gửi.

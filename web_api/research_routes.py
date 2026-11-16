@@ -114,7 +114,7 @@ def research(request, cid):
 @router.get('')
 def nodes(cid: str, request: Request):
     rows = research(request, cid).store.list(cid)
-    return [{k: v for k, v in row.items() if k not in ('answer', 'partial', 'config', 'reading_mark')} for row in rows]
+    return [{k: v for k, v in row.items() if k not in ('answer', 'partial', 'config', 'reading_mark', 'excerpt_mark')} for row in rows]
 
 
 @router.post('/import')
@@ -141,6 +141,7 @@ def node(cid: str, nid: str, request: Request):
         if result['status'] == 'working' and job:
             result.update(partial=job['partial'], detail=job['detail'])
     result['markdown'] = browser_markdown(result['answer'])
+    result['branch_marks'] = manager.store.branch_marks(cid, nid)
     return result
 
 @router.put('/{nid}/reading-mark')

@@ -21,6 +21,7 @@ import "./research.css";
 import ResearchGraph from "./ResearchGraph";
 import BranchComposer from "./BranchComposer";
 import ResponseSource from "./ResponseSource";
+import BranchMarks from "./BranchMarks";
 import { selectedReadingMark, readingMarkRange, scrollToReadingMark } from "./readingMark";
 
 const labels = {
@@ -307,7 +308,11 @@ export default function ResearchTab({
   const reading = detail?.id === selected && (showHidden || !detail.hidden) ? detail : null;
   useEffect(() => {
     const range = readingMarkRange(answer.current, reading?.reading_mark);
-    if (range) CSS.highlights.set("rtc-reading-mark", new Highlight(range));
+    if (range) {
+      const highlight = new Highlight(range);
+      highlight.priority = 1;
+      CSS.highlights.set("rtc-reading-mark", highlight);
+    }
     else CSS.highlights.delete("rtc-reading-mark");
     return () => CSS.highlights.delete("rtc-reading-mark");
   }, [reading?.id, reading?.answer, reading?.reading_mark]);
@@ -585,6 +590,8 @@ export default function ResearchTab({
                       </div>
                     )}
                   </div>
+                  {reading.status === "done" && <BranchMarks answerRef={answer} nodeId={reading.id}
+                    content={reading.answer} marks={reading.branch_marks} />}
                   {["working", "error", "cancelled", "interrupted"].includes(
                     reading.status,
                   ) && (

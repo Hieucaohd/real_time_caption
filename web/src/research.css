@@ -274,6 +274,46 @@
   overflow-y: auto;
 }
 ::highlight(rtc-reading-mark) { background-color: #ffe58a; color: #29230b; }
+::highlight(rtc-branch-marks) {
+  background-color: #dbeafe;
+  color: #123d73;
+  text-decoration: underline solid #5086ca;
+}
+.branch-marks-list {
+  margin: 20px 0;
+  padding: 12px;
+  border: 1px solid #8daed0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.branch-marks-list summary { cursor: pointer; font-weight: 600; }
+.branch-mark-entry { margin-top: 14px; }
+.branch-mark-entry blockquote {
+  border-left: 3px solid #5086ca;
+  padding-left: 10px;
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 130px;
+  overflow: auto;
+}
+.branch-marks-list ul, .branch-mark-tooltip ul { margin: 6px 0 0; padding-left: 20px; }
+.branch-mark-tooltip {
+  position: fixed;
+  z-index: 90;
+  width: min(320px, calc(100vw - 16px));
+  max-height: 40vh;
+  overflow: hidden;
+  padding: 12px 16px;
+  border: 1px solid #8daed0;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #123d73;
+  box-shadow: 0 4px 16px #0003;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
 .research-response-tab {
   font-size: 12px;
   color: #617b6d;

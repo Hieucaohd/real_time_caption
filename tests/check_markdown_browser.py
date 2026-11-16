@@ -201,6 +201,9 @@ def main():
             auto_child = next(n for n in fixture.service.research.store.list(fixture.cid) if n['question'] == 'Explain selected heading')
             assert auto_child['excerpt'] == saved_mark['text']
             assert auto_child['reading_mark'] is None
+            assert auto_child['excerpt_mark'] == saved_mark
+            page.wait_for_function("CSS.highlights.get('rtc-branch-marks')?.size === 1")
+            assert page.evaluate("[...CSS.highlights.get('rtc-branch-marks')][0].toString()") == saved_mark['text']
             child = fixture.service.research.children(fixture.cid, root['id'],
                 {'questions': ['Child mark test'], 'config': {'selected_tab': 'fake-tab'}})[0]
             fixture.service.research.store.update(fixture.cid, child['id'], status='done', answer='A different answer')
