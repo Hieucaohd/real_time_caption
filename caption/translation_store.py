@@ -108,9 +108,8 @@ class TranslationStore:
                 count = legacy_counts.get(signature, 0)
                 legacy_counts[signature] = count + 1
                 group = ('legacy', signature, count // row['batch_size'])
-            if row['source_text'] == sources.get(row['line_id']):
-                group_members.setdefault(group, []).append(row['line_id'])
             if row['status'] == 'done' and row['source_text'] == sources.get(row['line_id']):
+                group_members.setdefault(group, []).append(row['line_id'])
                 latest[row['line_id']] = (group, row['translated_text'])
         segments, seen = [], set()
         for line_id in sources:

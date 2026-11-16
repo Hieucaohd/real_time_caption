@@ -150,6 +150,16 @@ class TranslationPersistenceTests(unittest.TestCase):
             db.execute("UPDATE line_translations SET batch_id='',created_at='same-second'")
         self.assertEqual(self.store.reading(self.item.id, config), result)
 
+    def test_reading_only_links_completed_batch_members(self):
+        config = translation.Config(engine='chrome')
+        lines = [self.line(f'partial:{i}', f'Sentence {i}') for i in range(3)]
+        attempts = self.store.begin_batch(lines, config)
+        self.store.finish(attempts[0], 'error', error='Interrupted')
+        self.store.finish(attempts[2], 'done', 'Translated tail')
+        reading = self.store.reading(self.item.id, config)
+        self.assertEqual(reading['translated_lines'], 1)
+        self.assertEqual(reading['segments'][0]['line_ids'], [lines[2]['id']])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
