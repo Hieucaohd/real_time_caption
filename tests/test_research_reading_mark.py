@@ -51,9 +51,24 @@ class ReadingMarkTests(unittest.TestCase):
         # Creating another child without a selection leaves the parent's mark alone.
         self.assertEqual(self.post(endpoint, {'questions': ['Another question'], 'config': {'selected_tab': 'test-tab'}}).status_code, 200)
         self.assertEqual(self.store.get(self.cid, parent['id'])['reading_mark'], mark)
-        for invalid in ({**mark, 'start': -1}, {**mark, 'text': 'different excerpt'}):
+        for invalid in ({**mark, 'start': -1}, {**mark, 'end': mark['start']}, {**mark, 'text': ''}):
             self.assertEqual(self.post(endpoint, {**body, 'parent_reading_mark': invalid}).status_code, 422)
         self.assertEqual(self.store.get(self.cid, parent['id'])['reading_mark'], mark)
+
+    def test_math_selection_can_differ_from_dom_anchor_text(self):
+        self.service.busy = True
+        excerpt = 'Every subspace of Rⁿ has an orthonormal basis.'
+        text = r'Every subspace of Rn\mathbb R^nRn has an orthonormal basis.'
+        mark = dict(start=0, end=len(text), text=text)
+        response = self.post(self.base + '/' + self.root_node['id'] + '/children', {
+            'questions': ['Prove this theorem'], 'excerpt': excerpt,
+            'parent_reading_mark': mark, 'config': {'selected_tab': 'test-tab'}})
+        self.assertEqual(response.status_code, 200, response.text)
+        child = response.json()[0]
+        self.assertEqual(child['excerpt'], excerpt)
+        self.assertEqual(child['excerpt_mark'], mark)
+        self.assertEqual(child['question'], 'Prove this theorem')
+        self.assertEqual(self.store.get(self.cid, self.root_node['id'])['reading_mark'], mark)
 
     def test_failed_batch_rolls_back_children_and_keeps_previous_mark(self):
         self.service.busy = True

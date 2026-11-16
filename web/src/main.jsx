@@ -57,9 +57,11 @@ async function api(path, options = {}) {
     } catch {
       detail = response.statusText;
     }
-    throw new Error(
-      typeof detail === "string" ? detail : JSON.stringify(detail),
-    );
+    const messages = Array.isArray(detail)
+      ? detail.map((item) => typeof item.msg === "string" ? item.msg.replace(/^Value error, /, "") : "").filter(Boolean)
+      : [];
+    throw new Error(typeof detail === "string" ? detail
+      : [...new Set(messages)].join(" · ") || "Yêu cầu không hợp lệ. Vui lòng kiểm tra lại thông tin.");
   }
   return response.json();
 }

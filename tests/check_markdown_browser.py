@@ -204,6 +204,41 @@ def main():
             assert auto_child['excerpt_mark'] == saved_mark
             page.wait_for_function("CSS.highlights.get('rtc-branch-marks')?.size === 1")
             assert page.evaluate("[...CSS.highlights.get('rtc-branch-marks')][0].toString()") == saved_mark['text']
+            # KaTeX gives Selection.toString() and Range.toString() different text.
+            selected_math = branch.locator('p').first.evaluate('''el=>{
+                const r=document.createRange();r.selectNodeContents(el);
+                const s=getSelection();s.removeAllRanges();s.addRange(r);
+                return {excerpt:s.toString().trim(), anchor:r.toString()};
+            }''')
+            assert selected_math['excerpt'] != selected_math['anchor'].strip()
+            branch.locator('p').first.click(button='right')
+            page.get_by_role('menuitem', name='Tạo nhánh từ đoạn đã chọn', exact=True).click()
+            expect(mark_dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value(selected_math['excerpt'])
+            mark_dialog.get_by_role('button', name='Mở tab ChatGPT mới', exact=True).click()
+            expect(mark_dialog.get_by_label('research ChatGPT tab')).to_have_value('fresh-empty-tab')
+            mark_dialog.get_by_label('Auto screenshot', exact=True).uncheck()
+            mark_dialog.get_by_label('Đính kèm transcript', exact=True).uncheck()
+            mark_dialog.get_by_label('Câu hỏi nhánh', exact=True).fill('Prove selected math theorem')
+            mark_dialog.locator('input[type=file]').set_input_files({'name':'proof-note.txt', 'mimeType':'text/plain', 'buffer':b'Proof context'})
+            expect(mark_dialog.locator('.composer-files')).to_contain_text('proof-note.txt')
+            def reject_children(route):
+                route.fulfill(status=422, json={'detail':[{'type':'value_error', 'msg':'Value error, Test validation message',
+                    'input':{'private':'DO_NOT_SHOW_INPUT'}, 'loc':['body'], 'ctx':{'error':{}}}]})
+            page.route('**/research/*/children', reject_children)
+            mark_dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True).click()
+            expect(mark_dialog.get_by_role('alert')).to_have_text('Test validation message')
+            expect(mark_dialog).not_to_contain_text('DO_NOT_SHOW_INPUT')
+            expect(mark_dialog.get_by_label('Câu hỏi nhánh', exact=True)).to_have_value('Prove selected math theorem')
+            expect(mark_dialog.locator('.composer-files')).to_contain_text('proof-note.txt')
+            page.unroute('**/research/*/children', reject_children)
+            mark_dialog.get_by_role('button', name='Xếp hàng 1 nhánh', exact=True).click()
+            expect(mark_dialog).to_have_count(0)
+            saved_mark = fixture.service.research.store.get(fixture.cid, root['id'])['reading_mark']
+            math_child = next(n for n in fixture.service.research.store.list(fixture.cid) if n['question'] == 'Prove selected math theorem')
+            assert math_child['excerpt'] == selected_math['excerpt']
+            assert math_child['excerpt_mark']['text'] == selected_math['anchor']
+            assert math_child['excerpt_mark'] == saved_mark
+            page.wait_for_function("CSS.highlights.get('rtc-reading-mark')?.size === 1 && [...CSS.highlights.get('rtc-reading-mark')][0].toString().includes('Ý tưởng chính')")
             child = fixture.service.research.children(fixture.cid, root['id'],
                 {'questions': ['Child mark test'], 'config': {'selected_tab': 'fake-tab'}})[0]
             fixture.service.research.store.update(fixture.cid, child['id'], status='done', answer='A different answer')

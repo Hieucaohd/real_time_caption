@@ -247,7 +247,7 @@ export default function ResearchTab({
   }
   async function createDraft(excerpt = "", mark = selectedReadingMark(answer.current)) {
     if (detail?.status !== "done" || detail.id !== selectedRef.current) return;
-    if (mark && !excerpt) excerpt = mark.text.trim();
+    if (mark && !excerpt) excerpt = window.getSelection()?.toString().trim() || mark.text.trim();
     if (excerpt.length > 20000 || (mark && mark.text.length > 20000)) {
       setMenu(null);
       setError("Chọn một đoạn ngắn hơn 20.000 ký tự để tạo nhánh.");

@@ -81,11 +81,8 @@ class ChildrenInput(BaseModel):
     files: list[str] = Field(default_factory=list, max_length=20)
     parent_reading_mark: ReadingMark | None = None
 
-    @model_validator(mode='after')
-    def mark_matches_excerpt(self):
-        if self.parent_reading_mark and self.parent_reading_mark.text.strip() != self.excerpt.strip():
-            raise ValueError('Đoạn đánh dấu phải khớp đoạn trích tạo nhánh.')
-        return self
+    # The visible Selection string and the DOM Range text are different for KaTeX
+    # (hidden MathML/TeX) and block boundaries. Keep both; their strings need not match.
 
 
 class GraphCamera(BaseModel):
