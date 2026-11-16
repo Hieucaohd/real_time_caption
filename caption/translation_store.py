@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import os
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from .shared_access import process_alive
@@ -42,6 +43,7 @@ class TranslationStore:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(line_translations)")}
             for name, definition in (("batch_source", "TEXT NOT NULL DEFAULT ''"),
                                      ("batch_size", "INTEGER NOT NULL DEFAULT 1"),
+                                     ("batch_id", "TEXT NOT NULL DEFAULT ''"),
                                      ("owner_pid", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE line_translations ADD COLUMN {name} {definition}")
@@ -86,6 +88,38 @@ class TranslationStore:
             row = db.execute("SELECT * FROM translation_lines WHERE id=?", (line_id,)).fetchone()
             return dict(row) if row else None
 
+    def reading(self, conversation_id, config):
+        """Latest successful text in source order, without repeating batch answers."""
+        with self.connect() as db:
+            rows = [dict(row) for row in db.execute(
+                "SELECT t.* FROM line_translations t JOIN translation_lines l ON l.id=t.line_id "
+                "WHERE l.conversation_id=? AND t.fingerprint=? ORDER BY t.id",
+                (conversation_id, config.fingerprint))]
+            sources = {row['id']: row['source_text'] for row in db.execute(
+                'SELECT id, source_text FROM translation_lines WHERE conversation_id=? ORDER BY id', (conversation_id,))}
+        latest, legacy_counts = {}, {}
+        for row in rows:
+            group = row['batch_id'] or str(row['id'])
+            if not row['batch_id'] and row['batch_size'] > 1:
+                # Old versions stored one attempt per member, with identical
+                # batch metadata. Count complete groups so repeated utterances
+                # with the same text and timestamp remain separate passages.
+                signature = (row['created_at'], row['batch_source'], row['batch_size'])
+                count = legacy_counts.get(signature, 0)
+                legacy_counts[signature] = count + 1
+                group = ('legacy', signature, count // row['batch_size'])
+            if row['status'] == 'done' and row['source_text'] == sources.get(row['line_id']):
+                latest[row['line_id']] = (group, row['translated_text'])
+        segments, seen = [], set()
+        for line_id in sources:
+            if line_id not in latest:
+                continue
+            group, text = latest[line_id]
+            if group not in seen:
+                seen.add(group)
+                segments.append({'line_id': line_id, 'text': text})
+        return {'segments': segments, 'translated_lines': len(latest), 'total_lines': len(sources)}
+
     def missing(self, conversation_id, config):
         with self.connect() as db:
             return [dict(r) for r in db.execute(
@@ -111,13 +145,14 @@ class TranslationStore:
         # Never claim that an arbitrary paragraph is a per-sentence alignment.
         source = "\n".join(line["source_text"] for line in lines) if len(lines) > 1 else ""
         attempts = []
+        batch_id = uuid.uuid4().hex
         with self.connect() as db:
             for line in lines:
                 cursor = db.execute("INSERT INTO line_translations(line_id,engine,model,source_lang,target_lang,fingerprint,source_text,status,created_at,batch_source,batch_size) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                     (line["id"], config.engine, config.model, config.source, config.target,
                                      config.fingerprint, line["source_text"], "queued", datetime.now().isoformat(timespec="seconds"), source, len(lines)))
                 attempts.append(cursor.lastrowid)
-                db.execute('UPDATE line_translations SET owner_pid=? WHERE id=?', (os.getpid(), cursor.lastrowid))
+                db.execute('UPDATE line_translations SET owner_pid=?,batch_id=? WHERE id=?', (os.getpid(), batch_id, cursor.lastrowid))
         return attempts
 
     def finish(self, attempt, status, text="", error=""):

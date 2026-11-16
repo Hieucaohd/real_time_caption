@@ -57,6 +57,7 @@ class Settings:
     translation_enabled: bool = False
     translation_partial: bool = False
     translation_auto_scroll: bool = True
+    translation_view: str = "history"
     translation_batch_size: int = 1
     translation_batch_timeout: float = 5.0
     translation_source: str = "en"

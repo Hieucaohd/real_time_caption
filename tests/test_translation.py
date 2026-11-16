@@ -122,6 +122,32 @@ class TranslationAdapterTests(unittest.TestCase):
 
 
 class TranslationPersistenceTests(unittest.TestCase):
+    def test_reading_keeps_source_order_and_success_during_retry(self):
+        config = translation.Config(engine='chrome')
+        first, second = self.line('one', 'First'), self.line('two', 'Second')
+        a, b = self.store.begin(first, config), self.store.begin(second, config)
+        self.store.finish(b, 'done', 'Second translated')
+        self.assertEqual([s['text'] for s in self.store.reading(self.item.id, config)['segments']], ['Second translated'])
+        self.store.finish(a, 'done', 'First translated')
+        self.store.finish(self.store.begin(first, config), 'error', error='Retry failed')
+        self.assertEqual([s['text'] for s in self.store.reading(self.item.id, config)['segments']], ['First translated', 'Second translated'])
+        self.assertEqual(self.store.reading(self.item.id, translation.Config(engine='chrome', target='ja'))['segments'], [])
+        self.line('one', 'Corrected source')
+        self.assertEqual(self.store.reading(self.item.id, config)['translated_lines'], 1)
+
+    def test_reading_deduplicates_batches_but_preserves_repeated_passages(self):
+        config = translation.Config(engine='chrome')
+        for group in range(2):
+            lines = [self.line(f'{group}:{index}', text) for index, text in enumerate(['Hello', 'World'])]
+            for attempt in self.store.begin_batch(lines, config):
+                self.store.finish(attempt, 'done', 'Hello world translated')
+        result = self.store.reading(self.item.id, config)
+        self.assertEqual(result['translated_lines'], 4)
+        self.assertEqual([s['text'] for s in result['segments']], ['Hello world translated'] * 2)
+        with self.store.connect() as db:
+            db.execute("UPDATE line_translations SET batch_id='',created_at='same-second'")
+        self.assertEqual(self.store.reading(self.item.id, config), result)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

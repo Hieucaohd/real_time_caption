@@ -8,6 +8,7 @@ import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
+import TranslationReading from "./TranslationReading";
 import { chromeTranslator } from "./chromeTranslator";
 import { createChatGPTTabLoader } from "./chatGPTTabs";
 import { chatPreferences, savedChatPreferences } from "./chatPreferences";
@@ -29,6 +30,7 @@ import {
   FolderOpen,
   Pencil,
   RefreshCw,
+  Save,
   X,
   Send,
   Paperclip,
@@ -179,6 +181,8 @@ function App() {
     chatScroll = useRef(null);
   const translationLinesScroll = useRef(null), translationHistoryScroll = useRef(null);
   const [translationFollowOverride, setTranslationFollowOverride] = useState(null);
+  const [translationViewOverride, setTranslationViewOverride] = useState(null);
+  const [savingTranslation, setSavingTranslation] = useState(false);
   const messageInput = useRef(null);
   useLayoutEffect(() => {
     const area = messageInput.current;
@@ -220,6 +224,7 @@ function App() {
   );
   const messages = detail?.messages || [];
   const translationFollow = translationFollowOverride ?? settings.translation_auto_scroll ?? true;
+  const translationView = translationViewOverride ?? settings.translation_view ?? "history";
   const latestTranslationLine = detail?.lines?.findLast((line) => line.last_state?.endsWith(": done"))?.id
     || detail?.lines?.at(-1)?.id;
   const lastTranslationSource = detail?.lines?.at(-1)?.id;
@@ -228,12 +233,12 @@ function App() {
     if (latestTranslationLine) setLineId(latestTranslationLine);
     const list = translationLinesScroll.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [tab, cid, translationFollow, latestTranslationLine, lastTranslationSource]);
+  }, [tab, cid, translationView, translationFollow, latestTranslationLine, lastTranslationSource]);
   useLayoutEffect(() => {
     if (tab !== "translation" || !translationFollow) return;
     const panel = translationHistoryScroll.current;
     if (panel) panel.scrollTop = panel.scrollHeight;
-  }, [tab, translationFollow, history, boot?.translation_preview]);
+  }, [tab, translationView, translationFollow, history, boot?.translation_preview]);
 
   function choose(id) {
     setCid(id);
@@ -337,6 +342,16 @@ function App() {
     const updated = await api("/settings", { method: "PATCH", body: values });
     setBoot((old) => ({ ...old, settings: updated }));
     return updated;
+  }
+  async function saveTranslationSettings() {
+    if (savingTranslation) return;
+    setSavingTranslation(true);
+    try {
+      const values = Object.fromEntries(Object.entries(settings).filter(([key]) => key.startsWith("translation_")));
+      await changeSettings({ ...values, translation_view: translationView, translation_auto_scroll: translationFollow });
+      setNotice("Đã lưu cài đặt dịch và chế độ hiển thị.");
+    } catch (e) { setError(e.message); }
+    finally { setSavingTranslation(false); }
   }
   async function create() {
     const title = window.prompt("Tên cuộc hội thoại mới", "New conversation");
@@ -1206,6 +1221,20 @@ function App() {
                     </span>
                   </div>
                   <div className="inline">
+                    <Button
+                      icon={BookOpen}
+                      aria-pressed={translationView === "parallel"}
+                      disabled={translationViewOverride !== null || savingTranslation}
+                      onClick={async () => {
+                        const next = translationView === "parallel" ? "history" : "parallel";
+                        setTranslationViewOverride(next);
+                        try { await changeSettings({ translation_view: next }); }
+                        catch (e) { setError(e.message); }
+                        finally { setTranslationViewOverride(null); }
+                      }}
+                    >
+                      {translationView === "parallel" ? "Theo từng câu" : "Đọc song song"}
+                    </Button>
                     <Toggle
                       label="Auto translate"
                       checked={settings.translation_enabled}
@@ -1247,9 +1276,19 @@ function App() {
                     >
                       Stop
                     </Button>
+                    <Button icon={Save} disabled={savingTranslation || translationViewOverride !== null || translationFollowOverride !== null}
+                      onClick={saveTranslationSettings}>
+                      {savingTranslation ? "Đang lưu…" : "Lưu cài đặt"}
+                    </Button>
                   </div>
                 </div>
-                <div className="translation-grid">
+                {translationView === "parallel" ? (
+                  <TranslationReading cid={cid} lines={detail?.lines || []} reading={detail?.translation_reading}
+                    capture={boot.capture} follow={translationFollow}
+                    source={settings.translation_source} target={settings.translation_target}
+                    preview={settings.translation_engine === "chrome" && settings.translation_partial &&
+                      boot.capture.active && boot.capture.conversation_id === cid ? boot.translation_preview : ""} />
+                ) : <div className="translation-grid">
                   <div className="translation-lines scroll" ref={translationLinesScroll}>
                     {!detail?.lines.length && (
                       <Empty
@@ -1327,7 +1366,7 @@ function App() {
                       </div>
                     )}
                   </div>
-                </div>
+                </div>}
               </>
             )}
             {tab === "vocab" && (

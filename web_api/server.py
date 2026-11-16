@@ -158,7 +158,8 @@ def create_app(service=None):
             messages.append(value)
         lines = s.translations.lines(cid)
         return {'conversation': asdict(s.conversation(cid)), 'transcript': transcript.read_text(),
-                'messages': messages, 'lines': lines}
+                'messages': messages, 'lines': lines,
+                'translation_reading': s.translations.reading(cid, Config.from_settings(Settings.load()))}
 
     @app.put('/api/conversations/{cid}/answers/{mid}/source')
     def save_answer_source(cid: str, mid: int, body: ResponseSourceInput, request: Request):
@@ -269,6 +270,8 @@ def create_app(service=None):
         batch_options(current.translation_batch_size, current.translation_batch_timeout)
         if current.translation_engine not in ENGINES:
             raise ValueError('Invalid translation engine.')
+        if current.translation_view not in ('history', 'parallel'):
+            raise ValueError('Invalid translation view.')
         if not 8 <= current.overlay_font_size <= 96 or not 1 <= current.overlay_lines <= 10 or not .1 <= current.overlay_alpha <= 1:
             raise ValueError('Invalid overlay settings.')
         current.save()
