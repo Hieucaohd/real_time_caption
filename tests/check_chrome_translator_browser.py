@@ -131,6 +131,21 @@ def main():
             page.wait_for_function("window.__rtcChromeTranslator.read('cold')?.status === 'error'")
             assert page.evaluate("window.__rtcChromeTranslator.read('cold').code") == 'setup'
             assert page.evaluate('window.modelCreates') == 0
+            # Replace the app tab while the persistent CDP workers are idle.
+            # They must discover the new document, not keep stale cached pages.
+            replacement = browser.new_page()
+            replacement.add_init_script(FAKE_API)
+            replacement.goto(page.url)
+            replacement.wait_for_function('!!window.__rtcChromeTranslator')
+            replacement.evaluate("window.__rtcChromeTranslator.prepare('ja', 'vi')")
+            page.close()
+            replacement_line = fixture.service.translations.line(fixture.cid, 'replacement', 'now', 'After replacing app tab')
+            fixture.service.worker.submit(replacement_line, config)
+            deadline = time.monotonic() + 15
+            while fixture.service.translations.history(replacement_line['id'])[-1]['status'] in ('queued', 'working'):
+                if time.monotonic() > deadline: raise AssertionError('Replacement tab was not detected')
+                replacement.wait_for_timeout(50)
+            assert fixture.service.translations.history(replacement_line['id'])[-1]['status'] == 'done'
             assert not errors, errors
             browser.close()
             print('Chrome Translator: Settings/save/reload, Chrome-only live preview before finalization, CDP worker, SQLite persistence/cache and no background downloads passed.')

@@ -377,6 +377,30 @@ class TranslationPersistenceTests(unittest.TestCase):
         with self.assertRaises(translation.TranslationError):
             worker.submit(second, config)
 
+    def test_chrome_error_does_not_cancel_other_active_or_queued_lines(self):
+        entered, release = threading.Event(), threading.Event()
+        def translate(text, config, cancel):
+            if text == 'Slow':
+                entered.set()
+                release.wait(3)
+                self.assertFalse(cancel.is_set())
+            if text == 'Fail':
+                raise translation.TranslationError('Tab unavailable')
+            return text
+        worker = self.worker(SimpleNamespace(translate=translate))
+        config = translation.Config(engine='chrome')
+        slow, fail, following = [self.line('isolation:' + text, text) for text in ('Slow', 'Fail', 'Following')]
+        try:
+            worker.submit(slow, config)
+            self.assertTrue(entered.wait(2))
+            worker.submit(fail, config)
+            self.assertEqual(worker.results.get(timeout=2)[1], 'error')
+            worker.submit(following, config)
+            self.assertEqual(worker.results.get(timeout=2)[1:], ('done', 'Following'))
+        finally:
+            release.set()
+        self.assertEqual(worker.results.get(timeout=2)[1:], ('done', 'Slow'))
+
     def test_missing_lines_are_scoped_to_engine_source_and_success(self):
         first, second = self.line(), self.line("test:2", "Other")
         azure = translation.Config(key="key")

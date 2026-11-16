@@ -37,6 +37,7 @@ class Service:
         self.busy = False
         self.closed = False
         self.translation_preview = ''
+        self.translation_issue = ''
         self.preview_revision = 0
         self.preview_timer = None
         self.preview_snapshot = None
@@ -73,7 +74,7 @@ class Service:
     def state(self):
         with self.lock:
             return dict(capture=dict(self.capture), jobs=[dict(j) for j in self.jobs.values()],
-                        translation_preview=self.translation_preview, last_final=self.last_final,
+                        translation_preview=self.translation_preview, translation_error=self.translation_issue, last_final=self.last_final,
                         final_revision=self.final_revision)
 
     def start(self, cid):
@@ -143,7 +144,10 @@ class Service:
         for origin, stamp, text in captured:
             line = self.translations.line(self.capture['conversation_id'], origin, stamp, text)
             if settings.translation_enabled:
-                self.batcher.add(line, Config.from_settings(settings), settings.translation_batch_size, settings.translation_batch_timeout)
+                try:
+                    self.batcher.add(line, Config.from_settings(settings), settings.translation_batch_size, settings.translation_batch_timeout)
+                except Exception as exc:
+                    self.translation_error(exc)
 
     def clear_preview(self):
         """Invalidate an utterance/settings epoch, not every new word."""
@@ -191,10 +195,15 @@ class Service:
                 self.translation_error(exc)
 
     def submit_batch(self, lines, config):
-        self.worker.submit_batch(lines, config)
+        try:
+            self.worker.submit_batch(lines, config)
+        except Exception as exc:
+            self.translation_error(exc)
 
     def translation_error(self, exc):
-        self.capture['error'] = str(exc)
+        # Keep the original provider error, not a subsequent "worker paused".
+        if not self.translation_issue:
+            self.translation_issue = str(exc)
 
     def drain(self):
         while not self._stop.wait(.2):
@@ -208,7 +217,9 @@ class Service:
                         if task.preview and current_preview and status == 'done':
                             self.translation_preview = value
                         if status == 'error' and (not task.preview or current_preview):
-                            self.capture['error'] = value
+                            self.translation_issue = value
+                        elif status == 'done' and (not task.preview or current_preview):
+                            self.translation_issue = ''
             except queue.Empty:
                 pass
 
@@ -222,6 +233,7 @@ class Service:
             lines = [line for line in lines if line['id'] in ids]
         count = max(1, int(settings.translation_batch_size))
         self.worker.resume()
+        self.translation_issue = ''
         submitted = sum(bool(self.worker.submit_batch(lines[i:i+count], config, force=force)) for i in range(0, len(lines), count))
         return {'batches': submitted, 'lines': len(lines)}
 

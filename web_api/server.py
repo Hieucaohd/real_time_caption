@@ -282,6 +282,7 @@ def create_app(service=None):
             svc(request).store.save_web_theme(theme)
         if values.get('translation_enabled'):
             svc(request).worker.resume()
+            svc(request).translation_issue = ''
         return {**asdict(Settings.load()), 'web_theme': svc(request).store.web_theme()}
 
     @app.get('/api/chrome-tabs')

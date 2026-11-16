@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from caption import livecaptions
 
@@ -42,6 +42,24 @@ class UnicodeCaptionTests(unittest.TestCase):
 
 
 class LiveCaptionsReconnectTests(unittest.TestCase):
+    def test_com_failure_during_refresh_recovers_without_losing_differ(self):
+        COMError = type('COMError', (Exception,), {})
+        reader = livecaptions.LiveCaptionsReader(lambda event: None)
+        events = []
+        def emit(event):
+            events.append(event)
+            if event.kind == 'final': reader.stop()
+        reader._emit = emit
+        with (patch.object(reader, '_find_text_control', side_effect=[COMError(), _TextControl('Recovered caption.')]),
+              patch.object(reader, '_window_exists', return_value=True),
+              patch.object(livecaptions, 'POLL_S', .001), patch.object(livecaptions, 'FLUSH_AFTER_S', .002)):
+            reader._loop(object())
+        self.assertEqual([e.text for e in events if e.kind == 'final'], ['Recovered caption.'])
+        self.assertFalse(any(e.kind == 'error' for e in events))
+        auto = Mock()
+        auto.WindowControl.return_value.Exists.side_effect = COMError()
+        self.assertTrue(reader._window_exists(auto))
+
     def test_reader_only_reads_captions_without_settings_callback(self):
         events = []
         reader = livecaptions.LiveCaptionsReader(events.append)

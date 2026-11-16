@@ -183,6 +183,17 @@ class LiveCaptionsReader:
         self._emit(Event("stopped"))
 
     def _find_text(self, auto, launch: bool):
+        try:
+            return self._find_text_control(auto, launch)
+        except Exception as exc:
+            if type(exc).__name__ != 'COMError':
+                raise
+            # UIA elements can disappear while Windows rebuilds its caption UI.
+            # The polling loop will attach again without resetting the differ.
+            log.warning('Live Captions UI changed during lookup; retrying')
+            return None
+
+    def _find_text_control(self, auto, launch: bool):
         window = auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS)
         if not window.Exists(0.5):
             if not launch:
@@ -201,7 +212,13 @@ class LiveCaptionsReader:
         return _CaptionText(text, scroll) if text is not None or scroll is not None else None
 
     def _window_exists(self, auto) -> bool:
-        return auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS).Exists(0.5)
+        try:
+            return auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS).Exists(0.5)
+        except Exception as exc:
+            if type(exc).__name__ != 'COMError':
+                raise
+            # Unknown during a UIA rebuild: keep waiting instead of stopping.
+            return True
 
     def _loop(self, auto) -> None:
         # Starting/resuming a transcript must only attach to the caption text.

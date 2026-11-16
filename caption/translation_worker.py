@@ -189,7 +189,10 @@ class TranslationWorker:
                         for line in task.members:
                             self._keys.discard(self._key(line, task.config))
                     self._active.pop(lane, None)
-                    if status == "error":
+                    # An unavailable/reloading local app tab must not cancel
+                    # unrelated lines or permanently disable realtime capture.
+                    # Failed lines remain in SQLite for an explicit Retry.
+                    if status == "error" and task.config.engine != 'chrome':
                         self._paused = True
                         self.cancel_all()
                 self.results.put((task, status, value))

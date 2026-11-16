@@ -30,7 +30,18 @@ def _check_cancel(cancel):
         raise TranslationError(_ERRORS["cancelled"])
 
 
+class AppTabUnavailable(TranslationError):
+    pass
+
+
 def _choose_tab(browser, source, target):
+    # contexts/pages and page.url are cached by Playwright. A worker can sleep
+    # while Chrome replaces a tab; pump CDP events before reading that cache.
+    session = browser.new_browser_cdp_session()
+    try:
+        session.send('Target.getTargets')
+    finally:
+        session.detach()
     candidates = []
     for context in browser.contexts:
         for page in context.pages:
@@ -48,7 +59,7 @@ def _choose_tab(browser, source, target):
             except Exception:
                 continue
     if not candidates:
-        raise TranslationError("Mở tab ứng dụng trong Chrome qua launch_chrome.bat, vào Settings và khởi tạo Chrome Translator API. Nếu app đã mở, hãy F5.")
+        raise AppTabUnavailable("Mở tab ứng dụng trong Chrome qua launch_chrome.bat, vào Settings và khởi tạo Chrome Translator API. Nếu app đã mở, hãy F5.")
     return max(candidates, key=lambda item: item[0])[1]
 
 
@@ -112,7 +123,28 @@ class Client:
                 except Exception:
                     self.close()
                     raise TranslationError("Không kết nối được Chrome 9222. Chạy launch_chrome.bat rồi thử lại.") from None
-            page = _choose_tab(self.browser, source, target)
+            try:
+                page = _choose_tab(self.browser, source, target)
+            except AppTabUnavailable:
+                # Re-enumerate from a fresh connection before declaring the app
+                # missing. No translation has been submitted, so this is safe.
+                self.close()
+                _check_cancel(cancel)
+                self.playwright = sync_playwright().start()
+                self.browser = self.playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+                deadline = time.monotonic() + 3
+                while True:
+                    _check_cancel(cancel)
+                    try:
+                        page = _choose_tab(self.browser, source, target)
+                        break
+                    except AppTabUnavailable:
+                        if time.monotonic() >= deadline:
+                            raise
+                        if cancel is None:
+                            time.sleep(.1)
+                        else:
+                            cancel.wait(.1)
             return " ".join(_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text))
         except TranslationError:
             raise

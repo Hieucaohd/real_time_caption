@@ -188,7 +188,7 @@ function App() {
   }, [message, tab, readingFocus, sidebarHidden]);
   const jobSeen = useRef(new Set());
   const [dismissedCaptureError, setDismissedCaptureError] = useState("");
-  const captureError = boot?.capture?.error || "";
+  const captureError = boot?.capture?.error || (boot?.translation_error ? `Dịch: ${boot.translation_error} Transcript vẫn được thu bình thường khi đang ghi.` : "");
   useEffect(() => { setDismissedCaptureError(""); }, [captureError, boot?.capture?.conversation_id]);
   const visibleError = error || (captureError !== dismissedCaptureError ? captureError : "");
   const settings = boot?.settings || {},

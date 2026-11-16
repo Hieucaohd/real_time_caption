@@ -8,13 +8,38 @@ import test_web_api as fixtures
 from caption.settings import Settings
 from caption.transcriber import Event
 from caption.translation_worker import Task
-from caption.translation import Config
+from caption.translation import Config, TranslationError
 
 
 class LivePreviewTests(unittest.TestCase):
     setUp = fixtures.WebApiTests.setUp
     tearDown = fixtures.WebApiTests.tearDown
     post = fixtures.WebApiTests.post
+
+    def test_submission_failure_keeps_capture_and_all_lines_in_database(self):
+        self.enable()
+        with patch.object(self.service.worker, 'submit_batch', side_effect=TranslationError('Original error')):
+            for text in ('First captured sentence.', 'Second captured sentence.'):
+                self.service.on_caption(Event('final', text, end_of_utterance=True))
+            self.assertTrue(self.service.capture['active'])
+            self.assertEqual(self.service.capture['error'], '')
+            self.assertEqual(len(self.service.translations.lines(self.cid)), 2)
+            self.assertEqual(self.service.state()['translation_error'], 'Original error')
+            self.post('/api/capture/pause')
+            self.assertEqual(self.service.capture['error'], '')
+
+    def test_chrome_failure_does_not_pause_following_captions(self):
+        self.enable()
+        with patch.object(self.service.worker.translator, 'translate', side_effect=[TranslationError('Tab reloading'), 'Recovered']):
+            self.service.on_caption(Event('final', 'First sentence.', end_of_utterance=True))
+            self.wait_until(lambda: self.service.translation_issue == 'Tab reloading')
+            self.assertTrue(self.service.capture['active'])
+            self.service.on_caption(Event('final', 'Next sentence.', end_of_utterance=True))
+            self.wait_until(lambda: any(row['last_state'] == 'chrome: done' for row in self.service.translations.lines(self.cid)))
+            self.wait_until(lambda: not self.service.translation_issue)
+            self.assertTrue(self.service.capture['active'])
+            self.assertEqual(self.service.capture['error'], '')
+            self.assertEqual(len(self.service.translations.lines(self.cid)), 2)
 
     def enable(self, engine='chrome'):
         current = Settings.load()

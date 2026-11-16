@@ -8,6 +8,25 @@ from caption.translation import Config, Translator, TranslationError
 
 
 class ChromeTranslationTests(unittest.TestCase):
+    def test_tab_scan_pumps_events_before_reading_cached_pages(self):
+        page = Mock(url='http://127.0.0.1:8765')
+        page.evaluate.return_value = {'ready': True, 'focused': False}
+        context = Mock(pages=[])
+        browser = Mock(contexts=[context])
+        browser.new_browser_cdp_session.return_value.send.side_effect = lambda _: setattr(context, 'pages', [page])
+        self.assertIs(chrome._choose_tab(browser, 'en', 'vi'), page)
+        browser.new_browser_cdp_session.return_value.detach.assert_called_once()
+
+    def test_missing_cached_tab_reconnects_before_submitting_once(self):
+        with patch('playwright.sync_api.sync_playwright') as playwright, \
+                patch.object(chrome, '_choose_tab', side_effect=[chrome.AppTabUnavailable('stale'), Mock()]), \
+                patch.object(chrome, '_translate_page', return_value='ok') as translate:
+            client = chrome.Client()
+            self.assertEqual(client.translate('hello', 'en', 'vi'), 'ok')
+            self.assertEqual(playwright.return_value.start.call_count, 2)
+            translate.assert_called_once()
+            client.close()
+
     def test_client_reuses_connection_and_disconnects_without_closing_browser(self):
         driver = Mock()
         browser = driver.chromium.connect_over_cdp.return_value
