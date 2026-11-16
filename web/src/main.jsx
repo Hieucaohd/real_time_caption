@@ -9,6 +9,7 @@ import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import TranslationReading from "./TranslationReading";
+import ConversationNameModal from "./ConversationNameModal";
 import { chromeTranslator } from "./chromeTranslator";
 import { createChatGPTTabLoader } from "./chatGPTTabs";
 import { chatPreferences, savedChatPreferences } from "./chatPreferences";
@@ -149,6 +150,7 @@ function App() {
     [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false),
     [promptKind, setPromptKind] = useState(null);
+  const [conversationDialog, setConversationDialog] = useState(null);
   const [transferring, setTransferring] = useState("");
   const transferRef = useRef(false), importInput = useRef(null);
   const [researchFocus, setResearchFocus] = useState(null);
@@ -353,20 +355,11 @@ function App() {
     } catch (e) { setError(e.message); }
     finally { setSavingTranslation(false); }
   }
-  async function create() {
-    const title = window.prompt("Tên cuộc hội thoại mới", "New conversation");
-    if (title?.trim())
-      await action(async () => {
-        const item = await post("/conversations", { title });
-        choose(item.id);
-      });
+  function create() {
+    setConversationDialog({ title: "New conversation" });
   }
-  async function rename() {
-    const title = window.prompt("Đổi tên cuộc hội thoại", current?.title);
-    if (title?.trim())
-      await action(() =>
-        api("/conversations/" + cid, { method: "PATCH", body: { title } }),
-      );
+  function rename() {
+    if (current) setConversationDialog({ cid, title: current.title });
   }
   async function exportConversation() {
     if (!cid || transferRef.current) return;
@@ -1555,6 +1548,18 @@ function App() {
           <span>{detail?.lines.length || 0} transcript lines</span>
         </footer>
       </main>
+      {conversationDialog && <ConversationNameModal
+        initialTitle={conversationDialog.title} rename={!!conversationDialog.cid}
+        close={() => setConversationDialog(null)}
+        save={async (title) => {
+          if (conversationDialog.cid) {
+            await api("/conversations/" + conversationDialog.cid, { method: "PATCH", body: { title } });
+          } else {
+            const item = await post("/conversations", { title });
+            choose(item.id);
+          }
+          refresh().catch((e) => setError(e.message));
+        }} />}
       {settingsOpen && (
         <SettingsModal
           settings={settings}

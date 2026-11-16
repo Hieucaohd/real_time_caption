@@ -66,6 +66,24 @@ def main():
             page.screenshot(path='cache/livecaptions-settings-dark.png')
             assert not errors, errors
             page.get_by_role('button', name='Close settings', exact=True).click()
+            page.get_by_role('button', name='New conversation', exact=True).click()
+            naming = page.get_by_role('dialog', name='Tạo cuộc hội thoại mới', exact=True)
+            title_input = naming.get_by_label('Tên cuộc hội thoại', exact=True)
+            title_input.fill('   ')
+            expect(naming.get_by_role('button', name='Tạo cuộc hội thoại', exact=True)).to_be_disabled()
+            title_input.fill('After Windows settings')
+            page.route('**/api/conversations', lambda route: route.fulfill(status=400, json={'detail': 'Temporary save failure'})
+                       if route.request.method == 'POST' else route.continue_())
+            naming.get_by_role('button', name='Tạo cuộc hội thoại', exact=True).click()
+            expect(naming.get_by_role('alert')).to_contain_text('Temporary save failure')
+            expect(title_input).to_have_value('After Windows settings')
+            page.unroute('**/api/conversations')
+            title_input.press('Enter')
+            expect(naming).to_have_count(0)
+            assert len([c for c in fixture.service.store.list() if c.title == 'After Windows settings']) == 1
+            page.get_by_role('button', name='New conversation', exact=True).click()
+            naming.get_by_label('Tên cuộc hội thoại', exact=True).press('Escape')
+            expect(naming).to_have_count(0)
             # A settings notice belongs in Settings; it is not a capture failure.
             fixture.service.capture['warning'] = 'Settings verification unavailable'
             page.reload()

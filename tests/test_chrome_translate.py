@@ -21,6 +21,7 @@ class ChromeTranslationTests(unittest.TestCase):
         with patch('playwright.sync_api.sync_playwright') as playwright, \
                 patch.object(chrome, '_choose_tab', side_effect=[chrome.AppTabUnavailable('stale'), Mock()]), \
                 patch.object(chrome, '_translate_page', return_value='ok') as translate:
+            playwright.return_value.start.return_value.chromium.connect_over_cdp.return_value.contexts = [Mock()]
             client = chrome.Client()
             self.assertEqual(client.translate('hello', 'en', 'vi'), 'ok')
             self.assertEqual(playwright.return_value.start.call_count, 2)
@@ -30,6 +31,8 @@ class ChromeTranslationTests(unittest.TestCase):
     def test_client_reuses_connection_and_disconnects_without_closing_browser(self):
         driver = Mock()
         browser = driver.chromium.connect_over_cdp.return_value
+        context = Mock()
+        browser.contexts = [context]
         browser.is_connected.return_value = True
         with patch('playwright.sync_api.sync_playwright') as playwright, \
                 patch.object(chrome, '_choose_tab'), patch.object(chrome, '_translate_page', return_value='translated'):
@@ -41,6 +44,13 @@ class ChromeTranslationTests(unittest.TestCase):
             client.close()
             driver.stop.assert_called_once()
             browser.close.assert_not_called()
+            context.on.assert_called_once()
+            event, handler = context.on.call_args.args
+            self.assertEqual(event, 'dialog')
+            dialog = Mock()
+            handler(dialog)
+            dialog.accept.assert_not_called()
+            dialog.dismiss.assert_not_called()
 
     def test_engine_needs_no_key_and_has_distinct_cache(self):
         config = Config.from_settings(Settings(translation_engine="chrome"))

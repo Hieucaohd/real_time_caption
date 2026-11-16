@@ -104,6 +104,27 @@ def main():
             fixture.service.worker.submit(fast, config)
             fixture.service.worker.preview(fixture.cid, 'Concurrent preview', config, 100)
             page.wait_for_function('Object.keys(window.pendingTranslations || {}).length === 3', timeout=15000)
+            # All three CDP lanes must leave native user dialogs alone.
+            dialogs = []
+            page.once('dialog', lambda dialog: dialogs.append(dialog))
+            page.evaluate("setTimeout(() => { window.dialogProbe = prompt('User-owned prompt'); }, 20)")
+            page.wait_for_timeout(500)
+            assert len(dialogs) == 1
+            dialogs[0].accept('User choice')
+            assert page.evaluate('window.dialogProbe') == 'User choice'
+            # App naming is a DOM form and stays usable while translations run.
+            page.get_by_role('button', name='New conversation', exact=True).click()
+            naming = page.get_by_role('dialog', name='Tạo cuộc hội thoại mới', exact=True)
+            naming.get_by_label('Tên cuộc hội thoại', exact=True).fill('Created during translation')
+            naming.get_by_role('button', name='Tạo cuộc hội thoại', exact=True).click()
+            expect(naming).to_have_count(0)
+            assert any(c.title == 'Created during translation' for c in fixture.service.store.list())
+            page.get_by_title('Rename conversation', exact=True).click()
+            naming = page.get_by_role('dialog', name='Đổi tên cuộc hội thoại', exact=True)
+            naming.get_by_label('Tên cuộc hội thoại', exact=True).fill('Renamed during translation')
+            naming.get_by_role('button', name='Lưu tên', exact=True).click()
+            expect(naming).to_have_count(0)
+            assert any(c.title == 'Renamed during translation' for c in fixture.service.store.list())
             page.evaluate("window.pendingTranslations['Fast final']()")
             deadline = time.monotonic() + 5
             while fixture.service.translations.history(fast['id'])[-1]['status'] != 'done':

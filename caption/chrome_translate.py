@@ -108,6 +108,14 @@ class Client:
                 pass
         self.playwright = self.browser = None
 
+    def connect(self):
+        self.browser = self.playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+        for context in self.browser.contexts:
+            # Playwright otherwise auto-dismisses native dialogs on every tab.
+            # Multiple translator lanes race to dismiss the same user prompt,
+            # which can also crash their drivers. Leave all dialogs to the user.
+            context.on('dialog', lambda dialog: None)
+
     def translate(self, text, source, target, cancel=None):
         from playwright.sync_api import sync_playwright
 
@@ -119,7 +127,7 @@ class Client:
                 self.close()
                 try:
                     self.playwright = sync_playwright().start()
-                    self.browser = self.playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+                    self.connect()
                 except Exception:
                     self.close()
                     raise TranslationError("Không kết nối được Chrome 9222. Chạy launch_chrome.bat rồi thử lại.") from None
@@ -131,7 +139,7 @@ class Client:
                 self.close()
                 _check_cancel(cancel)
                 self.playwright = sync_playwright().start()
-                self.browser = self.playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
+                self.connect()
                 deadline = time.monotonic() + 3
                 while True:
                     _check_cancel(cancel)

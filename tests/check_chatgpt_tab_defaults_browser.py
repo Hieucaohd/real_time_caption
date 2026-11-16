@@ -103,8 +103,11 @@ def main():
             expect(page.get_by_role('checkbox', name='New ChatGPT chat', exact=True)).to_be_checked()
             assert len(scans) == 1
             # A new local conversation also keeps the saved ChatGPT tab.
-            page.once('dialog', lambda dialog: dialog.accept('Another conversation'))
             page.get_by_role('button', name='New conversation', exact=True).click()
+            naming = page.get_by_role('dialog', name='Tạo cuộc hội thoại mới', exact=True)
+            naming.get_by_label('Tên cuộc hội thoại', exact=True).fill('Another conversation')
+            naming.get_by_role('button', name='Tạo cuộc hội thoại', exact=True).click()
+            expect(naming).to_have_count(0)
             page.wait_for_timeout(300)
             expect(chat).to_have_value('first')
             assert len(scans) == 1
