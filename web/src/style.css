@@ -1173,6 +1173,17 @@ footer {
 .livecaptions-settings small { opacity: .8; }
 .livecaptions-settings .inline { justify-content: flex-start; }
 .livecaptions-settings input[type="checkbox"] { flex: none; width: auto; }
+.livecaptions-language { position: relative; }
+.livecaptions-language > button { width: 100%; justify-content: space-between; text-align: left; }
+.livecaptions-language-options {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 5;
+  background: var(--surface-raised, #fff); border: 1px solid var(--line);
+  border-radius: 8px; max-height: 240px; overflow-y: auto;
+  box-shadow: 0 8px 24px #0003; padding: 6px;
+}
+.livecaptions-language-options > button { display: block; width: 100%; text-align: left; border: 0; }
+.livecaptions-language-options > [role="status"] { padding: 12px; }
+.livecaptions-language-options > button[aria-selected="true"] { outline: 1px solid var(--green); outline-offset: -2px; }
 .livecaptions-settings button:not(.primary) {
   background: var(--surface-raised, #fff);
   color: var(--text, #374b42);

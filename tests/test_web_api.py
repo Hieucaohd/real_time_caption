@@ -60,6 +60,7 @@ class WebApiTests(unittest.TestCase):
             patch.object(prompt_versions, 'SUMMARY_DIR', self.root / 'summary-prompts'),
             patch('web_api.service.ConversationStore', lambda: ConversationStore(self.root / 'data.sqlite3')),
             patch('web_api.service.livecaptions.LiveCaptionsReader', FakeReader),
+            patch('caption.livecaptions_settings.PreferenceRestorer.start'),
         ]
         for p in self.patches:
             p.start()

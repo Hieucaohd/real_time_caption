@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import unittest
+import threading
 from unittest.mock import MagicMock, Mock, patch
 
 import test_web_api as fixtures
@@ -47,7 +48,7 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
     @contextmanager
     def controller(self, controls):
         @contextmanager
-        def connected(_):
+        def connected(_, **kwargs):
             yield controls
         with patch.object(captions, 'windows_controls', connected):
             yield
@@ -164,7 +165,103 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
         self.assertFalse(self.service.capture['active'])
 
 
+class PreferenceRestoreTests(unittest.TestCase):
+    setUp = fixtures.WebApiTests.setUp
+    tearDown = fixtures.WebApiTests.tearDown
+    post = fixtures.WebApiTests.post
+
+    def test_restore_once_after_startup_and_each_reopened_window(self):
+        wanted = {'microphone': True, 'language': 'Japanese (Japan)'}
+        self.service.store.save_livecaptions_preferences(wanted)
+        restorer = self.service.captions_preferences
+        with patch.object(captions, 'window_session', return_value=(10, 20)) as session, \
+                patch.object(captions.time, 'monotonic', return_value=0) as clock, \
+                patch.object(captions, 'apply_windows', return_value={'ready': True}) as apply:
+            restorer.poll()
+            apply.assert_not_called()
+            clock.return_value = 2
+            for _ in range(5): restorer.poll()
+            apply.assert_called_once_with(self.service.store, wanted, launch=False)
+            for _ in range(2):
+                cid = self.post('/api/conversations', {'title': 'Another'}).json()['id']
+                self.post(f'/api/conversations/{cid}/capture'); self.post('/api/capture/pause')
+                restorer.poll()
+            self.assertEqual(apply.call_count, 1)
+            session.return_value = None
+            restorer.poll()
+            session.return_value = (11, 21)
+            restorer.poll()
+            clock.return_value = 4
+            restorer.poll(); restorer.poll()
+            self.assertEqual(apply.call_count, 2)
+
+    def test_no_window_or_no_saved_choices_never_calls_windows(self):
+        restorer = self.service.captions_preferences
+        with patch.object(captions, 'window_session', return_value=None) as session, \
+                patch.object(captions.time, 'monotonic', return_value=0) as clock, \
+                patch.object(captions, 'apply_windows') as apply:
+            restorer.poll()
+            session.return_value = (10, 20)
+            restorer.poll(); clock.return_value = 2; restorer.poll()
+            apply.assert_not_called()
+
+    def test_failure_warns_once_without_stopping_capture_or_reopening_menus(self):
+        self.service.store.save_livecaptions_preferences({'microphone': True, 'language': ''})
+        self.post(f'/api/conversations/{self.cid}/capture')
+        restorer = self.service.captions_preferences
+        with patch.object(captions, 'window_session', return_value=(10, 20)), \
+                patch.object(captions.time, 'monotonic', return_value=0) as clock, \
+                patch.object(captions, 'apply_windows', side_effect=captions.CaptionsSettingsError('Not ready')) as apply:
+            restorer.poll(); clock.return_value = 2
+            for _ in range(5): restorer.poll()
+            apply.assert_called_once()
+            self.assertTrue(self.service.state()['capture']['warning'])
+            self.assertEqual(self.service.capture['error'], '')
+            self.assertTrue(self.service.capture['active'])
+            self.service.on_caption(Event('final', 'Capture continues.', end_of_utterance=True))
+            self.assertEqual(len(self.service.translations.lines(self.cid)), 1)
+
+    def test_explicit_save_marks_session_and_background_does_not_repeat(self):
+        restorer = self.service.captions_preferences
+        self.service.store.save_livecaptions_preferences({'microphone': True, 'language': ''})
+        with patch.object(captions, 'window_session', return_value=(10, 20)), \
+                patch.object(captions, 'apply_windows', return_value={'ready': True}) as apply:
+            restorer.save({'microphone': True, 'language': ''})
+            restorer.poll(); restorer.poll()
+            apply.assert_called_once()
+
+    def test_slow_restore_does_not_lock_conversation_api_or_caption_events(self):
+        restorer = self.service.captions_preferences
+        self.service.store.save_livecaptions_preferences({'microphone': True, 'language': ''})
+        entered, release = threading.Event(), threading.Event()
+        def slow(*args, **kwargs):
+            entered.set(); release.wait(3)
+            return {'ready': True}
+        with patch.object(captions, 'window_session', return_value=(10, 20)), \
+                patch.object(captions, 'apply_windows', side_effect=slow) as apply:
+            restorer._observed, restorer._seen_at = (10, 20), 0
+            thread = threading.Thread(target=restorer.poll); thread.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                cid = self.post('/api/conversations', {'title': 'While restoring'}).json()['id']
+                self.post(f'/api/conversations/{cid}/capture')
+                self.service.on_caption(Event('final', 'Independent caption.', end_of_utterance=True))
+                restorer.poll()  # Does not block or start a duplicate operation.
+                self.assertEqual(len(self.service.translations.lines(cid)), 1)
+                self.assertEqual(apply.call_count, 1)
+            finally:
+                release.set(); thread.join(3)
+
+
 class MicrophoneControlTests(unittest.TestCase):
+    def test_background_restore_never_reopens_a_closed_window(self):
+        windows = captions.WindowsControls(Mock())
+        windows.window.Exists.return_value = False
+        with patch.object(captions.subprocess, 'Popen') as launch:
+            with self.assertRaises(captions.CaptionsSettingsError):
+                windows.open(launch=False)
+            launch.assert_not_called()
+
     def test_dismiss_does_not_reopen_menu_after_collapse_closed_it(self):
         windows = captions.WindowsControls(Mock())
         windows.exists = Mock(side_effect=[True, False])

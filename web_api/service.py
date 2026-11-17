@@ -51,6 +51,9 @@ class Service:
         self._events.start()
         from .research import Research
         self.research = Research(self)
+        from caption.livecaptions_settings import PreferenceRestorer
+        self.captions_preferences = PreferenceRestorer(self.store)
+        self.captions_preferences.start()
 
     def schedule(self, ms, callback):
         def run():
@@ -73,7 +76,7 @@ class Service:
 
     def state(self):
         with self.lock:
-            return dict(capture=dict(self.capture), jobs=[dict(j) for j in self.jobs.values()],
+            return dict(capture={**self.capture, 'warning': self.capture['warning'] or self.captions_preferences.warning}, jobs=[dict(j) for j in self.jobs.values()],
                         translation_preview=self.translation_preview, translation_error=self.translation_issue, last_final=self.last_final,
                         final_revision=self.final_revision)
 
@@ -387,6 +390,7 @@ class Service:
         return [asdict(w) for w in values]
 
     def close(self):
+        self.captions_preferences.close()
         self.research.close()
         self.pause()
         reader = self.reader

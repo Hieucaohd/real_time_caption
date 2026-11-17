@@ -19,7 +19,7 @@ def main():
     fixture = WebApiTests(); fixture.setUp()
     controls = FakeControls()
     @contextmanager
-    def connected(_):
+    def connected(_, **kwargs):
         yield controls
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
@@ -38,10 +38,23 @@ def main():
             panel = page.get_by_role('region', name='Cài đặt Windows Live Captions')
             expect(panel.get_by_role('button', name='Lưu và áp dụng cho Windows')).to_be_enabled()
             assert controls.mic_calls == 0  # Opening settings does not manipulate Windows.
-            panel.get_by_role('button', name='Tải lại ngôn ngữ và trạng thái từ Windows').click()
-            expect(panel.get_by_role('checkbox')).to_be_checked()
             language = panel.get_by_role('combobox', name='Ngôn ngữ Windows Live Captions')
-            language.select_option('Japanese (Japan)')
+            expect(panel.get_by_role('button', name='Tải lại ngôn ngữ và trạng thái từ Windows')).to_have_count(0)
+            release = threading.Event()
+            read_windows = captions.read_windows
+            def delayed_read(store):
+                release.wait(5)
+                return read_windows(store)
+            with patch.object(captions, 'read_windows', side_effect=delayed_read) as read:
+                language.click()
+                try:
+                    expect(language).to_have_attribute('aria-busy', 'true')
+                    expect(panel.get_by_role('status')).to_contain_text('Đang tải ngôn ngữ')
+                finally:
+                    release.set()
+                panel.get_by_role('option', name='Japanese (Japan)', exact=True).click()
+                assert read.call_count == 1
+            expect(panel.get_by_role('checkbox')).to_be_checked()
             panel.get_by_role('checkbox').uncheck()
             panel.get_by_role('button', name='Lưu và áp dụng cho Windows').click()
             expect(panel.get_by_role('status')).to_contain_text('Đã lưu và xác nhận')
@@ -49,8 +62,14 @@ def main():
             assert controls.language == 'Japanese (Japan)' and not controls.mic
             page.reload()
             page.get_by_role('button', name='Settings', exact=True).click()
-            expect(language).to_have_value('Japanese (Japan)')
+            expect(language).to_contain_text('Japanese (Japan)')
             expect(panel.get_by_role('checkbox')).not_to_be_checked()
+            previous_reads = controls.language_reads
+            language.focus(); language.press('ArrowDown')
+            expect(panel.get_by_role('option', name='Japanese (Japan)', exact=True)).to_be_focused()
+            assert controls.language_reads == previous_reads + 1
+            page.keyboard.press('Escape')
+            expect(language).to_have_attribute('aria-expanded', 'false')
             # Failed automation keeps a readable error and leaves persisted preferences intact.
             panel.get_by_role('checkbox').check()
             with patch.object(captions, 'apply_windows', side_effect=captions.CaptionsSettingsError('Windows chưa sẵn sàng')):

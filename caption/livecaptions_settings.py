@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import threading
 import time
 
 from .shared_access import ProcessLock
@@ -65,8 +66,10 @@ class WindowsControls:
     def exists(self, kind, identity):
         return getattr(self.window, kind)(AutomationId=identity).Exists(.15)
 
-    def open(self):
+    def open(self, launch=True):
         if not self.window.Exists(.2):
+            if not launch:
+                raise CaptionsSettingsError('Windows Live Captions đã đóng.')
             subprocess.Popen([os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'LiveCaptions.exe')])
         if not self.window.Exists(15):
             raise CaptionsSettingsError('Không mở được Windows Live Captions. Hãy thử Win + Ctrl + L.')
@@ -185,7 +188,7 @@ class WindowsControls:
 
 
 @contextmanager
-def windows_controls(db_path):
+def windows_controls(db_path, *, launch=True):
     if os.name != 'nt':
         raise CaptionsSettingsError('Tính năng này cần Windows 11 có Live Captions.')
     import uiautomation as auto
@@ -198,7 +201,7 @@ def windows_controls(db_path):
         with auto.UIAutomationInitializerInThread():
             controls = WindowsControls(auto)
             try:
-                controls.open()
+                controls.open(launch=launch)
                 yield controls
             except (LookupError, OSError, COMError, AttributeError) as exc:
                 raise CaptionsSettingsError('Không điều khiển được Live Captions. Hãy kiểm tra cửa sổ Windows rồi thử lại.') from exc
@@ -240,9 +243,77 @@ def read_windows(store):
         return inspect(controls)
 
 
-def apply_windows(store, preferences, *, save=False):
-    with windows_controls(store.db_path) as controls:
+def apply_windows(store, preferences, *, save=False, launch=True):
+    with windows_controls(store.db_path, launch=launch) as controls:
         result = apply(controls, preferences)
         if save:
             store.save_livecaptions_preferences(preferences)
         return result
+
+
+class PreferenceRestorer:
+    """Restore saved choices once per Windows window, independently of capture."""
+    def __init__(self, store):
+        self.store = store
+        self.warning = ''
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = None
+        self._observed = self._attempted = None
+        self._seen_at = 0
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name='livecaptions-preferences', daemon=True)
+        self._thread.start()
+
+    def close(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def read(self):
+        with self._lock:
+            return read_windows(self.store)
+
+    def save(self, preferences):
+        with self._lock:
+            result = apply_windows(self.store, preferences, save=True)
+            self._observed = self._attempted = window_session()
+            self.warning = ''
+            return result
+
+    def poll(self):
+        if self._stop.is_set() or not self._lock.acquire(blocking=False):
+            return
+        try:
+            session = window_session()
+            if session != self._observed:
+                self._observed, self._seen_at = session, time.monotonic()
+                self._attempted = None
+            if not session or session == self._attempted or time.monotonic() - self._seen_at < 1:
+                return
+            preferences = self.store.livecaptions_preferences()
+            if preferences['microphone'] is None and not preferences['language']:
+                return
+            # Mark before UI automation: errors/setup-required must not cause
+            # menus to open on every poll. Explicit Save remains a manual retry.
+            self._attempted = session
+            try:
+                result = apply_windows(self.store, preferences, launch=False)
+                self.warning = '' if result['ready'] else 'Windows Live Captions cần hoàn tất tải ngôn ngữ. Sau đó bấm Lưu và áp dụng để khôi phục cài đặt.'
+                if result['ready']:
+                    # A language transition may recreate the root window itself.
+                    self._observed = self._attempted = window_session()
+                    log.info('Restored saved Live Captions preferences for the new window')
+            except Exception:
+                self.warning = 'Chưa khôi phục được cài đặt Windows Live Captions. Mở Settings và bấm Lưu và áp dụng để thử lại; việc đọc phụ đề vẫn tiếp tục.'
+                log.warning('Could not restore Live Captions preferences for the new window')
+        finally:
+            self._lock.release()
+
+    def _run(self):
+        while not self._stop.wait(.5):
+            try:
+                self.poll()
+            except Exception:
+                log.warning('Could not inspect Live Captions window for preference restoration')

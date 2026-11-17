@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
-from caption import livecaptions_settings
 
 router = APIRouter(prefix='/api/livecaptions')
 
@@ -18,13 +17,13 @@ def saved(request: Request):
 
 @router.post('/inspect')
 def inspect(request: Request):
-    return livecaptions_settings.read_windows(request.app.state.service.store)
+    return request.app.state.service.captions_preferences.read()
 
 
 @router.put('/settings')
 def apply(body: Preferences, request: Request):
     service = request.app.state.service
-    result = livecaptions_settings.apply_windows(service.store, body.model_dump(), save=True)
+    result = service.captions_preferences.save(body.model_dump())
     if result['ready']:
         with service.lock:
             service.capture['warning'] = ''
