@@ -153,14 +153,24 @@ class DictationBrowserTests(unittest.TestCase):
         self.assertEqual(segment.page.locator('#prompt-textarea').inner_text(), 'Transcript segment 1')
         self.reader._cleanup()
 
-    def test_existing_draft_is_never_captured_or_sent(self):
+    def test_existing_text_does_not_block_opening_or_starting_dictation(self):
         self.context.unroute('https://chatgpt.com/**')
         self.context.route('https://chatgpt.com/**', lambda r: r.fulfill(
             body=HTML.replace('contenteditable="true"></div>', 'contenteditable="true">User draft</div>'), content_type='text/html'))
-        with self.assertRaises(chatgpt.ChatGPTError):
-            self.reader._capture(self.browser)
+        segment = self.reader._new_segment(self.browser)
+        self.reader._begin(segment, self.browser)
+        self.assertEqual(self.actions, [(1, 'start')])
+        self.assertEqual(segment.page.locator('#prompt-textarea').inner_text(), 'User draft')
+        self.reader.shutdown()
         self.reader._cleanup()
-        self.assertEqual(self.actions, [])
+
+    def test_text_restored_after_tab_load_does_not_block_dictation(self):
+        segment = self.reader._new_segment(self.browser)
+        segment.page.locator('#prompt-textarea').fill('Restored after loading')
+        self.reader._begin(segment, self.browser)
+        self.assertEqual(self.actions, [(1, 'start')])
+        self.reader.shutdown()
+        self.reader._cleanup()
 
     def test_disabled_dictate_can_become_ready_after_old_two_second_timeout(self):
         segment = self.reader._new_segment(self.browser)

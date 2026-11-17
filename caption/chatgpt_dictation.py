@@ -109,10 +109,6 @@ class ChatGPTDictationReader:
                 raise
         self._wait(page, lambda: self._button(page, START).count(), 30,
                    'Không tìm thấy nút Dictate. Kiểm tra đăng nhập ChatGPT và kết nối trong Chrome 9222.')
-        composer = chatgpt._visible(page, chatgpt.COMPOSER)
-        if self._text(composer):
-            # ChatGPT may restore a draft in a new tab. Never capture or erase it.
-            raise chatgpt.ChatGPTError('Tab mới có bản nháp ChatGPT. Hãy lưu/xóa bản nháp đó trước khi thu âm.')
         page.evaluate("document.title = '🎙 Transcript · ChatGPT'")
         return segment
 
@@ -151,9 +147,6 @@ class ChatGPTDictationReader:
                 page.bring_to_front()
             self._wait_start_ready(page)
             self._check()
-            # The editor can restore a saved draft while ChatGPT initializes.
-            if self._text(chatgpt._visible(page, chatgpt.COMPOSER)):
-                raise chatgpt.ChatGPTError('Tab mới có bản nháp ChatGPT. Hãy lưu/xóa bản nháp đó trước khi thu âm.')
             self._emit(Event('status', 'Đang bật micro ChatGPT… Cho phép micro trong Chrome nếu được hỏi.'))
             try:
                 self._button(page, START).click(timeout=2000)
