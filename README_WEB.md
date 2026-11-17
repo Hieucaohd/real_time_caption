@@ -27,7 +27,7 @@ Export lấy dữ liệu đã lưu tại thời điểm đóng gói. Pause Live 
 
 ## Nguồn transcript trên web
 
-Với phương thức dịch **Google Translate (Chrome)**, app dùng lại tab Google Translate có sẵn trong Chrome 9222. Nếu chưa có hoặc tab đã bị đóng, lần dịch tiếp theo tự mở một tab Google Translate rồi dịch, kể cả khi chạy bản EXE; không cần mở tab thủ công. Phương thức này không cần API key và thay nội dung ô nguồn của tab bằng nhóm transcript đang dịch.
+Với phương thức dịch **Google Translate (Chrome)**, app dùng lại hoặc tự mở tab Google Translate trong Chrome 9222, kể cả bản EXE. Transcript đã ghi được nối vào ô nguồn; toàn bộ bản dịch bên phải được đồng bộ và lưu SQLite. Chế độ này bỏ nhóm câu/thời gian chờ, dùng giao diện đọc song song; khi Google sửa cách dịch theo ngữ cảnh mới, app cập nhật cả đoạn tại chỗ. Trong khi đang dịch, chữ mới được gộp vào lần cập nhật kế tiếp. Đoạn dài chuyển sang phần tiếp theo ở mốc 4.000 ký tự và giữ các phần dịch trước. Đổi hội thoại/ngôn ngữ sẽ đồng bộ nội dung tương ứng. Stop dừng đồng bộ; Translate missing/Retry đồng bộ lại toàn bộ transcript. Không cần API key; phần lời nói chưa được ghi thành transcript chưa được gửi.
 
 Chọn **Windows Live Captions** hoặc **ChatGPT · Micro** ở thanh Start / Continue, hoặc trong Settings → Nguồn transcript. App chỉ thu một nguồn tại một thời điểm. Bấm Pause và chờ đoạn cuối được chốt trước khi đổi nguồn. Lựa chọn được lưu trong cài đặt dùng chung; transcript của cả hai nguồn đi vào cùng conversation, database và luồng dịch hiện có.
 

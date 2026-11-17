@@ -231,7 +231,7 @@ function App() {
   );
   const messages = detail?.messages || [];
   const translationFollow = translationFollowOverride ?? settings.translation_auto_scroll ?? true;
-  const translationView = translationViewOverride ?? settings.translation_view ?? "history";
+  const translationView = settings.translation_engine === "google_web" ? "parallel" : (translationViewOverride ?? settings.translation_view ?? "history");
   const latestTranslationLine = detail?.lines?.findLast((line) => line.last_state?.endsWith(": done"))?.id
     || detail?.lines?.at(-1)?.id;
   const lastTranslationSource = detail?.lines?.at(-1)?.id;
@@ -1249,7 +1249,7 @@ function App() {
                     </span>
                   </div>
                   <div className="inline">
-                    <Button
+                    {settings.translation_engine !== "google_web" && <Button
                       icon={BookOpen}
                       aria-pressed={translationView === "parallel"}
                       disabled={translationViewOverride !== null || savingTranslation}
@@ -1262,7 +1262,7 @@ function App() {
                       }}
                     >
                       {translationView === "parallel" ? "Theo từng câu" : "Đọc song song"}
-                    </Button>
+                    </Button>}
                     <Toggle
                       label="Auto translate"
                       checked={settings.translation_enabled}
@@ -1292,11 +1292,11 @@ function App() {
                     <Button
                       onClick={() =>
                         action(() =>
-                          post("/conversations/" + cid + "/translate"),
+                          post("/conversations/" + cid + "/translate", { force: settings.translation_engine === "google_web" }),
                         )
                       }
                     >
-                      Translate missing
+                      {settings.translation_engine === "google_web" ? "Đồng bộ bản dịch" : "Translate missing"}
                     </Button>
                     <Button
                       icon={Square}
@@ -1723,8 +1723,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
                 </select>
               </Field>
             ))}
-            {input("translation_batch_size", "Số câu mỗi nhóm", "number")}
-            {input(
+            {draft.translation_engine !== "google_web" && input("translation_batch_size", "Số câu mỗi nhóm", "number")}
+            {draft.translation_engine !== "google_web" && input(
               "translation_batch_timeout",
               "Thời gian chờ nhóm (giây)",
               "number",
@@ -1748,8 +1748,10 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           {draft.translation_engine === "chrome" && <ChromeTranslatorSettings
             source={draft.translation_source} target={draft.translation_target} />}
           {draft.translation_engine === "google_web" && <p className="muted">
-            Không cần API key. App dùng lại tab Google Translate trong Chrome 9222; nếu chưa có, app tự mở tab khi dịch.
-            Nội dung ô nguồn trong tab đó sẽ được thay bằng transcript cần dịch.
+            Không cần API key. App tự mở hoặc dùng lại tab Google Translate trong Chrome 9222,
+            nối transcript đã ghi vào ô nguồn và đồng bộ toàn bộ bản dịch bên phải về đây.
+            Bản dịch cả đoạn được cập nhật và lưu vào database, không dịch từng câu riêng lẻ.
+            Đoạn dài được chia ở mốc 4.000 ký tự; phần đã dịch được giữ lại khi chuyển sang đoạn tiếp theo.
           </p>}
           <div className="form-grid">
             {input("translation_azure_key", "Azure API key", "password")}

@@ -105,7 +105,7 @@ class GoogleTranslateTests(unittest.TestCase):
         create.assert_called_once_with(browser)
         created.goto.assert_called_once_with(
             'https://translate.google.com/?sl=ja&tl=zh-CN&op=translate&hl=en',
-            wait_until='domcontentloaded', timeout=30_000)
+            wait_until='load', timeout=30_000)
         created.close.assert_not_called()
         browser.new_context.assert_not_called()
         browser.close.assert_not_called()
@@ -150,6 +150,33 @@ class GoogleTranslateTests(unittest.TestCase):
         self.assertEqual(source.fill.call_args_list, [call("", timeout=1500), call("new question", timeout=1500)])
         copy.assert_called_once_with(page, "full translation", None)
         page.goto.assert_not_called()
+
+    def test_append_keeps_existing_source_and_waits_for_updated_translation(self):
+        page, source, _ = self.page()
+        source.fill('Hello')
+        source.fill.reset_mock()
+        current = {'value': 'Hello'}
+        source.input_value.side_effect = lambda **kwargs: current['value']
+        source.evaluate.side_effect = lambda script, suffix: current.update(value=current['value'] + suffix)
+        results = iter(['Old result', 'Old result', 'Old result', 'Updated paragraph'])
+        with patch.object(web, '_read_output', side_effect=lambda p: next(results, 'Updated paragraph')), \
+             patch.object(web, '_copy_result', side_effect=lambda p, text, cancel: text) as copy:
+            result = web._translate_page(page, 'Hello\nWorld', 'en', 'vi', None, append=True)
+        self.assertEqual(result, 'Updated paragraph')
+        self.assertEqual(current['value'], 'Hello\nWorld')
+        source.fill.assert_not_called()
+        self.assertEqual(source.evaluate.call_args.args[1], '\nWorld')
+        copy.assert_called_once_with(page, 'Updated paragraph', None)
+
+    def test_append_never_accepts_unchanged_old_output(self):
+        page, source, _ = self.page()
+        current = {'value': 'Hello'}
+        source.input_value.side_effect = lambda **kwargs: current['value']
+        source.evaluate.side_effect = lambda script, suffix: current.update(value=current['value'] + suffix)
+        with patch.object(web, '_read_output', return_value='Old result'), patch.object(web, '_copy_result') as copy:
+            with self.assertRaises(translation.TranslationError):
+                web._translate_page(page, 'Hello more words', 'en', 'vi', None, timeout_s=1, append=True)
+        copy.assert_not_called()
 
     def test_identical_successive_answers_are_still_accepted_after_empty_baseline(self):
         page, _, _ = self.page()
@@ -290,6 +317,22 @@ class GoogleTranslateTests(unittest.TestCase):
         browser.close.assert_not_called()
         browser.new_page.assert_not_called()
         self.assertTrue(all(c.args[0] is page for c in translate.call_args_list))
+
+    def test_long_append_keeps_completed_passages_and_only_updates_tail(self):
+        browser, playwright, manager, page = Mock(), Mock(), Mock(), Mock()
+        playwright.chromium.connect_over_cdp.return_value = browser
+        manager.__enter__ = Mock(return_value=playwright)
+        manager.__exit__ = Mock(return_value=False)
+        cache = {}
+        with patch('playwright.sync_api.sync_playwright', return_value=manager), \
+             patch.object(web, '_choose_tab', return_value=page), \
+             patch.object(web, '_translate_page', side_effect=lambda p, chunk, *a, **k: chunk) as translate:
+            first = web.translate('a' * 4000 + 'b' * 20, 'en', 'vi', append=True, cache=cache)
+            second = web.translate('a' * 4000 + 'b' * 20 + 'c', 'en', 'vi', append=True, cache=cache)
+        self.assertEqual(first, 'a' * 4000 + ' ' + 'b' * 20)
+        self.assertEqual(second, first + 'c')
+        self.assertEqual([len(call.args[1]) for call in translate.call_args_list], [4000, 20, 21])
+        self.assertTrue(all(call.kwargs['append'] for call in translate.call_args_list))
 
     def test_cancel_before_connection_and_while_waiting_for_lock(self):
         event = threading.Event()

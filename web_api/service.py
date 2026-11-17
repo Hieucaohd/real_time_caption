@@ -158,13 +158,19 @@ class Service:
 
     def on_lines(self, captured):
         settings = Settings.load()
+        google = settings.translation_enabled and settings.translation_engine == 'google_web'
         for origin, stamp, text in captured:
             line = self.translations.line(self.capture['conversation_id'], origin, stamp, text)
-            if settings.translation_enabled:
+            if settings.translation_enabled and not google:
                 try:
                     self.batcher.add(line, Config.from_settings(settings), settings.translation_batch_size, settings.translation_batch_timeout)
                 except Exception as exc:
                     self.translation_error(exc)
+        if google and captured:
+            try:
+                self.worker.sync_google(self.capture['conversation_id'], Config.from_settings(settings))
+            except Exception as exc:
+                self.translation_error(exc)
 
     def clear_preview(self, reset_passage=True):
         """Cancel live work; persisted passages are never cleared by final jobs."""
@@ -262,6 +268,11 @@ class Service:
         settings = Settings.load()
         config = Config.from_settings(settings)
         config.validate()
+        if config.engine == 'google_web':
+            self.worker.resume()
+            self.translation_issue = ''
+            submitted = self.worker.sync_google(cid, config, force=force)
+            return {'batches': int(submitted), 'lines': len(self.translations.lines(cid))}
         lines = self.translations.lines(cid) if ids else self.translations.missing(cid, config)
         if ids:
             lines = [line for line in lines if line['id'] in ids]

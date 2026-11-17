@@ -24,7 +24,7 @@ NOTES = {
     "chrome": "On-device Chrome Translator API. Open the web app in Chrome 9222 and initialize the language pair in its Settings first. Live preview translates unfinished speech; finalized translations are saved normally.",
     "azure": "Cloud: sends transcript text to Microsoft. Configure a Translator resource/key and region. Quota depends on your plan.",
     "google": "Cloud: sends text to Google Cloud Translation Basic v2. Enable the API in the project that owns this key. Billing/quota depends on the project.",
-    "google_web": "No API key. Uses Chrome on port 9222 (opened by the web EXE or launch_chrome.bat). Reuses a Translate tab, or opens one automatically when missing, types the source text and reads Copy translation. Text is sent to Google; the tab's previous input is replaced. Other tabs and your system clipboard are left alone.",
+    "google_web": "No API key. Automatically opens or reuses Google Translate in Chrome 9222. Appends recorded transcript to the source box and synchronizes the full translated paragraph to SQLite. Batch size/wait are ignored. Long passages roll over at 4,000 characters; completed translations are retained. Text is sent to Google. Other tabs and the system clipboard are left alone.",
     "gemini": "Cloud: sends text to Gemini API, not the Chrome tab. Free-tier data may be used to improve Google's products. Check your API quota.",
     "vinai": "Offline: English → Vietnamese only. CPU is the safe default. CUDA shares GPU resources with Whisper. Model: VinAI Translate (AGPL-3.0). Download is explicit, never automatic.",
 }
@@ -279,6 +279,10 @@ class TranslationPanel(ttk.Frame):
                     self._put_line(line)
                 if self.enabled_var.get() and not self._closed:
                     config = self.config()
+                    if config.engine == 'google_web':
+                        self.worker.sync_google(conversation_id, config)
+                        self.status.set('Synchronizing transcript with Google Translate…')
+                        continue
                     count, timeout = self.batch_options()
                     self.batcher.add(line, config, count, timeout)
                     if self.batcher.lines:
@@ -358,6 +362,14 @@ class TranslationPanel(ttk.Frame):
         if not line:
             return
         e = markdown_html.plain_to_html
+        if self.engine() == 'google_web':
+            reading = self.store.reading(line['conversation_id'], self.config())
+            if reading.get('paragraph_sync'):
+                body = '<p><b>Google Translate — synchronized transcript</b></p>'
+                body += f"<p>{e(reading['synced_source'])}</p><hr>"
+                body += f"<p>{e(reading['segments'][0]['text'])}</p>"
+                markdown_html.show(self.view, body, scroll_to_end=self.follow_var.get())
+                return
         body = f"<div class='meta'>{e(line['stamp'])}</div><p><b>Original</b></p><p>{e(line['source_text'])}</p>"
         for item in self.store.history(line["id"]):
             meta = f"{translation.ENGINES.get(item['engine'], item['engine'])} · {item['source_lang']} → {item['target_lang']} · {item['model']} · {item['created_at']} · {item['status']}"
@@ -395,6 +407,10 @@ class TranslationPanel(ttk.Frame):
         self.worker.resume()
         count = 0
         try:
+            if config.engine == 'google_web':
+                self.worker.sync_google(self._get_conversation_id(), config, force=True)
+                self.status.set('Synchronizing the full transcript with Google Translate…')
+                return
             size, _ = self.batch_options()
             for start in range(0, len(lines), size):
                 group = lines[start:start + size]
@@ -473,7 +489,12 @@ class TranslationPanel(ttk.Frame):
             elif task.line["conversation_id"] == self._get_conversation_id():
                 try:
                     for line in task.members:
-                        self._put_line(line)
+                        if task.sync:
+                            self._put_line(line, state=f'google_web: {status}', follow=False, show=False)
+                        else:
+                            self._put_line(line)
+                    if task.sync:
+                        self._show_selected()
                 except Exception:
                     self.enabled_var.set(False)
                     self.settings.translation_enabled = False

@@ -21,6 +21,7 @@ class Task:
     cancel: threading.Event = field(default_factory=threading.Event)
     lines: tuple = ()
     attempts: tuple = ()
+    sync: bool = False
 
     @property
     def members(self):
@@ -37,6 +38,7 @@ class TranslationWorker:
         self._tasks = deque()
         self._keys = set()
         self._preview = None
+        self._google_cache = {}
         self._active = {}
         self._closed = False
         self._paused = False
@@ -61,6 +63,8 @@ class TranslationWorker:
             return False
         if len({line["conversation_id"] for line in lines}) != 1:
             raise TranslationError("Cannot batch lines from different conversations.")
+        if config.engine == 'google_web':
+            return self.sync_google(lines[0]['conversation_id'], config, force=force)
         with self._condition:
             if self._closed:
                 return False
@@ -84,6 +88,35 @@ class TranslationWorker:
             task = Task(pending[0], config, attempts[0], lines=tuple(pending), attempts=attempts)
             self._tasks.append(task)
             self._keys.update(self._key(line, config) for line in pending)
+            self._condition.notify_all()
+            return True
+
+    def sync_google(self, conversation_id, config, *, force=False):
+        """One in-flight snapshot and one latest pending snapshot per conversation."""
+        config.validate()
+        with self._condition:
+            if self._closed:
+                return False
+            if self._paused and not force:
+                raise TranslationError('Translation paused after an error. Enable Auto translate or Retry.')
+            lines = self.store.lines(conversation_id)
+            if not lines:
+                return False
+            text = '\n'.join(line['source_text'] for line in lines)
+            if not force and self.store.google_source(conversation_id, config) == text:
+                return False
+            def matches(task):
+                return task.sync and task.line['conversation_id'] == conversation_id and task.config == config
+            for task in list(self._active.values()) + list(self._tasks):
+                if matches(task) and task.line['source_text'] == text and not task.cancel.is_set():
+                    return False
+            self._tasks = deque(task for task in self._tasks if not matches(task))
+            if len(self._tasks) >= self.capacity:
+                raise TranslationError('Translation queue is full. Retry later.')
+            self._paused = False
+            task = Task({'conversation_id': conversation_id, 'source_text': text}, config,
+                        lines=tuple(lines), sync=True)
+            self._tasks.append(task)
             self._condition.notify_all()
             return True
 
@@ -168,7 +201,12 @@ class TranslationWorker:
                     for attempt in task.attempts:
                         self.store.finish(attempt, "working")
                 text = "\n".join(line["source_text"] for line in task.members)
-                value = self.translator.translate(text, task.config, task.cancel)
+                if task.sync:
+                    from .google_translate import translate
+                    value = translate(text, task.config.source, task.config.target, task.cancel,
+                                      append=True, cache=self._google_cache)
+                else:
+                    value = self.translator.translate(text, task.config, task.cancel)
             except Exception as error:
                 # Do not log exception bodies: third-party errors can contain keys.
                 status, value = "error", "Translation failed. Check settings, connection or offline dependencies."
@@ -178,6 +216,9 @@ class TranslationWorker:
             if task.cancel.is_set():
                 status, value = "cancelled", "Cancelled; the provider may already have received this request."
             try:
+                if task.sync and status == 'done':
+                    self.store.save_realtime(task.line['conversation_id'], 'google-sync:' + task.config.fingerprint,
+                                             task.config, task.line['source_text'], value)
                 if not task.preview:
                     for attempt in task.attempts:
                         self.store.finish(attempt, status, value if status == "done" else "", value if status != "done" else "")

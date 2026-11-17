@@ -103,7 +103,10 @@ def _choose_tab(browser, source="en", target="vi", cancel=None):
         chosen = _open_background_tab(browser)
         try:
             chosen.goto('https://translate.google.com/?' + urlencode(_translation_params(source, target)),
-                        wait_until='domcontentloaded', timeout=30_000)
+                        wait_until='load', timeout=30_000)
+            # The source textarea is server-rendered before Google's handlers
+            # initialize; typing immediately can be erased during hydration.
+            _pause(cancel, 1.0)
             _check_cancel(cancel)
             chosen.evaluate("name => window.name = name", TAB_NAME)
             return chosen
@@ -157,7 +160,7 @@ def _copy_result(page, rendered, cancel):
     return rendered
 
 
-def _translate_page(page, text, source, target, cancel, timeout_s=30):
+def _translate_page(page, text, source, target, cancel, timeout_s=30, append=False):
     _check_cancel(cancel)
     if not _is_translate_url(page.url):
         raise TranslationError("The Google Translate tab navigated away. Open Translate again and Retry.")
@@ -167,11 +170,29 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30):
     current = parse_qs(parsed.query)
     clean_url = f"https://{parsed.hostname}/?{urlencode(params)}"
     if any(current.get(key, [""])[0] != value for key, value in params.items()):
-        page.goto(clean_url, wait_until="domcontentloaded", timeout=10_000)
+        page.goto(clean_url, wait_until="load" if append else "domcontentloaded", timeout=10_000)
+        if append:
+            _pause(cancel, 1.0)
         page.evaluate("name => window.name = name", TAB_NAME)
     input_box = _visible(page, SOURCE).first
     input_box.wait_for(state="visible", timeout=10_000)
     _check_cancel(cancel)
+    previous_input = input_box.input_value(timeout=1500) if append else ''
+    previous_output = _read_output(page) if previous_input else ''
+    extending = bool(append and previous_input and text.startswith(previous_input) and text != previous_input)
+    if extending:
+        # Append just the new suffix without clearing the paragraph or using the
+        # OS clipboard. setRangeText preserves the previous source characters.
+        input_box.evaluate('''(el, suffix) => {
+            el.setRangeText(suffix, el.value.length, el.value.length, 'end');
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+        }''', text[len(previous_input):])
+    else:
+        return _replace_and_translate(page, input_box, text, source, target, cancel, clean_url, timeout_s)
+    return _wait_result(page, input_box, text, source, target, cancel, timeout_s, previous_output)
+
+
+def _replace_and_translate(page, input_box, text, source, target, cancel, clean_url, timeout_s):
     input_box.fill("", timeout=1500)
     # Observe an empty target after clearing before submitting anything. A new
     # answer may legitimately equal the previous answer, so text inequality alone
@@ -192,8 +213,13 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30):
     if not _is_translate_url(page.url):
         raise TranslationError("The Google Translate tab navigated away. Retry after reopening it.")
     input_box.fill(text, timeout=1500)
+    return _wait_result(page, input_box, text, source, target, cancel, timeout_s)
+
+
+def _wait_result(page, input_box, text, source, target, cancel, timeout_s, previous_output=''):
     deadline = time.monotonic() + timeout_s
     last, changed = "", time.monotonic()
+    fresh = not previous_output
     while time.monotonic() < deadline:
         _check_cancel(cancel)
         if not _is_translate_url(page.url):
@@ -204,10 +230,12 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30):
         if input_box.input_value(timeout=1500) != text:
             raise TranslationError("Source text changed in the Translate tab. Retry when the tab is not being edited.")
         result = _read_output(page)
+        if result != previous_output:
+            fresh = True
         if result != last:
             last, changed = result, time.monotonic()
         button = _visible(page, COPY).first
-        if result and time.monotonic() - changed >= 0.6 and button.count() and button.is_enabled():
+        if fresh and result and time.monotonic() - changed >= 0.6 and button.count() and button.is_enabled():
             copied = _copy_result(page, result, cancel)
             _check_cancel(cancel)
             if input_box.input_value(timeout=1500) != text:
@@ -217,7 +245,7 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30):
     raise TranslationError(f"Google Translate did not finish within {timeout_s:g} seconds. Check connection, consent/CAPTCHA or changes to the page, then Retry manually.")
 
 
-def translate(text, source, target, cancel=None):
+def translate(text, source, target, cancel=None, *, append=False, cache=None):
     """Serialize all chunks and disconnect without closing Chrome or its tabs."""
     from playwright.sync_api import sync_playwright
 
@@ -232,7 +260,23 @@ def translate(text, source, target, cancel=None):
             except Exception:
                 raise TranslationError("Could not connect to Chrome on port 9222. Reopen the app or start launch_chrome.bat and Retry.") from None
             page = _choose_tab(browser, source, target, cancel)
-            result = [_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text)]
+            if append:
+                # Fixed boundaries keep completed paragraphs immutable as new
+                # transcript arrives; stay comfortably below the text box limit.
+                chunks = list(_chunks(text, maximum=4000))
+                result = []
+                for index, chunk in enumerate(chunks):
+                    _check_cancel(cancel)
+                    key = (source, target, chunk)
+                    cached = cache.get(key) if cache is not None else None
+                    value = cached or _translate_page(page, chunk, source, target, cancel, append=True)
+                    result.append(value)
+                    if cache is not None and index < len(chunks) - 1:
+                        cache[key] = value
+                        if len(cache) > 64:
+                            del cache[next(iter(cache))]
+            else:
+                result = [_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text)]
             if not result:
                 raise TranslationError("Enter some text to translate.")
             return " ".join(result)

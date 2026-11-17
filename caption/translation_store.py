@@ -105,8 +105,31 @@ class TranslationStore:
                 source_text=excluded.source_text, translated_text=excluded.translated_text''',
                 (conversation_id, passage_key, config.fingerprint, source, text, datetime.now().isoformat()))
 
+    def google_source(self, conversation_id, config):
+        with self.connect() as db:
+            row = db.execute('SELECT source_text FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
+                (conversation_id, 'google-sync:' + config.fingerprint)).fetchone()
+            return row['source_text'] if row else ''
+
     def reading(self, conversation_id, config):
         """Latest successful text in source order, without repeating batch answers."""
+        if config.engine == 'google_web':
+            lines = self.lines(conversation_id)
+            with self.connect() as db:
+                row = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
+                    (conversation_id, 'google-sync:' + config.fingerprint)).fetchone()
+            if row:
+                # The result belongs to the entire paragraph, never to arbitrary
+                # individual sentences. Only highlight fully synchronized lines.
+                ids, prefix = [], ''
+                for line in lines:
+                    prefix += ('\n' if prefix else '') + line['source_text']
+                    if not (row['source_text'] == prefix or row['source_text'].startswith(prefix + '\n')):
+                        break
+                    ids.append(line['id'])
+                return {'segments': [{'line_id': 'google-sync', 'line_ids': ids, 'text': row['translated_text']}],
+                        'realtime': [], 'translated_lines': len(ids), 'total_lines': len(lines),
+                        'synced_source': row['source_text'], 'paragraph_sync': True}
         with self.connect() as db:
             rows = [dict(row) for row in db.execute(
                 "SELECT t.* FROM line_translations t JOIN translation_lines l ON l.id=t.line_id "
@@ -142,6 +165,9 @@ class TranslationStore:
         return {'segments': segments, 'realtime': realtime, 'translated_lines': len(latest), 'total_lines': len(sources)}
 
     def missing(self, conversation_id, config):
+        if config.engine == 'google_web':
+            lines = self.lines(conversation_id)
+            return [] if '\n'.join(line['source_text'] for line in lines) == self.google_source(conversation_id, config) else lines
         with self.connect() as db:
             return [dict(r) for r in db.execute(
                 "SELECT l.* FROM translation_lines l WHERE conversation_id=? AND NOT EXISTS ("

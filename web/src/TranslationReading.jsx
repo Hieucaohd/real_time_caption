@@ -9,7 +9,7 @@ export default function TranslationReading({ cid, lines, reading, capture, showR
     const groups = new Map();
     for (const segment of segments) {
       const ids = memberIds(segment);
-      for (const id of ids) groups.set(id, [...new Set([...(groups.get(id) || []), ...ids])]);
+      for (const id of ids) groups.set(id, groups.has(id) ? [...new Set([...groups.get(id), ...ids])] : ids);
     }
     return groups;
   }, [segments]);
@@ -37,7 +37,7 @@ export default function TranslationReading({ cid, lines, reading, capture, showR
       <div className="translation-reading-head">
         <header><h3>Nguyên văn <small>{source}</small></h3><span>{lines.length} câu</span></header>
         {showRealtime && <header><h3>Dịch realtime <small>{target}</small></h3><span>{realtime.length} đoạn</span></header>}
-        <header><h3>Dịch đã chốt <small>{target}</small></h3><span>{reading?.translated_lines || 0}/{lines.length} câu</span></header>
+        <header><h3>{reading?.paragraph_sync ? "Bản dịch đồng bộ" : "Dịch đã chốt"} <small>{target}</small></h3><span>{reading?.translated_lines || 0}/{lines.length} câu</span></header>
       </div>
       <div className="translation-reading-scroll scroll" ref={scroll} tabIndex={0} aria-label="Cuộn nguyên văn và bản dịch">
         <div className="translation-reading-columns">
