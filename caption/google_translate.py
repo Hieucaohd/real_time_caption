@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 import time
 import hashlib
+import re
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .chatgpt import CDP_URL, _open_background_tab
@@ -233,10 +234,12 @@ def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
     language_query = parse_qs(urlsplit(page.url).query)
     languages = (language_query.get('sl'), language_query.get('tl'))
     previous = _read_output(page)
+    before = box.input_value(timeout=1500)
     wrote = _append_source(box, text)
     last, changed = '', time.monotonic()
     source_changed, published = changed, ''
-    fresh = not wrote or not previous
+    same_words = lambda a, b: re.sub(r'[\s.,!?;:。！？、，：；…]+', '', a).casefold() == re.sub(r'[\s.,!?;:。！？、，：；…]+', '', b).casefold()
+    fresh = not wrote or not previous or same_words(before, text)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         _check_cancel(cancel)
@@ -246,7 +249,9 @@ def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
         # Continue appending incoming transcript while Google is still translating.
         incoming = latest() if latest else None
         if incoming and incoming != text:
+            previous = _read_output(page)
             _append_source(box, incoming)
+            fresh = not previous or same_words(text, incoming)
             text = incoming
             source_changed = time.monotonic()
             deadline = time.monotonic() + timeout_s

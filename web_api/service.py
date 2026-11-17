@@ -19,6 +19,7 @@ from caption.translation_store import TranslationStore
 from caption.translation_worker import TranslationWorker
 from caption.translation_batch import SentenceBatcher
 from caption.realtime_translation import RealtimePassage
+from caption.google_capture import GoogleCapture
 from caption.voca_client import VocaClient
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ class Service:
         self.preview_snapshot = None
         self.preview_context = None
         self.realtime_passage = RealtimePassage()
+        self.google_capture = None
+        self.google_timer = None
         self.last_final = ''
         self.final_revision = 0
         self.batcher = SentenceBatcher(self.schedule, lambda timer: timer.cancel(), self.submit_batch, self.translation_error)
@@ -95,6 +98,15 @@ class Service:
             transcript = self.transcript_for(cid)
             transcript.begin_segment(chatgpt_dictation.LABEL if source == 'chatgpt' else livecaptions.LABEL)
             try:
+                self.translations.sync_transcript(transcript)
+                prior = self.translations.lines(cid)
+                if self.google_timer:
+                    self.google_timer.cancel()
+                    self.google_timer = None
+                self.google_capture = GoogleCapture(cid, prior[-1]['origin'] if prior else '')
+                if settings.translation_enabled and settings.translation_engine == 'google_web':
+                    self.worker.resume()
+                    self.translation_issue = ''
                 self.store.set_status(cid, 'recording')
                 self.transcript = transcript
                 if self.capture['conversation_id'] != cid:
@@ -132,8 +144,14 @@ class Service:
                         self.reader.stop()
                 elif event.kind == 'partial':
                     self.capture['partial'] = event.text
+                    if self.google_capture:
+                        self.google_capture.partial = event.text
+                        self.queue_google()
                     self.update_preview(Settings.load())
                 elif event.kind == 'final' and self.transcript:
+                    if self.google_capture:
+                        self.google_capture.final(event.text)
+                        self.queue_google()
                     if self.preview_context:
                         self.realtime_passage.final(event.text)
                     self.last_final = event.text
@@ -144,6 +162,7 @@ class Service:
                         self.clear_preview()
                         if self.transcript:
                             self.on_lines(self.transcript.close())
+                        self.send_google()
                         self.batcher.flush()
                     finally:
                         self.capture.update(active=False, partial='', status=self.capture['error'] or 'Paused')
@@ -166,11 +185,26 @@ class Service:
                     self.batcher.add(line, Config.from_settings(settings), settings.translation_batch_size, settings.translation_batch_timeout)
                 except Exception as exc:
                     self.translation_error(exc)
-        if google and captured:
-            try:
-                self.worker.sync_google(self.capture['conversation_id'], Config.from_settings(settings))
-            except Exception as exc:
-                self.translation_error(exc)
+
+    def queue_google(self):
+        settings = Settings.load()
+        if settings.translation_enabled and settings.translation_engine == 'google_web' and self.google_timer is None:
+            self.google_timer = self.schedule(300, self.send_google)
+
+    def send_google(self, force=False):
+        if self.google_timer:
+            self.google_timer.cancel()
+            self.google_timer = None
+        settings = Settings.load()
+        session = self.google_capture
+        if not session or settings.translation_engine != 'google_web' or not (force or settings.translation_enabled):
+            return False
+        try:
+            return self.worker.sync_google(session.conversation_id, Config.from_settings(settings), force=force,
+                text=session.snapshot(), session_key=session.key, source_anchor=session.anchor)
+        except Exception as exc:
+            self.translation_error(exc)
+            return False
 
     def clear_preview(self, reset_passage=True):
         """Cancel live work; persisted passages are never cleared by final jobs."""
@@ -271,6 +305,9 @@ class Service:
         if config.engine == 'google_web':
             self.worker.resume()
             self.translation_issue = ''
+            if self.google_capture and self.google_capture.conversation_id == cid:
+                submitted = self.send_google(force=True)
+                return {'batches': int(submitted), 'lines': int(bool(self.google_capture.text))}
             submitted = self.worker.sync_google(cid, config, force=force)
             return {'batches': int(submitted), 'lines': len(self.translations.lines(cid))}
         lines = self.translations.lines(cid) if ids else self.translations.missing(cid, config)
@@ -483,6 +520,8 @@ class Service:
             self.batcher.clear()
             if self.preview_timer:
                 self.preview_timer.cancel()
+            if self.google_timer:
+                self.google_timer.cancel()
             for cancel in self.job_cancel.values():
                 cancel.set()
             self.worker.close()

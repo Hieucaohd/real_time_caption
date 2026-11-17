@@ -1,4 +1,5 @@
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -6,6 +7,32 @@ import test_translation as fixtures
 import test_web_api as api_fixtures
 from caption.translation import Config
 from caption.translation_store import TranslationStore
+from caption.google_capture import GoogleCapture
+from caption.transcriber import Event
+
+
+class GoogleCaptureTests(unittest.TestCase):
+    def test_partial_is_available_before_final_and_handoff_does_not_repeat(self):
+        capture = GoogleCapture('conversation')
+        capture.partial = 'Hello world and'
+        self.assertEqual(capture.snapshot(), 'Hello world and')
+        capture.final('Hello world')
+        self.assertEqual(capture.snapshot(), 'Hello world and')
+        capture.partial = 'and welcome'
+        self.assertEqual(capture.snapshot(), 'Hello world and welcome')
+        capture.final('and welcome')
+        self.assertEqual(capture.snapshot(), 'Hello world and welcome')
+
+    def test_repeated_spoken_words_are_retained_but_revisions_do_not_reset_source(self):
+        capture = GoogleCapture('conversation')
+        capture.partial = 'Yes'
+        self.assertEqual(capture.snapshot(), 'Yes')
+        capture.final('Yes'); capture.partial = 'Yes'
+        self.assertEqual(capture.snapshot(), 'Yes Yes')
+        capture.final('Yes'); capture.partial = 'I have a cat'
+        old = capture.snapshot()
+        capture.partial = 'I have a cap now'
+        self.assertEqual(capture.snapshot(), old + ' now')
 
 
 class GoogleSyncTests(unittest.TestCase):
@@ -114,20 +141,67 @@ class GoogleSyncApiTests(unittest.TestCase):
     tearDown = api_fixtures.WebApiTests.tearDown
     post = api_fixtures.WebApiTests.post
 
-    def test_auto_sync_ignores_batch_count_and_manual_sync_uses_full_transcript(self):
+    def test_live_sync_ignores_batch_count_and_manual_sync_stays_in_current_session(self):
         self.client.patch('/api/settings', headers=self.headers, json={
             'translation_engine': 'google_web', 'translation_enabled': True,
             'translation_batch_size': 50, 'translation_batch_timeout': 300})
         self.service.capture['conversation_id'] = self.cid
+        self.service.google_capture = GoogleCapture(self.cid)
+        self.service.google_capture.partial = 'New words'
         with patch.object(self.service.worker, 'sync_google', return_value=True) as sync, \
              patch.object(self.service.batcher, 'add') as batch:
             self.service.on_lines([('one', 'now', 'Hello'), ('two', 'now', 'World')])
-            sync.assert_called_once_with(self.cid, Config.from_settings(api_fixtures.settings.Settings.load()))
+            sync.assert_not_called()  # Indexing existing lines is not a live-source event.
+            self.service.send_google()
+            self.assertEqual(sync.call_args.kwargs['text'], 'New words')
             batch.assert_not_called()
             result = self.post('/api/conversations/' + self.cid + '/translate', {'ids': [1], 'force': True})
             self.assertEqual(result.status_code, 200)
-            self.assertEqual(result.json()['lines'], 2)
+            self.assertEqual(result.json()['lines'], 1)
             self.assertTrue(sync.call_args.kwargs['force'])
+
+    def test_start_excludes_history_partial_translates_and_restart_does_not_replay(self):
+        transcript = self.service.transcript_for(self.cid)
+        transcript.begin_segment(); transcript.write('Historical sentence.', True); transcript.close()
+        self.client.patch('/api/settings', headers=self.headers, json={
+            'translation_engine': 'google_web', 'translation_enabled': True})
+        sent = threading.Event()
+        def translate(text, *a, **kw):
+            sent.set()
+            return 'Translated ' + text
+        with patch('caption.google_translate.translate', side_effect=translate) as run:
+            self.post('/api/conversations/' + self.cid + '/capture')
+            first_session = self.service.google_capture.key
+            self.service.on_caption(Event('partial', 'Currently speaking'))
+            self.assertTrue(sent.wait(3), 'A partial must be sent before any final event')
+            self.assertEqual(run.call_args.args[0], 'Currently speaking')
+            self.service.on_caption(Event('final', 'Currently speaking', True))
+            self.service.on_caption(Event('partial', ''))
+            self.post('/api/capture/pause')
+            deadline = time.monotonic() + 3
+            while not self.service.translations.google_source(self.cid, Config.from_settings(api_fixtures.settings.Settings.load()), first_session):
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.02)
+            self.post('/api/conversations/' + self.cid + '/capture')
+            self.assertNotEqual(self.service.google_capture.key, first_session)
+            self.assertEqual(self.service.google_capture.text, '')
+            sent.clear()
+            self.service.on_caption(Event('partial', 'Only new speech'))
+            self.assertTrue(sent.wait(3))
+            self.assertEqual(run.call_args.args[0], 'Only new speech')
+            self.service.on_caption(Event('final', 'Only new speech', True))
+            self.service.on_caption(Event('partial', ''))
+            self.post('/api/capture/pause')
+            deadline = time.monotonic() + 3
+            config = Config.from_settings(api_fixtures.settings.Settings.load())
+            while len(self.service.translations.reading(self.cid, config)['segments']) < 2:
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.02)
+            reading = TranslationStore(self.service.store.db_path).reading(self.cid, config)
+            self.assertEqual([s['text'] for s in reading['segments']], ['Translated Currently speaking', 'Translated Only new speech'])
+            historical = self.service.translations.lines(self.cid)[0]['id']
+            self.assertTrue(all(historical not in s['line_ids'] for s in reading['segments']))
+            self.assertTrue(all('Historical' not in call.args[0] for call in run.call_args_list))
 
 
 if __name__ == '__main__':

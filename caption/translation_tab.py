@@ -11,6 +11,7 @@ from . import markdown_html, translation
 from .translation_batch import SentenceBatcher, batch_options
 from .translation_store import TranslationStore
 from .translation_worker import TranslationWorker
+from .google_capture import GoogleCapture
 
 FIELDS = {
     "azure": [("translation_azure_key", "API key", True), ("translation_azure_region", "Region (if required)", False)],
@@ -24,7 +25,7 @@ NOTES = {
     "chrome": "On-device Chrome Translator API. Open the web app in Chrome 9222 and initialize the language pair in its Settings first. Live preview translates unfinished speech; finalized translations are saved normally.",
     "azure": "Cloud: sends transcript text to Microsoft. Configure a Translator resource/key and region. Quota depends on your plan.",
     "google": "Cloud: sends text to Google Cloud Translation Basic v2. Enable the API in the project that owns this key. Billing/quota depends on the project.",
-    "google_web": "No API key. Appends new transcript to Google Translate in Chrome 9222 and appends newly translated text to the app and SQLite. Never clears or reloads the source; previously displayed translation stays unchanged. At 5,000 characters another tab continues the text, preserving earlier tabs. Batch size/wait are ignored. Each conversation/language pair keeps its own tabs. Text is sent to Google.",
+    "google_web": "No API key. Sends live speech without waiting for finalized sentences. Each Start/Continue translates only new speech; old transcript is not resent. Appends source in Chrome 9222 and new translation in the app and SQLite. Never clears earlier tabs or displayed translations. At 5,000 characters another tab continues the text. Batch size/wait are ignored. Text is sent to Google.",
     "gemini": "Cloud: sends text to Gemini API, not the Chrome tab. Free-tier data may be used to improve Google's products. Check your API quota.",
     "vinai": "Offline: English → Vietnamese only. CPU is the safe default. CUDA shares GPU resources with Whisper. Model: VinAI Translate (AGPL-3.0). Download is explicit, never automatic.",
 }
@@ -245,6 +246,10 @@ class TranslationPanel(ttk.Frame):
         self.preview_label.configure(text="")
 
     def on_partial(self, transcript, text):
+        session = getattr(transcript, '_google_capture', None)
+        if session:
+            session.partial = text
+            self._queue_google(session)
         if not text.strip() or not self.enabled_var.get() or not self.partial_var.get() or self.engine() != 'chrome':
             self.invalidate_preview()
             return
@@ -268,6 +273,42 @@ class TranslationPanel(ttk.Frame):
 
         self._preview_after = self.after(300, submit)
 
+    def begin_google(self, transcript):
+        self.store.sync_transcript(transcript)
+        lines = self.store.lines(transcript.conversation_id)
+        session = GoogleCapture(transcript.conversation_id, lines[-1]['origin'] if lines else '')
+        transcript._google_capture = self._google_current = session
+        if self.enabled_var.get() and self.engine() == 'google_web':
+            self.worker.resume()
+
+    def google_final(self, transcript, text):
+        session = getattr(transcript, '_google_capture', None)
+        if session:
+            session.final(text)
+            self._queue_google(session)
+
+    def _queue_google(self, session):
+        if self.enabled_var.get() and self.engine() == 'google_web' and not getattr(self, '_google_after', None):
+            self._google_after = self.after(300, lambda: self._send_google(session))
+
+    def _send_google(self, session, force=False):
+        if getattr(self, '_google_after', None):
+            self.after_cancel(self._google_after)
+            self._google_after = None
+        if self._closed or self.engine() != 'google_web' or not (force or self.enabled_var.get()):
+            return False
+        try:
+            return self.worker.sync_google(session.conversation_id, self.config(), force=force,
+                text=session.snapshot(), session_key=session.key, source_anchor=session.anchor)
+        except translation.TranslationError as exc:
+            self.status.set(str(exc))
+            return False
+
+    def finish_google(self, transcript):
+        session = getattr(transcript, '_google_capture', None)
+        if session:
+            self._send_google(session)
+
     def on_lines(self, conversation_id, captured):
         if not captured:
             return
@@ -280,8 +321,6 @@ class TranslationPanel(ttk.Frame):
                 if self.enabled_var.get() and not self._closed:
                     config = self.config()
                     if config.engine == 'google_web':
-                        self.worker.sync_google(conversation_id, config)
-                        self.status.set('Synchronizing transcript with Google Translate…')
                         continue
                     count, timeout = self.batch_options()
                     self.batcher.add(line, config, count, timeout)
@@ -359,17 +398,17 @@ class TranslationPanel(ttk.Frame):
     def _show_selected(self):
         selected = self.tree.selection()
         line = self._lines.get(selected[0]) if selected else None
-        if not line:
-            return
         e = markdown_html.plain_to_html
         if self.engine() == 'google_web':
-            reading = self.store.reading(line['conversation_id'], self.config())
+            reading = self.store.reading(self._get_conversation_id(), self.config())
             if reading.get('paragraph_sync'):
                 body = '<p><b>Google Translate — synchronized transcript</b></p>'
                 body += f"<p>{e(reading['synced_source'])}</p><hr>"
-                body += f"<p>{e(reading['segments'][0]['text'])}</p>"
+                body += f"<p>{e(' '.join(segment['text'] for segment in reading['segments']))}</p>"
                 markdown_html.show(self.view, body, scroll_to_end=self.follow_var.get())
                 return
+        if not line:
+            return
         body = f"<div class='meta'>{e(line['stamp'])}</div><p><b>Original</b></p><p>{e(line['source_text'])}</p>"
         for item in self.store.history(line["id"]):
             meta = f"{translation.ENGINES.get(item['engine'], item['engine'])} · {item['source_lang']} → {item['target_lang']} · {item['model']} · {item['created_at']} · {item['status']}"
@@ -396,6 +435,12 @@ class TranslationPanel(ttk.Frame):
             config = self.config()
         except translation.TranslationError as exc:
             messagebox.showinfo("Translation", str(exc), parent=self)
+            return
+        session = getattr(self, '_google_current', None)
+        if config.engine == 'google_web' and session and session.conversation_id == self._get_conversation_id():
+            self.worker.resume()
+            self._send_google(session, force=True)
+            self.status.set('Synchronizing new speech from the current capture session…')
             return
         lines = self.store.missing(self._get_conversation_id(), config)
         if not lines:
@@ -490,7 +535,8 @@ class TranslationPanel(ttk.Frame):
                 try:
                     for line in task.members:
                         if task.sync:
-                            self._put_line(line, state=f'google_web: {status}', follow=False, show=False)
+                            if 'id' in line:
+                                self._put_line(line, state=f'google_web: {status}', follow=False, show=False)
                         else:
                             self._put_line(line)
                     if task.sync:
@@ -508,6 +554,9 @@ class TranslationPanel(ttk.Frame):
         self.after(100, self._drain)
 
     def close(self):
+        if getattr(self, '_google_after', None):
+            self.after_cancel(self._google_after)
+            self._google_after = None
         self.batcher.clear()
         self.invalidate_preview()
         self._closed = True

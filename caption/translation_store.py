@@ -59,6 +59,8 @@ class TranslationStore:
             realtime_columns = {row['name'] for row in db.execute('PRAGMA table_info(realtime_translations)')}
             if 'raw_text' not in realtime_columns:
                 db.execute("ALTER TABLE realtime_translations ADD COLUMN raw_text TEXT NOT NULL DEFAULT ''")
+            if 'source_anchor' not in realtime_columns:
+                db.execute("ALTER TABLE realtime_translations ADD COLUMN source_anchor TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connect(self):
@@ -108,15 +110,16 @@ class TranslationStore:
                 source_text=excluded.source_text, translated_text=excluded.translated_text''',
                 (conversation_id, passage_key, config.fingerprint, source, text, datetime.now().isoformat()))
 
-    def google_source(self, conversation_id, config):
+    def google_source(self, conversation_id, config, session_key=''):
+        key = 'google-sync:' + config.fingerprint + (':' + session_key if session_key else '')
         with self.connect() as db:
             row = db.execute('SELECT source_text FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
-                (conversation_id, 'google-sync:' + config.fingerprint)).fetchone()
+                (conversation_id, key)).fetchone()
             return row['source_text'] if row else ''
 
-    def append_google(self, conversation_id, config, source, raw):
+    def append_google(self, conversation_id, config, source, raw, session_key='', source_anchor=''):
         from .append_translation import added_tail
-        key = 'google-sync:' + config.fingerprint
+        key = 'google-sync:' + config.fingerprint + (':' + session_key if session_key else '')
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             old = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
@@ -129,10 +132,10 @@ class TranslationStore:
                     tail = ' ' + tail
                 displayed += tail
             db.execute('''INSERT INTO realtime_translations
-                (conversation_id,passage_key,fingerprint,source_text,translated_text,raw_text,created_at)
-                VALUES(?,?,?,?,?,?,?) ON CONFLICT(conversation_id,passage_key) DO UPDATE SET
+                (conversation_id,passage_key,fingerprint,source_text,translated_text,raw_text,created_at,source_anchor)
+                VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(conversation_id,passage_key) DO UPDATE SET
                 source_text=excluded.source_text,translated_text=excluded.translated_text,raw_text=excluded.raw_text''',
-                (conversation_id,key,config.fingerprint,source,displayed,raw,datetime.now().isoformat()))
+                (conversation_id,key,config.fingerprint,source,displayed,raw,datetime.now().isoformat(),source_anchor))
             return displayed
 
     def reading(self, conversation_id, config):
@@ -140,20 +143,25 @@ class TranslationStore:
         if config.engine == 'google_web':
             lines = self.lines(conversation_id)
             with self.connect() as db:
-                row = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
-                    (conversation_id, 'google-sync:' + config.fingerprint)).fetchone()
-            if row:
+                rows = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND fingerprint=? AND passage_key LIKE ? ORDER BY id',
+                    (conversation_id, config.fingerprint, 'google-sync:' + config.fingerprint + '%')).fetchall()
+            if rows:
                 # The result belongs to the entire paragraph, never to arbitrary
                 # individual sentences. Only highlight fully synchronized lines.
-                ids, prefix = [], ''
-                for line in lines:
-                    prefix += ('\n' if prefix else '') + line['source_text']
-                    if not (row['source_text'] == prefix or row['source_text'].startswith(prefix + '\n')):
-                        break
-                    ids.append(line['id'])
-                return {'segments': [{'line_id': 'google-sync', 'line_ids': ids, 'text': row['translated_text']}],
-                        'realtime': [], 'translated_lines': len(ids), 'total_lines': len(lines),
-                        'synced_source': row['source_text'], 'paragraph_sync': True}
+                segments, covered = [], set()
+                for row in rows:
+                    start = next((i + 1 for i, line in enumerate(lines) if line['origin'] == row['source_anchor']), len(lines)) if row['source_anchor'] else 0
+                    ids, prefix = [], ''
+                    source = ' '.join(row['source_text'].split())
+                    for line in lines[start:]:
+                        prefix += (' ' if prefix else '') + ' '.join(line['source_text'].split())
+                        if not (source == prefix or source.startswith(prefix + ' ')):
+                            break
+                        ids.append(line['id'])
+                    covered.update(ids)
+                    segments.append({'line_id': 'google-sync:' + str(row['id']), 'line_ids': ids, 'text': row['translated_text']})
+                return {'segments': segments, 'realtime': [], 'translated_lines': len(covered), 'total_lines': len(lines),
+                        'synced_source': ' '.join(row['source_text'] for row in rows), 'paragraph_sync': True}
         with self.connect() as db:
             rows = [dict(row) for row in db.execute(
                 "SELECT t.* FROM line_translations t JOIN translation_lines l ON l.id=t.line_id "

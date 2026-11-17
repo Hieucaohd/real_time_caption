@@ -385,6 +385,9 @@ def create_app(service=None):
         s = svc(request)
         with s.lock:
             s.batcher.clear()
+            if s.google_timer:
+                s.google_timer.cancel()
+                s.google_timer = None
             s.worker.cancel_all()
             s.clear_preview()
         settings = Settings.load()

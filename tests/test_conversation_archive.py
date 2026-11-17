@@ -87,6 +87,9 @@ class ConversationArchiveTests(unittest.TestCase):
         return result.getvalue()
 
     def test_roundtrip_to_second_device_preserves_all_conversation_data(self):
+        google_config = Config(engine='google_web')
+        self.service.translations.append_google(self.cid, google_config, 'Second part', 'Live translation',
+                                               'capture-session', self.lines[0]['origin'])
         other = self.store.create('Other', 'Unrelated private conversation')
         (other.folder / 'private.txt').write_text('Do not export', encoding='utf-8')
         package = self.exported()
@@ -141,6 +144,12 @@ class ConversationArchiveTests(unittest.TestCase):
             self.assertEqual(translations.history(imported_lines[0]['id'])[0]['translated_text'], 'Xin chào')
             self.assertEqual(translations.history(imported_lines[1]['id'])[0]['status'], 'error')
             self.assertEqual(translations.reading(imported.id, Config(engine='chrome'))['realtime'][0]['text'], 'Realtime hello')
+            google_reading = translations.reading(imported.id, google_config)
+            self.assertEqual(google_reading['segments'][0]['text'], 'Live translation')
+            self.assertEqual(google_reading['segments'][0]['line_ids'], [imported_lines[1]['id']])
+            translations.append_google(imported.id, google_config, 'Second part', 'Live translation',
+                                       'capture-session', self.lines[0]['origin'])
+            self.assertEqual(translations.reading(imported.id, google_config)['segments'][0]['text'], 'Live translation')
             translations.sync_transcript(ConversationTranscript(imported, target))
             self.assertEqual(len(translations.lines(imported.id)), 2)
             sidecar = json.loads((imported.folder / 'conversation.json').read_text(encoding='utf-8'))

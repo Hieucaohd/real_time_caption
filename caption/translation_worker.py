@@ -22,6 +22,8 @@ class Task:
     lines: tuple = ()
     attempts: tuple = ()
     sync: bool = False
+    session_key: str = ''
+    source_anchor: str = ''
 
     @property
     def members(self):
@@ -91,7 +93,7 @@ class TranslationWorker:
             self._condition.notify_all()
             return True
 
-    def sync_google(self, conversation_id, config, *, force=False):
+    def sync_google(self, conversation_id, config, *, force=False, text=None, session_key='', source_anchor=''):
         """One in-flight snapshot and one latest pending snapshot per conversation."""
         config.validate()
         with self._condition:
@@ -99,14 +101,14 @@ class TranslationWorker:
                 return False
             if self._paused and not force:
                 raise TranslationError('Translation paused after an error. Enable Auto translate or Retry.')
-            lines = self.store.lines(conversation_id)
-            if not lines:
+            lines = self.store.lines(conversation_id) if text is None else []
+            text = '\n'.join(line['source_text'] for line in lines) if text is None else text
+            if not text:
                 return False
-            text = '\n'.join(line['source_text'] for line in lines)
-            if not force and self.store.google_source(conversation_id, config) == text:
+            if not force and self.store.google_source(conversation_id, config, session_key) == text:
                 return False
             def matches(task):
-                return task.sync and task.line['conversation_id'] == conversation_id and task.config == config
+                return task.sync and task.session_key == session_key and task.line['conversation_id'] == conversation_id and task.config == config
             for task in list(self._active.values()) + list(self._tasks):
                 if matches(task) and task.line['source_text'] == text and not task.cancel.is_set():
                     return False
@@ -115,7 +117,7 @@ class TranslationWorker:
                 raise TranslationError('Translation queue is full. Retry later.')
             self._paused = False
             task = Task({'conversation_id': conversation_id, 'source_text': text}, config,
-                        lines=tuple(lines), sync=True)
+                        lines=tuple(lines), sync=True, session_key=session_key, source_anchor=source_anchor)
             self._tasks.append(task)
             self._condition.notify_all()
             return True
@@ -153,8 +155,9 @@ class TranslationWorker:
                         self.store.finish(attempt, "cancelled", error="Cancelled before sending.")
                 except Exception:
                     pass  # Startup recovery will mark interrupted rows; keep cancelling safely.
-                for line in task.members:
-                    self._keys.discard(self._key(line, task.config))
+                if not task.sync:
+                    for line in task.members:
+                        self._keys.discard(self._key(line, task.config))
                 self.results.put((task, "cancelled", ""))
 
     def close(self):
@@ -200,13 +203,13 @@ class TranslationWorker:
                 if not task.preview:
                     for attempt in task.attempts:
                         self.store.finish(attempt, "working")
-                text = "\n".join(line["source_text"] for line in task.members)
+                text = task.line['source_text'] if task.sync else "\n".join(line["source_text"] for line in task.members)
                 if task.sync:
                     from .google_translate import translate
                     def latest():
                         with self._condition:
                             for candidate in list(self._tasks):
-                                if (candidate.sync and candidate.config == task.config
+                                if (candidate.sync and candidate.session_key == task.session_key and candidate.config == task.config
                                         and candidate.line['conversation_id'] == task.line['conversation_id']):
                                     self._tasks.remove(candidate)
                                     task.line, task.lines = candidate.line, candidate.lines
@@ -216,9 +219,10 @@ class TranslationWorker:
                             cid = task.line['conversation_id']
                             # Publish additions immediately, but advance the source
                             # checkpoint only when the final read succeeds.
-                            self.store.append_google(cid, task.config, self.store.google_source(cid, task.config), raw)
+                            self.store.append_google(cid, task.config, self.store.google_source(cid, task.config, task.session_key), raw,
+                                                     task.session_key, task.source_anchor)
                     value = translate(text, task.config.source, task.config.target, task.cancel,
-                                      append=True, stream_key=task.line['conversation_id'] + ':' + task.config.fingerprint,
+                                      append=True, stream_key=task.line['conversation_id'] + ':' + task.config.fingerprint + (':' + task.session_key if task.session_key else ''),
                                       latest=latest, on_result=publish, cache=self._google_completed)
                 else:
                     value = self.translator.translate(text, task.config, task.cancel)
@@ -233,7 +237,7 @@ class TranslationWorker:
             try:
                 if task.sync and status == 'done':
                     value = self.store.append_google(task.line['conversation_id'], task.config,
-                                                     task.line['source_text'], value)
+                                                     task.line['source_text'], value, task.session_key, task.source_anchor)
                 if not task.preview:
                     for attempt in task.attempts:
                         self.store.finish(attempt, status, value if status == "done" else "", value if status != "done" else "")
@@ -241,7 +245,7 @@ class TranslationWorker:
                 status, value = "error", "Could not save translation history. Retry after checking SQLite access."
             finally:
                 with self._condition:
-                    if not task.preview:
+                    if not task.preview and not task.sync:
                         for line in task.members:
                             self._keys.discard(self._key(line, task.config))
                     self._active.pop(lane, None)

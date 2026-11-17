@@ -208,6 +208,16 @@ class GoogleTranslateTests(unittest.TestCase):
         source.evaluate.assert_not_called()
         page.goto.assert_not_called()
 
+    def test_final_punctuation_can_keep_the_same_translation_without_error(self):
+        page, source, _ = self.page()
+        current = {'value': 'Hello'}
+        source.input_value.side_effect = lambda **kw: current['value']
+        source.evaluate.side_effect = lambda script, args: (current.update(value=args['text']) or 'ok')
+        with patch.object(web, '_read_output', return_value='Xin chao.'):
+            self.assertEqual(web._translate_page(page, 'Hello.', 'en', 'vi', None, append=True), 'Xin chao.')
+        source.fill.assert_not_called()
+        page.goto.assert_not_called()
+
     def test_mismatch_limit_and_language_change_never_clear_source(self):
         page, source, _ = self.page()
         source.input_value.side_effect = lambda **kw: 'Keep this'

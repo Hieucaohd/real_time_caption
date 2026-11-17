@@ -790,6 +790,7 @@ class App:
         try:
             tfile = ConversationTranscript(self.current_conversation, self.store)
             tfile.begin_segment(source_label)
+            self.translation.begin_google(tfile)
             self.store.set_status(self.current_conversation.id, "recording")
         except OSError as exc:
             log.exception("Could not create transcript file")
@@ -801,6 +802,7 @@ class App:
     def _close_session_file(self, tfile: ConversationTranscript) -> None:
         captured = tfile.close()
         self.translation.on_lines(tfile.conversation_id, captured)
+        self.translation.finish_google(tfile)
         self.translation.flush_pending(tfile.conversation_id)
         self._open_files.discard(tfile)
 
@@ -1220,6 +1222,7 @@ class App:
                 self._set_transcript_partial(event.text)
             self.overlay.set_partial(event.text)
         elif event.kind == "final":
+            self.translation.google_final(tfile, event.text)
             captured = tfile.write(event.text, event.end_of_utterance)
             self.translation.on_lines(tfile.conversation_id, captured)
             if tfile.conversation_id == self._conversation_id():
