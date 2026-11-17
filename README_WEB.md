@@ -174,6 +174,8 @@ Lựa chọn lưu trong bảng `livecaptions_preferences` của SQLite, dùng ch
 
 Backend điều khiển các nút qua UI Automation và xác nhận trạng thái thực tế. Giao diện Windows có thể hiện khi tải danh sách, áp dụng hoặc tự khôi phục cài đặt. Ngôn ngữ chưa sẵn sàng sẽ báo cần hoàn tất thiết lập/tải gói trong Live Captions. Danh sách ngôn ngữ được dùng lại theo cửa sổ, tiến trình và ngôn ngữ Windows hiện tại, không phụ thuộc khóa AppSessionId. Bộ đọc giữ Unicode và đọc từ vùng chứa phụ đề nếu phần tử chữ tạm thời trống. Lỗi đọc thật vẫn hiển thị; nút đóng thông báo không để cùng lỗi xuất hiện lại ở mỗi lần cập nhật giao diện.
 
+Menu Live Captions cần cửa sổ đang được chọn. Nếu người dùng chuyển ứng dụng, app ngừng thao tác, chờ chuột/bàn phím nghỉ ít nhất 1,5 giây rồi thử lại; tối đa 3 lượt, thời gian chờ trong khoảng 20 giây. App đọc lại trạng thái trước khi bật/tắt micro, không đảo công tắc mù và không kéo người dùng về cửa sổ cũ sau khi họ đã chuyển đi. Khôi phục tự động cũng chờ lúc người dùng ngừng thao tác. Nếu vẫn bị gián đoạn, app báo chưa xác nhận thay vì báo thành công; người dùng có thể bấm áp dụng lại. Việc đọc phụ đề tiếp tục độc lập, chuột/bàn phím không bị khóa.
+
 ## Lưu cài đặt Chat và chọn tab ChatGPT
 
 Trong **Chat → Tùy chọn Chat**, bấm **Lưu cài đặt Chat** để lưu tab ChatGPT đang chọn (mã tab và tên hiển thị), prompt, Power, số dòng transcript, đính kèm transcript/lịch sử, Auto screenshot và New ChatGPT chat vào `settings.json` dùng chung với native. Các tùy chọn đang chỉnh được dùng ngay khi gửi và giữ lại khi chuyển tab/conversation; chỉ bấm Lưu mới thay đổi mặc định cho lần mở app tiếp theo. Việc sửa/lưu nội dung mẫu prompt vẫn thực hiện trong trình chỉnh sửa prompt.

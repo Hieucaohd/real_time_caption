@@ -50,21 +50,62 @@ class CaptionsSettingsError(ValueError):
     pass
 
 
+class FocusInterrupted(CaptionsSettingsError):
+    """The user changed windows while a foreground-only XAML menu was open."""
+
+
+def input_idle_seconds():
+    if os.name != 'nt':
+        return float('inf')
+    class LastInput(ctypes.Structure):
+        _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
+    value = LastInput()
+    value.cbSize = ctypes.sizeof(value)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(value)):
+        return 0
+    return ((ctypes.windll.kernel32.GetTickCount() - value.dwTime) & 0xffffffff) / 1000
+
+
 class WindowsControls:
     def __init__(self, auto):
         self.auto = auto
         self.window = auto.WindowControl(searchDepth=1, ClassName=WINDOW_CLASS)
         self.selection = None
+        self.focus_process = None
+
+    def owns_focus(self):
+        if self.focus_process is None:
+            return True  # Not activated yet (also supports isolated control tests).
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        process = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(process))
+        return process.value == self.focus_process
+
+    def check_focus(self):
+        if not self.owns_focus():
+            raise FocusInterrupted('Bạn đã chuyển cửa sổ trong lúc áp dụng cài đặt Live Captions. '
+                                   'Hãy ngừng thao tác chuột/bàn phím một lát rồi thử lại.')
 
     def control(self, kind, identity, timeout=3):
         control = getattr(self.window, kind)(AutomationId=identity)
-        if not control.Exists(timeout):
-            raise CaptionsSettingsError(f'Không tìm thấy điều khiển Live Captions: {identity}. '
-                                        'Hãy hoàn tất thiết lập trong cửa sổ Windows rồi thử lại.')
-        return control
+        deadline = time.monotonic() + timeout
+        while True:
+            self.check_focus()
+            if control.Exists(.1):
+                self.check_focus()
+                return control
+            if time.monotonic() >= deadline:
+                self.check_focus()
+                raise CaptionsSettingsError(f'Không tìm thấy điều khiển Live Captions: {identity}. '
+                                            'Hãy hoàn tất thiết lập trong cửa sổ Windows rồi thử lại.')
 
     def exists(self, kind, identity):
-        return getattr(self.window, kind)(AutomationId=identity).Exists(.15)
+        self.check_focus()
+        result = getattr(self.window, kind)(AutomationId=identity).Exists(.15)
+        self.check_focus()
+        return result
 
     def open(self, launch=True):
         if not self.window.Exists(.2):
@@ -75,7 +116,25 @@ class WindowsControls:
             raise CaptionsSettingsError('Không mở được Windows Live Captions. Hãy thử Win + Ctrl + L.')
         # XAML flyouts dismiss immediately when their owning window is inactive.
         # Activate once for the whole operation; restore the caller in finally.
+        self.focus_process = self.window.ProcessId
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        previous = user32.GetForegroundWindow()
         self.window.SetActive(waitTime=.2)
+        if not self.owns_focus():
+            # SetForegroundWindow can be denied for a background Python process.
+            # UIA SetFocus on a caption control activates its XAML input window
+            # without moving/clicking the user's mouse. Do not retry activation
+            # here if the user already switched to another foreground window.
+            if user32.GetForegroundWindow() != previous:
+                self.check_focus()
+            for kind, identity in (('ButtonControl', 'SettingsButton'),
+                                   ('ComboBoxControl', 'SpeechModelDropDown')):
+                anchor = getattr(self.window, kind)(AutomationId=identity)
+                if anchor.Exists(.2):
+                    anchor.SetFocus()
+                    break
+        self.check_focus()
 
     def invoke(self, kind, identity):
         self.control(kind, identity).GetInvokePattern().Invoke()
@@ -102,10 +161,12 @@ class WindowsControls:
         pref.GetExpandCollapsePattern().Expand()
         mic = self.control('MenuItemControl', 'MicrophoneMenuFlyoutItem')
         pattern = mic.GetTogglePattern()
+        self.check_focus()
         current = pattern.ToggleState
         if current not in (0, 1):
             raise CaptionsSettingsError('Không đọc được trạng thái micro của Live Captions.')
         if desired is not None and bool(current) != desired:
+            self.check_focus()
             pattern.Toggle()
             # TogglePattern normally keeps the menu alive; read it in place.
             time.sleep(.25)
@@ -142,6 +203,7 @@ class WindowsControls:
         current = next((item.Name for item in self.items(combo) if item.GetSelectionItemPattern().IsSelected), '')
         combo.GetExpandCollapsePattern().Expand()
         time.sleep(.25)
+        self.check_focus()
         names = list(dict.fromkeys(item.Name for item in self.items(combo)))
         combo.GetExpandCollapsePattern().Collapse()
         if not current or not names:
@@ -153,11 +215,13 @@ class WindowsControls:
         combo = self.language_picker()
         combo.GetExpandCollapsePattern().Expand()
         time.sleep(.25)
+        self.check_focus()
         items = self.items(combo)
         item = next((item for item in items if item.Name == name), None)
         if item is None:
             combo.GetExpandCollapsePattern().Collapse()
             raise CaptionsSettingsError('Ngôn ngữ đã chọn không có trên Windows này. Hãy tải lại danh sách.')
+        self.check_focus()
         item.GetSelectionItemPattern().Select()
         if not item.GetSelectionItemPattern().IsSelected:
             raise CaptionsSettingsError('Windows chưa chọn ngôn ngữ được yêu cầu.')
@@ -204,13 +268,16 @@ def windows_controls(db_path, *, launch=True):
                 controls.open(launch=launch)
                 yield controls
             except (LookupError, OSError, COMError, AttributeError) as exc:
+                controls.check_focus()
                 raise CaptionsSettingsError('Không điều khiển được Live Captions. Hãy kiểm tra cửa sổ Windows rồi thử lại.') from exc
             finally:
                 try:
-                    controls.dismiss_menu()
+                    if controls.focus_process is not None and controls.owns_focus():
+                        controls.dismiss_menu()
                 except Exception:
                     pass
-                if previous:
+                # Never take focus back from an app the user deliberately chose.
+                if previous and controls.focus_process is not None and controls.owns_focus():
                     user32.SetForegroundWindow(previous)
 
 
@@ -238,17 +305,34 @@ def apply(controls, preferences):
     return dict(language=target, languages=languages, microphone=microphone, ready=True, status='applied')
 
 
+def _run_windows(store, operation, *, launch=True):
+    deadline = time.monotonic() + 20
+    for attempt in range(3):
+        try:
+            with windows_controls(store.db_path, launch=launch) as controls:
+                return operation(controls)
+        except FocusInterrupted:
+            if attempt == 2:
+                raise
+            # Do not repeatedly activate menus while the user is working.
+            while input_idle_seconds() < 1.5:
+                if time.monotonic() >= deadline:
+                    raise FocusInterrupted('Chưa xác nhận được cài đặt vì bạn đang thao tác ở cửa sổ khác. '
+                                           'Việc đọc phụ đề vẫn tiếp tục. Bấm Lưu và áp dụng để thử lại.')
+                time.sleep(.2)
+            if time.monotonic() >= deadline:
+                raise
+
+
 def read_windows(store):
-    with windows_controls(store.db_path) as controls:
-        return inspect(controls)
+    return _run_windows(store, inspect)
 
 
 def apply_windows(store, preferences, *, save=False, launch=True):
-    with windows_controls(store.db_path, launch=launch) as controls:
-        result = apply(controls, preferences)
-        if save:
-            store.save_livecaptions_preferences(preferences)
-        return result
+    result = _run_windows(store, lambda controls: apply(controls, preferences), launch=launch)
+    if save:
+        store.save_livecaptions_preferences(preferences)
+    return result
 
 
 class PreferenceRestorer:
@@ -291,6 +375,8 @@ class PreferenceRestorer:
                 self._observed, self._seen_at = session, time.monotonic()
                 self._attempted = None
             if not session or session == self._attempted or time.monotonic() - self._seen_at < 1:
+                return
+            if input_idle_seconds() < 1.5:
                 return
             preferences = self.store.livecaptions_preferences()
             if preferences['microphone'] is None and not preferences['language']:

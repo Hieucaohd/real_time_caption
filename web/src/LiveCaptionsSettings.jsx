@@ -55,6 +55,7 @@ export default function LiveCaptionsSettings({ api, warning = "" }) {
   return <section className="livecaptions-settings" aria-label="Cài đặt Windows Live Captions">
     <h3>Windows Live Captions</h3>
     <p>Cài đặt đã lưu được tự khôi phục khi Windows Live Captions mở lại. App chỉ áp dụng một lần cho mỗi phiên cửa sổ, không lặp lại khi tạo cuộc hội thoại hoặc Pause / Continue.</p>
+    {!!busy && busy !== "loading" && <p className="muted">Nếu bạn chuyển ứng dụng, thao tác sẽ chờ chuột/bàn phím nghỉ rồi thử lại, tối đa 3 lần. Bạn vẫn có thể sử dụng máy bình thường.</p>}
     {warning && <p role="status">{warning}</p>}
     {actual && <small>Windows: {actual.language} · Micro: {actual.microphone == null ? "Chưa xác nhận" : actual.microphone ? "Bật" : "Tắt"}</small>}
     <label className="inline">

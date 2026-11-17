@@ -166,7 +166,11 @@ class LiveCaptionsSettingsTests(unittest.TestCase):
 
 
 class PreferenceRestoreTests(unittest.TestCase):
-    setUp = fixtures.WebApiTests.setUp
+    def setUp(self):
+        fixtures.WebApiTests.setUp(self)
+        idle = patch.object(captions, 'input_idle_seconds', return_value=100)
+        self.patches.append(idle)
+        idle.start()
     tearDown = fixtures.WebApiTests.tearDown
     post = fixtures.WebApiTests.post
 
@@ -204,6 +208,20 @@ class PreferenceRestoreTests(unittest.TestCase):
             session.return_value = (10, 20)
             restorer.poll(); clock.return_value = 2; restorer.poll()
             apply.assert_not_called()
+
+    def test_background_restore_waits_until_user_stops_interacting(self):
+        self.service.store.save_livecaptions_preferences({'microphone': True, 'language': ''})
+        restorer = self.service.captions_preferences
+        restorer._observed, restorer._seen_at = (10, 20), 0
+        with patch.object(captions, 'window_session', return_value=(10, 20)), \
+                patch.object(captions, 'input_idle_seconds', return_value=0) as idle, \
+                patch.object(captions, 'apply_windows', return_value={'ready': True}) as apply:
+            for _ in range(5): restorer.poll()
+            apply.assert_not_called()
+            self.assertIsNone(restorer._attempted)
+            idle.return_value = 2
+            restorer.poll(); restorer.poll()
+            apply.assert_called_once()
 
     def test_failure_warns_once_without_stopping_capture_or_reopening_menus(self):
         self.service.store.save_livecaptions_preferences({'microphone': True, 'language': ''})
@@ -254,6 +272,85 @@ class PreferenceRestoreTests(unittest.TestCase):
 
 
 class MicrophoneControlTests(unittest.TestCase):
+    def test_activation_uses_uia_when_windows_denies_foreground_request(self):
+        windows = captions.WindowsControls(Mock())
+        windows.window.ProcessId = 20
+        windows.owns_focus = Mock(side_effect=[False, True])
+        user32 = Mock()
+        user32.GetForegroundWindow.return_value = 10
+        with patch.object(captions.ctypes.windll, 'user32', user32):
+            windows.open()
+        windows.window.ButtonControl.return_value.SetFocus.assert_called_once()
+
+    def test_activation_does_not_override_user_switch_during_open(self):
+        windows = captions.WindowsControls(Mock())
+        windows.window.ProcessId = 20
+        windows.owns_focus = Mock(return_value=False)
+        user32 = Mock()
+        user32.GetForegroundWindow.side_effect = [10, 30]
+        with patch.object(captions.ctypes.windll, 'user32', user32):
+            with self.assertRaises(captions.FocusInterrupted):
+                windows.open()
+        windows.window.ButtonControl.assert_not_called()
+
+    def test_cleanup_does_not_restore_old_window_after_user_switches_apps(self):
+        controls = Mock(focus_process=20)
+        controls.owns_focus.return_value = False
+        user32 = Mock()
+        user32.GetForegroundWindow.return_value = 10
+        with patch.object(captions.ctypes.windll, 'user32', user32), \
+                patch.object(captions, 'WindowsControls', return_value=controls), \
+                patch.object(captions, 'ProcessLock'), \
+                patch.dict('sys.modules', {'uiautomation': MagicMock()}):
+            with captions.windows_controls('data.sqlite3'):
+                pass
+            controls.dismiss_menu.assert_not_called()
+            user32.SetForegroundWindow.assert_not_called()
+            controls.owns_focus.return_value = True
+            with captions.windows_controls('data.sqlite3'):
+                pass
+            controls.dismiss_menu.assert_called_once()
+            user32.SetForegroundWindow.assert_called_once_with(10)
+
+    def test_focus_loss_stops_before_operating_controls(self):
+        windows = captions.WindowsControls(Mock())
+        windows.owns_focus = Mock(return_value=False)
+        with self.assertRaises(captions.FocusInterrupted):
+            windows.invoke('ButtonControl', 'SettingsButton')
+        windows.window.ButtonControl.return_value.GetInvokePattern.assert_not_called()
+
+    def test_interrupted_operation_waits_for_idle_then_retries_boundedly(self):
+        store = Mock()
+        operation = Mock(side_effect=[captions.FocusInterrupted('Changed windows'), {'ready': True}])
+        with patch.object(captions, 'windows_controls') as controls, \
+                patch.object(captions, 'input_idle_seconds', side_effect=[0, .5, 2]), \
+                patch.object(captions.time, 'sleep') as sleep:
+            self.assertEqual(captions._run_windows(store, operation), {'ready': True})
+            self.assertEqual(controls.call_count, 2)
+            self.assertEqual(sleep.call_count, 2)
+        operation = Mock(side_effect=captions.FocusInterrupted('Changed windows'))
+        with patch.object(captions, 'windows_controls'), \
+                patch.object(captions, 'input_idle_seconds', return_value=2):
+            with self.assertRaises(captions.FocusInterrupted):
+                captions._run_windows(store, operation)
+        self.assertEqual(operation.call_count, 3)
+
+    def test_real_settings_error_is_not_retried(self):
+        operation = Mock(side_effect=captions.CaptionsSettingsError('Unsupported language'))
+        with patch.object(captions, 'windows_controls'):
+            with self.assertRaises(captions.CaptionsSettingsError):
+                captions._run_windows(Mock(), operation)
+        operation.assert_called_once()
+
+    def test_continuous_user_input_expires_without_reopening_the_menu(self):
+        operation = Mock(side_effect=captions.FocusInterrupted('Changed windows'))
+        with patch.object(captions, 'windows_controls'), \
+                patch.object(captions, 'input_idle_seconds', return_value=0), \
+                patch.object(captions.time, 'monotonic', side_effect=[0, 21]):
+            with self.assertRaises(captions.FocusInterrupted):
+                captions._run_windows(Mock(), operation)
+        operation.assert_called_once()
+
     def test_background_restore_never_reopens_a_closed_window(self):
         windows = captions.WindowsControls(Mock())
         windows.window.Exists.return_value = False
