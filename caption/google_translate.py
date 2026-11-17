@@ -207,6 +207,10 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30, append=Fal
 
 def _append_source(box, text):
     current = box.input_value(timeout=1500)
+    # Google accepts 5,000 characters per text translation even though the
+    # textarea reports maxLength=-1. Check before dispatching any input event.
+    if len(text.encode('utf-16-le')) // 2 > 5000:
+        raise TranslationError('Google Translate chỉ nhận 5.000 ký tự mỗi lượt. Nguồn vượt giới hạn; app giữ nguyên tab, không xóa hoặc ghi đè nội dung.')
     if not text.startswith(current):
         raise TranslationError('Ô nguồn Google Translate đã thay đổi. App giữ nguyên nội dung, không xóa hoặc ghi đè. Hãy khôi phục nội dung nguồn rồi Đồng bộ lại.')
     if text == current:

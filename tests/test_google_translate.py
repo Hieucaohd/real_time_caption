@@ -222,6 +222,14 @@ class GoogleTranslateTests(unittest.TestCase):
         source.fill.assert_not_called()
         page.goto.assert_not_called()
 
+    def test_google_limit_is_checked_before_any_input_mutation(self):
+        box = Mock()
+        box.input_value.return_value = 'Existing text'
+        with self.assertRaisesRegex(translation.TranslationError, '5.000'):
+            web._append_source(box, 'Existing text' + 'x' * 5000)
+        box.evaluate.assert_not_called()
+        box.fill.assert_not_called()
+
     def test_incoming_transcript_is_appended_while_waiting_for_translation(self):
         page, source, _ = self.page()
         current = {'value': ''}
