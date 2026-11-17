@@ -39,7 +39,7 @@ if errorlevel 1 (popd & goto :error)
 call npm.cmd run build
 if errorlevel 1 (popd & goto :error)
 popd
-.venv\Scripts\python.exe packaging\build_web_exe.py %* || goto :error
+.venv\Scripts\python.exe packaging\build_web_exe.py %* --build-tag "%RTC_BUILD_TAG%" || goto :error
 set "RTC_BUILD_RESULT=0"
 goto :finish
 :git_missing
@@ -66,7 +66,7 @@ rem Parse all cleanup commands before checkout can replace this batch file.
     )
     if "%RTC_BUILD_RESULT%"=="0" (
         echo.
-        echo Done: %~dp0dist\RealTimeCaptionWeb.exe
+        echo Done: %~dp0dist\RealTimeCaptionWeb-%RTC_BUILD_TAG%.exe
         echo Built from tag: %RTC_BUILD_TAG%
         echo Build branch kept: %RTC_BUILD_BRANCH%
         echo Double-click the EXE to open the web app in Chrome 9222.
