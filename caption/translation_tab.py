@@ -25,7 +25,7 @@ NOTES = {
     "chrome": "On-device Chrome Translator API. Open the web app in Chrome 9222 and initialize the language pair in its Settings first. Live preview translates unfinished speech; finalized translations are saved normally.",
     "azure": "Cloud: sends transcript text to Microsoft. Configure a Translator resource/key and region. Quota depends on your plan.",
     "google": "Cloud: sends text to Google Cloud Translation Basic v2. Enable the API in the project that owns this key. Billing/quota depends on the project.",
-    "google_web": "No API key. Sends live speech without waiting for finalized sentences. Each Start/Continue translates only new speech; old transcript is not resent. Appends source in Chrome 9222 and new translation in the app and SQLite. Never clears earlier tabs or displayed translations. At 5,000 characters another tab continues the text. Batch size/wait are ignored. Text is sent to Google.",
+    "google_web": "No API key. Sends live speech without waiting for finalized sentences. Each Start/Continue translates only new speech; old transcript is not resent. Appends source in Chrome 9222 and mirrors Google's current translation, including rewrites, in the app and SQLite. At 5,000 characters another tab continues; completed parts are preserved. Batch size/wait are ignored. Text is sent to Google.",
     "gemini": "Cloud: sends text to Gemini API, not the Chrome tab. Free-tier data may be used to improve Google's products. Check your API quota.",
     "vinai": "Offline: English → Vietnamese only. CPU is the safe default. CUDA shares GPU resources with Whisper. Model: VinAI Translate (AGPL-3.0). Download is explicit, never automatic.",
 }
@@ -40,6 +40,8 @@ class TranslationPanel(ttk.Frame):
         self.store = TranslationStore(store.db_path)
         self.store.recover()
         self.worker = TranslationWorker(self.store)
+        self._google_dirty = threading.Event()
+        self.worker.on_google_update = lambda cid, config: self._google_dirty.set()
         self.batcher = SentenceBatcher(self.after, self.after_cancel, self._submit_batch, self._batch_error)
         self._results = queue.Queue()
         self._lines = {}
@@ -508,6 +510,9 @@ class TranslationPanel(ttk.Frame):
     def _drain(self):
         if self._closed:
             return
+        if self._google_dirty.is_set():
+            self._google_dirty.clear()
+            self._show_selected()
         for _ in range(30):
             try:
                 result = self._results.get_nowait()

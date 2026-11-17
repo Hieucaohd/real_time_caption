@@ -118,19 +118,11 @@ class TranslationStore:
             return row['source_text'] if row else ''
 
     def append_google(self, conversation_id, config, source, raw, session_key='', source_anchor=''):
-        from .append_translation import added_tail
+        """Mirror the current session; earlier sessions remain separate rows."""
         key = 'google-sync:' + config.fingerprint + (':' + session_key if session_key else '')
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            old = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
-                             (conversation_id, key)).fetchone()
-            displayed = old['translated_text'] if old else ''
-            baseline = (old['raw_text'] or displayed) if old else ''
-            tail = added_tail(baseline, raw)
-            if tail:
-                if displayed and not tail[0].isspace() and tail[0].isalnum():
-                    tail = ' ' + tail
-                displayed += tail
+            displayed = raw
             db.execute('''INSERT INTO realtime_translations
                 (conversation_id,passage_key,fingerprint,source_text,translated_text,raw_text,created_at,source_anchor)
                 VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(conversation_id,passage_key) DO UPDATE SET

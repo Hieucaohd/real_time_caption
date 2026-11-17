@@ -18,6 +18,7 @@ def run():
         import uiautomation
         import tkinter
         from . import overlay, screen
+        from uvicorn.protocols.websockets.websockets_sansio import WebSocketsSansIOProtocol
 
         driver = Path(compute_driver_executable()[0])
         assert driver.is_file(), f'Missing Playwright driver: {driver}'
@@ -39,6 +40,10 @@ def run():
             headers = {'X-RTC-Client': 'web'}
             cid = client.post('/api/conversations', json={'title': 'Packaged smoke test'}, headers=headers).json()['id']
             assert client.get(f'/api/conversations/{cid}/research').json() == []
+            with client.websocket_connect(f'/api/conversations/{cid}/translation-stream',
+                                          headers={'origin': 'http://testserver'}) as socket:
+                assert socket.receive_json()['conversation_id'] == cid
+        report['checks'].append('translation-websocket')
         report['checks'].append('react-api-sqlite-prompts-fonts')
         # This verifies native libraries and runtime data used by Word/PDF export.
         mathjax_render._load_bridge()

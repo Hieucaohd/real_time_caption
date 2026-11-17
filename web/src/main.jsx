@@ -9,6 +9,7 @@ import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import TranslationReading from "./TranslationReading";
+import useGoogleTranslationStream from "./useGoogleTranslationStream";
 import RecopyAnswer from "./RecopyAnswer";
 import ConversationNameModal from "./ConversationNameModal";
 import { chromeTranslator } from "./chromeTranslator";
@@ -231,6 +232,7 @@ function App() {
   );
   const messages = detail?.messages || [];
   const translationFollow = translationFollowOverride ?? settings.translation_auto_scroll ?? true;
+  const googleReading = useGoogleTranslationStream(cid, settings);
   const translationView = settings.translation_engine === "google_web" ? "parallel" : (translationViewOverride ?? settings.translation_view ?? "history");
   const latestTranslationLine = detail?.lines?.findLast((line) => line.last_state?.endsWith(": done"))?.id
     || detail?.lines?.at(-1)?.id;
@@ -1311,7 +1313,7 @@ function App() {
                   </div>
                 </div>
                 {translationView === "parallel" ? (
-                  <TranslationReading cid={cid} lines={detail?.lines || []} reading={detail?.translation_reading}
+                  <TranslationReading cid={cid} lines={detail?.lines || []} reading={googleReading ?? detail?.translation_reading}
                     capture={boot.capture} follow={translationFollow}
                     source={settings.translation_source} target={settings.translation_target}
                     showRealtime={settings.translation_engine === "chrome" && settings.translation_partial} />
@@ -1749,7 +1751,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             source={draft.translation_source} target={draft.translation_target} />}
           {draft.translation_engine === "google_web" && <p className="muted">
             Không cần API key. App tự mở hoặc dùng lại tab Google Translate trong Chrome 9222,
-            nối chữ mới vào cuối ô nguồn, đồng thời nối phần dịch mới vào cuối bản dịch của app.
+            nối chữ mới vào cuối ô nguồn và đồng bộ trực tiếp ô dịch về app. Khi Google sửa câu,
+            phần dịch đang chạy trong app cũng cập nhật theo; các phần của tab đã đầy được giữ lại.
             Gửi cả chữ đang nói, không đợi chốt câu. Mỗi lần Start / Continue chỉ dịch nội dung mới từ lần đó,
             không gửi lại lịch sử transcript; bản dịch cũ vẫn được lưu và hiển thị.
             Không xóa nguồn trong tab, không thay phần dịch đã hiển thị. Nội dung được lưu vào database.

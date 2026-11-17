@@ -31,6 +31,9 @@ class Service:
         self.translations = TranslationStore(self.store.db_path)
         self.translations.recover()
         self.worker = TranslationWorker(self.translations)
+        from .translation_stream import TranslationUpdates
+        self.translation_updates = TranslationUpdates()
+        self.worker.on_google_update = self.translation_updates.publish
         self.lock = threading.RLock()
         self.reader = self.transcript = None
         self.capture = dict(active=False, conversation_id=None, partial='', status='Ready', error='', warning='')

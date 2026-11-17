@@ -95,18 +95,23 @@ class GoogleSyncTests(unittest.TestCase):
         self.assertEqual(reading['translated_lines'], 1)
         self.assertEqual(self.store.reading(self.item.id, Config(engine='google_web', target='ja'))['segments'], [])
 
-    def test_old_output_is_immutable_when_google_rephrases_and_retry_does_not_duplicate(self):
+    def test_google_rewrites_replace_current_output_and_survive_reopen(self):
         config = Config(engine='google_web')
         self.line('one', 'Hello.')
         self.store.append_google(self.item.id, config, 'Hello.', 'Xin chào.')
         self.line('two', 'How are you?')
         self.store.append_google(self.item.id, config, 'Hello.\nHow are you?', 'Chào bạn. Bạn khỏe không?')
-        self.assertEqual(self.store.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không?')
+        self.assertEqual(self.store.reading(self.item.id, config)['segments'][0]['text'], 'Chào bạn. Bạn khỏe không?')
         reopened = TranslationStore(self.store.db_path)
         reopened.append_google(self.item.id, config, 'Hello.\nHow are you?', 'Chào bạn. Bạn khỏe không?')
-        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không?')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Chào bạn. Bạn khỏe không?')
         reopened.append_google(self.item.id, config, 'Hello.\nHow are you?\nBye.', 'Chào bạn. Bạn khỏe không? Tạm biệt.')
-        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không? Tạm biệt.')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Chào bạn. Bạn khỏe không? Tạm biệt.')
+        # No shared ending: a complete rewrite or shortened target must still mirror.
+        reopened.append_google(self.item.id, config, 'Hello.', 'Entirely different')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Entirely different')
+        reopened.append_google(self.item.id, config, 'Hello.', '')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], '')
 
     def test_running_sync_picks_up_new_source_and_publishes_without_waiting_for_completion(self):
         config = Config(engine='google_web')

@@ -140,7 +140,7 @@ def main():
     from web_api.server import create_app
     # Windowed PyInstaller has no console streams; use our file logger.
     uvicorn.run(create_app(), host='127.0.0.1', port=args.port, access_log=False,
-                loop='asyncio', http='h11', ws='none', log_config=None)
+                loop='asyncio', http='h11', ws='websockets-sansio', log_config=None)
     return 0
 
 

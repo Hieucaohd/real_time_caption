@@ -436,6 +436,21 @@ class GoogleTranslateTests(unittest.TestCase):
         self.assertEqual(''.join(parts), text)
         self.assertTrue(all(len(part.encode('utf-16-le')) // 2 <= 5000 for part in parts))
 
+    def test_rewritten_current_tab_keeps_completed_tab_prefix(self):
+        cache, published = {}, []
+        calls = []
+        def translate(page, text, *args, **kwargs):
+            calls.append(text)
+            result = 'Completed first tab.' if len(text) == 5000 else 'Rewritten current tab.'
+            kwargs['on_result'](result)
+            return result
+        with patch.object(web, '_choose_tab', return_value=Mock()), patch.object(web, '_translate_page', side_effect=translate):
+            web._translate_stream(Mock(), 'a' * 5000 + 'b', 'en', 'vi', None, 'session', None, published.append, cache)
+            result = web._translate_stream(Mock(), 'a' * 5000 + 'bc', 'en', 'vi', None, 'session', None, published.append, cache)
+        self.assertEqual(calls, ['a' * 5000, 'b', 'bc'])
+        self.assertEqual(result, 'Completed first tab. Rewritten current tab.')
+        self.assertEqual(published[-1], result)
+
     def test_cancel_before_connection_and_while_waiting_for_lock(self):
         event = threading.Event()
         event.set()

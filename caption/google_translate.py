@@ -11,6 +11,8 @@ import threading
 import time
 import hashlib
 import re
+import uuid
+from contextlib import contextmanager
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .chatgpt import CDP_URL, _open_background_tab
@@ -152,6 +154,52 @@ def _read_output(page):
     return " ".join(part.strip() for part in parts if part.strip())
 
 
+@contextmanager
+def _observe_output(page, callback):
+    """Forward target DOM changes while connected; never use the clipboard."""
+    name = '__rtcTranslation_' + uuid.uuid4().hex
+    state = {'active': True, 'error': None}
+    def changed(_, value):
+        if state['active'] and isinstance(value, str):
+            try:
+                callback(value)
+            except Exception as error:
+                state['error'] = error
+    page.expose_binding(name, changed)
+    try:
+        page.evaluate('''({name, primary, fallback}) => {
+            const visible = selector => Array.from(document.querySelectorAll(selector))
+                .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+            const read = () => {
+                let nodes = visible(primary);
+                if (!nodes.length) nodes = visible(fallback);
+                return nodes.map(el => el.innerText.trim()).filter(Boolean).join(' ');
+            };
+            let last = read();
+            const observer = new MutationObserver(() => {
+                const text = read();
+                if (text === last) return;
+                last = text;
+                window[name](text).catch(() => {});
+            });
+            observer.observe(document.body, {subtree: true, childList: true,
+                characterData: true, attributes: true,
+                attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']});
+            window[name + '_observer'] = observer;
+        }''', {'name': name, 'primary': OUTPUT, 'fallback': OUTPUT_FALLBACK})
+        yield state
+    finally:
+        state['active'] = False
+        try:
+            page.evaluate('''name => {
+                window[name + '_observer']?.disconnect();
+                delete window[name + '_observer'];
+                delete window[name];
+            }''', name)
+        except Exception:
+            pass  # Closing or navigating the page destroys its observer too.
+
+
 def _copy_result(page, rendered, cancel):
     _check_cancel(cancel)
     try:
@@ -231,6 +279,17 @@ def _append_source(box, text):
 
 
 def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
+    published = {'text': None}
+    def publish(value):
+        _check_cancel(cancel)
+        if on_result and value != published['text']:
+            on_result(value)
+            published['text'] = value
+    with _observe_output(page, publish) as observer:
+        return _follow_output(page, box, text, cancel, timeout_s, latest, publish, observer)
+
+
+def _follow_output(page, box, text, cancel, timeout_s, latest, on_result, observer):
     language_query = parse_qs(urlsplit(page.url).query)
     languages = (language_query.get('sl'), language_query.get('tl'))
     previous = _read_output(page)
@@ -243,6 +302,8 @@ def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         _check_cancel(cancel)
+        if observer['error']:
+            raise observer['error']
         query = parse_qs(urlsplit(page.url).query)
         if not _is_translate_url(page.url) or (query.get('sl'), query.get('tl')) != languages:
             raise TranslationError('Tab Google Translate đã đổi trang hoặc ngôn ngữ. App giữ nguyên nội dung; hãy kiểm tra tab rồi Đồng bộ lại.')
@@ -262,7 +323,7 @@ def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
             fresh = True
         if result != last:
             last, changed = result, time.monotonic()
-        if fresh and result and time.monotonic() - changed >= .3:
+        if fresh and result:
             if on_result and result != published:
                 _check_cancel(cancel)
                 on_result(result)

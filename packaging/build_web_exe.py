@@ -57,7 +57,7 @@ def pyinstaller_args(tag, version_file, with_translation=False):
         args += ['--collect-all', package]
     for package in ('docx', 'reportlab'):
         args += ['--collect-data', package]
-    for package in ('uvicorn', 'comtypes', 'mdit_py_plugins', 'reportlab'):
+    for package in ('uvicorn', 'websockets', 'comtypes', 'mdit_py_plugins', 'reportlab'):
         args += ['--collect-submodules', package]
     for module in ('web_api.overlay', 'web_api.selftest'):
         args += ['--hidden-import', module]

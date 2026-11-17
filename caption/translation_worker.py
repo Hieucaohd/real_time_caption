@@ -36,6 +36,7 @@ class TranslationWorker:
         self.translator = translator or Translator()
         self.capacity = capacity
         self.results = queue.Queue()
+        self.on_google_update = None
         self._condition = threading.Condition()
         self._tasks = deque()
         self._keys = set()
@@ -217,10 +218,12 @@ class TranslationWorker:
                     def publish(raw):
                         if not task.cancel.is_set():
                             cid = task.line['conversation_id']
-                            # Publish additions immediately, but advance the source
+                            # Mirror revisions immediately, but advance the source
                             # checkpoint only when the final read succeeds.
                             self.store.append_google(cid, task.config, self.store.google_source(cid, task.config, task.session_key), raw,
                                                      task.session_key, task.source_anchor)
+                            if self.on_google_update:
+                                self.on_google_update(cid, task.config)
                     value = translate(text, task.config.source, task.config.target, task.cancel,
                                       append=True, stream_key=task.line['conversation_id'] + ':' + task.config.fingerprint + (':' + task.session_key if task.session_key else ''),
                                       latest=latest, on_result=publish, cache=self._google_completed)
@@ -238,6 +241,8 @@ class TranslationWorker:
                 if task.sync and status == 'done':
                     value = self.store.append_google(task.line['conversation_id'], task.config,
                                                      task.line['source_text'], value, task.session_key, task.source_anchor)
+                    if self.on_google_update:
+                        self.on_google_update(task.line['conversation_id'], task.config)
                 if not task.preview:
                     for attempt in task.attempts:
                         self.store.finish(attempt, status, value if status == "done" else "", value if status != "done" else "")

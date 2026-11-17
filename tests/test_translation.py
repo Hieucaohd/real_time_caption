@@ -576,6 +576,7 @@ class TranslationPanelTests(unittest.TestCase):
     def test_stale_preview_from_previous_line_or_conversation_is_ignored(self):
         panel = object.__new__(TranslationPanel)
         panel._closed = False
+        panel._google_dirty = threading.Event()
         panel._revision = 10
         panel._get_conversation_id = Mock(return_value="new-conversation")
         panel._results = queue.Queue()
