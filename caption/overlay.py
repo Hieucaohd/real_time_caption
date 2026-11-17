@@ -57,8 +57,9 @@ except AttributeError:  # not on Windows
 class CaptionOverlay:
     """Drag to move, wheel = font size, Ctrl+wheel = width, right-click for options."""
 
-    def __init__(self, master: tk.Misc, settings: Settings):
+    def __init__(self, master: tk.Misc, settings: Settings, *, clear_after=CLEAR_AFTER_S):
         self.settings = settings
+        self.clear_after = clear_after
         self.win = tk.Toplevel(master)
         self.win.withdraw()
         self.win.title("Caption overlay")
@@ -151,7 +152,7 @@ class CaptionOverlay:
     def tick(self) -> None:
         """Called frequently by the app: clear stale captions and stay on top."""
         now = time.monotonic()
-        if (self._committed or self._partial) and now - self._last_update > CLEAR_AFTER_S:
+        if self.clear_after is not None and (self._committed or self._partial) and now - self._last_update > self.clear_after:
             self.clear()
         if now - self._last_topmost > TOPMOST_EVERY_S:
             self._last_topmost = now

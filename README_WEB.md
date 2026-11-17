@@ -76,7 +76,7 @@ Không cần API key, không tính phí theo ký tự. Lần đầu Chrome có t
 Khả năng hỗ trợ tùy phiên bản Chrome desktop và cặp ngôn ngữ; Settings kiểm tra trực tiếp trên trình duyệt. Tham khảo [tài liệu Translator API](https://developer.chrome.com/docs/ai/translator-api).
 - **New words:** tìm ngữ cảnh trong transcript, dịch bằng ChatGPT, chọn Power, lưu vào Voca và chọn collection. Lịch sử thẻ từ được lưu chung trong SQLite và hiển thị ở hai giao diện.
 - **Prompt editor / Settings:** sửa phiên bản hiện tại hoặc lưu phiên bản mới, dùng chung file với native app. API key được lưu tại `settings.json` trên máy này.
-- **Caption overlay:** dùng lại overlay Windows của native app để luôn nổi trên các ứng dụng khác, kéo vị trí, chỉnh cỡ chữ, số dòng, nền trong suốt và click-through. Đây là cửa sổ Windows riêng; tab Chrome không thể tự áp dụng click-through.
+- **Popup transcript:** khi chọn nguồn **ChatGPT · Micro**, bấm **Popup transcript** cạnh Start / Continue để hiện chữ đang nói và đoạn vừa chốt trong cửa sổ luôn nổi trên các ứng dụng khác. Bấm **Ẩn popup** để đóng; chuyển về nguồn Windows cũng đóng popup. Chữ được giữ lại khi ngừng nói. Có thể kéo vị trí, chỉnh cỡ chữ, số dòng, nền trong suốt và click-through trong Settings → Caption overlay hoặc menu chuột phải của popup. Đây là cửa sổ Windows riêng, không giành bàn phím khi bạn tương tác với ứng dụng khác.
 
 Automatic screenshot chụp màn hình chính và tạm thu nhỏ cửa sổ Chrome nếu cửa sổ đang ở phía trước là tab Real-time Caption. Khi đã đính kèm ảnh, ảnh đó được ưu tiên. Nút Screenshot dùng bộ chọn màn hình/cửa sổ của Chrome để bạn chọn nội dung muốn gửi.
 

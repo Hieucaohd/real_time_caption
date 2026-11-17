@@ -153,6 +153,8 @@ function App() {
     [promptKind, setPromptKind] = useState(null);
   const [conversationDialog, setConversationDialog] = useState(null);
   const [transferring, setTransferring] = useState("");
+  const [togglingPopup, setTogglingPopup] = useState(false);
+  const popupPending = useRef(false);
   const transferRef = useRef(false), importInput = useRef(null);
   const [researchFocus, setResearchFocus] = useState(null);
   const [sidebarHidden, setSidebarHidden] = useState(false),
@@ -361,6 +363,13 @@ function App() {
     const updated = await api("/settings", { method: "PATCH", body: values });
     setBoot((old) => ({ ...old, settings: updated }));
     return updated;
+  }
+  async function toggleTranscriptPopup() {
+    if (popupPending.current) return;
+    popupPending.current = true;
+    setTogglingPopup(true);
+    try { await action(() => post("/overlay")); }
+    finally { popupPending.current = false; setTogglingPopup(false); }
   }
   async function saveTranslationSettings() {
     if (savingTranslation) return;
@@ -840,13 +849,6 @@ function App() {
                 }
                 disabled={!cid}
               />
-              <Button
-                icon={PanelTop}
-                title="Caption overlay"
-                onClick={() => action(() => post("/overlay"))}
-              >
-                Caption overlay
-              </Button>
             </div>
           </header>
           <div className="capture-bar">
@@ -864,6 +866,12 @@ function App() {
               </small>
             </div>
             <span className="source-tag">{captureSource === "chatgpt" ? "Realtime" : "Win + Ctrl + L"}</span>
+            {captureSource === "chatgpt" && <Button icon={PanelTop}
+              aria-pressed={!!boot.overlay_visible} disabled={togglingPopup}
+              title="Hiển thị transcript luôn nổi trên các ứng dụng khác"
+              onClick={toggleTranscriptPopup}>
+              {boot.overlay_visible ? "Ẩn popup" : "Popup transcript"}
+            </Button>}
             <Button
               className={active ? "stop" : "primary"}
               icon={active ? Pause : Play}

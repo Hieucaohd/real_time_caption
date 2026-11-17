@@ -17,7 +17,8 @@ def main(url=None, parent_pid=None):
     root = tk.Tk()
     root.withdraw()
     settings = Settings.load()
-    overlay = CaptionOverlay(root, settings)
+    overlay = CaptionOverlay(root, settings, clear_after=None)
+    overlay.win.title('Popup transcript ChatGPT')
     overlay.on_hidden = root.destroy
     overlay.show()
     events, stop = queue.Queue(maxsize=2), threading.Event()
@@ -43,15 +44,22 @@ def main(url=None, parent_pid=None):
         stop.set()
     if sys.stdin is not None:
         threading.Thread(target=wait_close, daemon=True).start()
-    last, partial, checked = -1, '', 0
+    last, partial, checked, conversation = -1, '', 0, None
     def tick():
-        nonlocal last, partial, checked
+        nonlocal last, partial, checked, conversation
         if stop.is_set():
             root.destroy()
             return
         try:
             while True:
                 state = events.get_nowait()
+                if state['capture'].get('source') != 'chatgpt':
+                    root.destroy()
+                    return
+                if state['capture']['conversation_id'] != conversation:
+                    conversation = state['capture']['conversation_id']
+                    overlay.clear()
+                    partial = ''
                 if state['final_revision'] != last:
                     last = state['final_revision']
                     if state['last_final']:

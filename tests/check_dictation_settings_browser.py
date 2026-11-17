@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+import subprocess
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,11 +11,18 @@ import uvicorn
 from playwright.sync_api import sync_playwright, expect
 from test_dictation_api import DictationApiTests
 from test_web_api import FakeReader
+from test_transcript_popup import PopupProcess
 from caption.transcriber import Event
 from web_api.server import create_app
 
 
 def main():
+    original_popen = subprocess.Popen
+    def spawn(command, *args, **kwargs):
+        if isinstance(command, (list, tuple)) and 'web_api.overlay' in command:
+            return PopupProcess()
+        return original_popen(command, *args, **kwargs)
+
     fixture = DictationApiTests(); fixture.setUp()
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
@@ -24,13 +32,19 @@ def main():
             raise AssertionError('Server did not start')
         time.sleep(.05)
     try:
-        with patch('web_api.service.chatgpt_dictation.ChatGPTDictationReader', side_effect=lambda emit, *a: FakeReader(emit)), sync_playwright() as p:
+        with patch('web_api.service.chatgpt_dictation.ChatGPTDictationReader', side_effect=lambda emit, *a: FakeReader(emit)), \
+             patch('web_api.server.subprocess.Popen', side_effect=spawn), sync_playwright() as p:
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width': 1500, 'height': 1000})
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}')
             source = page.get_by_role('combobox', name='Nguồn transcript', exact=True)
+            expect(page.get_by_role('button', name='Popup transcript', exact=True)).to_have_count(0)
             source.select_option('chatgpt')
+            page.get_by_role('button', name='Popup transcript', exact=True).click()
+            expect(page.get_by_role('button', name='Ẩn popup', exact=True)).to_have_attribute('aria-pressed', 'true')
+            page.get_by_role('button', name='Ẩn popup', exact=True).click()
+            expect(page.get_by_role('button', name='Popup transcript', exact=True)).to_have_attribute('aria-pressed', 'false')
             page.get_by_role('button', name='Settings', exact=True).click()
             source_setting = page.get_by_role('combobox', name='Nguồn transcript trong Settings')
             expect(source_setting).to_have_value('chatgpt')
@@ -54,6 +68,7 @@ def main():
             expect(source).to_be_enabled()
             source.select_option('windows')
             expect(source).to_have_value('windows')
+            expect(page.get_by_role('button', name='Popup transcript', exact=True)).to_have_count(0)
             page.reload()
             expect(source).to_have_value('windows')
             expect(page.locator('.transcript pre')).to_contain_text('Microphone transcript test.')

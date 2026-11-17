@@ -82,7 +82,7 @@ class Service:
             return dict(capture={**self.capture, 'source': source,
                         'warning': self.capture['warning'] or (self.captions_preferences.warning if source == 'windows' else '')}, jobs=[dict(j) for j in self.jobs.values()],
                         translation_preview=self.translation_preview, translation_error=self.translation_issue, last_final=self.last_final,
-                        final_revision=self.final_revision)
+                        final_revision=self.final_revision, overlay_visible=self.overlay_visible())
 
     def start(self, cid, return_tab=''):
         with self.lock:
@@ -97,6 +97,8 @@ class Service:
             try:
                 self.store.set_status(cid, 'recording')
                 self.transcript = transcript
+                if self.capture['conversation_id'] != cid:
+                    self.last_final = ''
                 self.capture = dict(active=True, conversation_id=cid, partial='', source=source,
                     status='Đang mở tab thu âm ChatGPT…' if source == 'chatgpt' else 'Connecting to Windows Live Captions…', error='', warning='')
                 self.reader = (chatgpt_dictation.ChatGPTDictationReader(self.on_caption, return_tab)
@@ -485,3 +487,7 @@ class Service:
                     self.overlay_process.stdin.close()
             except OSError:
                 pass
+
+    def overlay_visible(self):
+        process = self.overlay_process
+        return bool(process and process.poll() is None and process.stdin and not process.stdin.closed)

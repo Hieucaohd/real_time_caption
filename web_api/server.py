@@ -296,7 +296,11 @@ def create_app(service=None):
             raise ValueError('Invalid overlay settings.')
         current.save()
         if 'web_capture_source' in values and not svc(request).capture['active']:
+            if svc(request).capture.get('source') != current.web_capture_source:
+                svc(request).last_final = ''
             svc(request).capture.update(source=current.web_capture_source, status='Ready', error='', warning='')
+            if current.web_capture_source != 'chatgpt':
+                svc(request).hide_overlay()
         if values.keys() & {'translation_enabled', 'translation_partial', 'translation_engine',
                             'translation_source', 'translation_target'}:
             s = svc(request)
@@ -427,9 +431,17 @@ def create_app(service=None):
     def overlay(request: Request):
         s = svc(request)
         with s.lock:
-            if s.overlay_process and s.overlay_process.poll() is None:
+            if s.overlay_visible():
                 s.hide_overlay()
                 return {'visible': False}
+            source = s.capture.get('source') if s.capture['active'] else Settings.load().web_capture_source
+            if source != 'chatgpt':
+                raise ValueError('Popup transcript chỉ dùng khi chọn nguồn ChatGPT · Micro.')
+            if s.overlay_process and s.overlay_process.poll() is None:
+                try:
+                    s.overlay_process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    raise ValueError('Popup đang đóng. Vui lòng bấm lại sau một giây.') from None
             command = ([sys.executable, '--overlay', str(request.base_url), '--overlay-parent', str(os.getpid())]
                        if paths.FROZEN else [sys.executable, '-m', 'web_api.overlay', str(request.base_url)])
             s.overlay_process = subprocess.Popen(command,
