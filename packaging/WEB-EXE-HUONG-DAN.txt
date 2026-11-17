@@ -4,7 +4,12 @@ REAL-TIME CAPTION WEB
 2. Double-click it. The app starts a local server and opens Chrome on port 9222.
 3. Log in to ChatGPT in that Chrome window. No Python or Node.js installation is needed.
 
-Google Chrome must be installed. Transcript capture uses Windows Live Captions.
+Google Chrome must be installed. Choose one transcript source: Windows Live
+Captions or ChatGPT Dictate (microphone). For ChatGPT, log in and allow microphone
+access in Chrome. Settings controls the recording interval and optional two-tab
+handoff. Audio is transcribed by ChatGPT; dedicated recording tabs cannot receive
+questions from the app and close after their text is collected. Pause flushes the
+last recording. Closing only the app's browser tab does not stop recording.
 The standard build includes online translation and Word/PDF export. Optional VinAI
 offline translation requires a build with --with-translation and its model files.
 

@@ -367,6 +367,9 @@ class PreferenceRestorer:
             return result
 
     def poll(self):
+        from .settings import Settings
+        if Settings.load().web_capture_source != 'windows':
+            return
         if self._stop.is_set() or not self._lock.acquire(blocking=False):
             return
         try:

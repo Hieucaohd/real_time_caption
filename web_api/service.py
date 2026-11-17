@@ -10,7 +10,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from caption import chatgpt, livecaptions, paths, prompt_versions, vocab
+from caption import chatgpt, chatgpt_dictation, livecaptions, paths, prompt_versions, vocab
 from caption.conversations import ConversationStore, ConversationTranscript
 from caption.settings import Settings
 from caption.shared_access import ProcessLock, capture_lock
@@ -78,22 +78,30 @@ class Service:
 
     def state(self):
         with self.lock:
-            return dict(capture={**self.capture, 'warning': self.capture['warning'] or self.captions_preferences.warning}, jobs=[dict(j) for j in self.jobs.values()],
+            source = self.capture.get('source') if self.capture['active'] else Settings.load().web_capture_source
+            return dict(capture={**self.capture, 'source': source,
+                        'warning': self.capture['warning'] or (self.captions_preferences.warning if source == 'windows' else '')}, jobs=[dict(j) for j in self.jobs.values()],
                         translation_preview=self.translation_preview, translation_error=self.translation_issue, last_final=self.last_final,
                         final_revision=self.final_revision)
 
-    def start(self, cid):
+    def start(self, cid, return_tab=''):
         with self.lock:
             if self.reader:
                 raise ValueError('Pause the active recording before starting another one.')
             self.clear_preview()
+            settings = Settings.load()
+            chatgpt_dictation.validate_options(settings.web_capture_source, settings.chatgpt_dictation_interval)
+            source = settings.web_capture_source
             transcript = self.transcript_for(cid)
-            transcript.begin_segment(livecaptions.LABEL)
+            transcript.begin_segment(chatgpt_dictation.LABEL if source == 'chatgpt' else livecaptions.LABEL)
             try:
                 self.store.set_status(cid, 'recording')
                 self.transcript = transcript
-                self.capture = dict(active=True, conversation_id=cid, partial='', status='Connecting to Windows Live Captions…', error='', warning='')
-                self.reader = livecaptions.LiveCaptionsReader(self.on_caption)
+                self.capture = dict(active=True, conversation_id=cid, partial='', source=source,
+                    status='Đang mở tab thu âm ChatGPT…' if source == 'chatgpt' else 'Connecting to Windows Live Captions…', error='', warning='')
+                self.reader = (chatgpt_dictation.ChatGPTDictationReader(self.on_caption,
+                    settings.chatgpt_dictation_interval, settings.chatgpt_dictation_overlap, return_tab)
+                    if source == 'chatgpt' else livecaptions.LiveCaptionsReader(self.on_caption))
                 self.reader.start()
             except Exception:
                 transcript.close()
@@ -144,6 +152,8 @@ class Service:
                 self.capture['error'] = str(exc)
                 if self.reader:
                     self.reader.stop()
+                return False
+            return True
 
     def on_lines(self, captured):
         settings = Settings.load()
@@ -453,6 +463,8 @@ class Service:
         self.pause()
         reader = self.reader
         if reader:
+            if hasattr(reader, 'shutdown'):
+                reader.shutdown()
             reader._thread.join(timeout=6)
         with self.lock:
             self.closed = True

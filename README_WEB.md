@@ -1,13 +1,13 @@
 # Real-time Caption Web — React + FastAPI
 
-Bản web chạy trên chính máy Windows có native app. Chỉ **Windows Live Captions** được dùng để lấy transcript; không có Whisper, upload audio hay microphone streaming trong bản web.
+Bản web chạy trên chính máy Windows có native app. Transcript có thể lấy từ **Windows Live Captions** hoặc **ChatGPT Dictate (micro)**, chỉ một nguồn tại một thời điểm; không dùng Whisper trong bản web.
 
 ## Khởi chạy
 
 1. Cài Python 3.10+ và Node.js 22.12+.
 2. Chạy `setup_web.bat` một lần để cài thư viện Python, npm và build React.
 3. Chạy `launch_chrome.bat`. Script khởi động FastAPI nền tại **http://127.0.0.1:8765**, đợi server sẵn sàng rồi mở tab ứng dụng trong cùng Chrome có remote debugging **9222**. Các tab ChatGPT/Gemini/NotebookLM/Claude/Translate vẫn được mở như trước.
-4. Chọn/tạo cuộc hội thoại, bấm **Start / Continue**. Mở Windows Live Captions bằng `Win + Ctrl + L`, hoàn tất cài ngôn ngữ của Windows nếu cần rồi phát âm thanh có lời nói.
+4. Chọn/tạo cuộc hội thoại, chọn nguồn rồi bấm **Start / Continue**. Với Windows Live Captions, mở bằng `Win + Ctrl + L` và hoàn tất cài ngôn ngữ nếu cần. Với ChatGPT, đăng nhập và cho phép micro trong Chrome khi được hỏi.
 
 `run_web.bat` cũng mở qua launcher này. Nếu chưa có bản build hoặc thiếu backend, launcher gọi setup. Chạy lại launcher sử dụng server đang chạy, không tạo thêm server. Đóng tab không dừng capture; dùng **Pause** trước khi đóng nếu muốn dừng ghi.
 
@@ -24,6 +24,14 @@ Gói chứa transcript (kể cả nhiều phần), chat, summary, từ vựng đ
 Mỗi lần import tạo một bản sao với ID mới, không ghi đè hội thoại hiện có. Hội thoại được đặt ở trạng thái tạm dừng; node đang chạy/xếp hàng chuyển sang chưa hoàn tất để thử lại thủ công, không tự gửi ChatGPT. Chọn lại tab ChatGPT trên máy mới trước khi Retry vì ID tab Chrome của máy cũ không còn dùng được. Cài đặt chung, mẫu prompt toàn cục và phiên đăng nhập Chrome không bị thay thế.
 
 Export lấy dữ liệu đã lưu tại thời điểm đóng gói. Pause Live Captions trước khi export; chờ dấu **Đã lưu DB** nếu vừa kéo đồ thị. Giới hạn gói ZIP 512 MB, dữ liệu giải nén 2 GB. App kiểm tra đường dẫn, cấu trúc và mã kiểm tra của file; gói hỏng hoặc không hợp lệ bị từ chối và không tạo hội thoại dở dang. Hai thiết bị cần phiên bản app có chức năng export/import này.
+
+## Nguồn transcript trên web
+
+Chọn **Windows Live Captions** hoặc **ChatGPT · Micro** ở thanh Start / Continue, hoặc trong Settings → Nguồn transcript. App chỉ thu một nguồn tại một thời điểm. Bấm Pause và chờ đoạn cuối được chốt trước khi đổi nguồn. Lựa chọn được lưu trong cài đặt dùng chung; transcript của cả hai nguồn đi vào cùng conversation, database và luồng dịch hiện có.
+
+Nguồn ChatGPT dùng **Dictate** (nút micro), không dùng chế độ hội thoại Voice và không gửi văn bản thành câu hỏi. Khi bấm Start, app mở tab thu âm riêng trong Chrome 9222; cần đăng nhập ChatGPT và cho phép micro nếu Chrome hỏi. Âm thanh micro được ChatGPT xử lý trên máy chủ. Nguồn này không tự thu âm thanh hệ thống. Settings cho phép đặt khoảng ghi từ 5–120 giây (mặc định 15); văn bản xuất hiện sau mỗi đoạn cộng thêm thời gian ChatGPT chuyển thành chữ, không phải theo từng từ trong lúc đang nói.
+
+Mặc định bật **Luân phiên 2 tab để giảm khoảng trống**: chuẩn bị tab kế tiếp, bật nghe rồi chốt tab cũ, lấy văn bản và đóng tab cũ. Tối đa 2 tab; chuyển tiếp có thể trùng một ít lời nói và khoảng thực tế có thể dài hơn nếu tải tab/chuyển chữ chậm. Tắt tùy chọn này để thu lần lượt từng tab (có khoảng nghỉ khi chờ chuyển chữ). Các tab này bị loại khỏi danh sách Chat/Summary/nghiên cứu và không nhận câu hỏi. Pause chốt phần đang thu rồi đóng tab; đóng ứng dụng sẽ đóng các tab do bộ thu tạo. Nếu ChatGPT đổi giao diện, từ chối micro hoặc kết nối lỗi, app báo lỗi và dừng thu, giữ transcript đã lưu.
 
 ## Đóng gói thành EXE
 

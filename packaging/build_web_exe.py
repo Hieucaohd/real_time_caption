@@ -61,7 +61,7 @@ def pyinstaller_args(tag, version_file, with_translation=False):
         args += ['--collect-submodules', package]
     for module in ('web_api.overlay', 'web_api.selftest'):
         args += ['--hidden-import', module]
-    # The web app captures only Windows Live Captions; no Whisper/CUDA models.
+    # Web capture uses Windows captions or ChatGPT Dictate; no Whisper/CUDA models.
     excluded = ['faster_whisper', 'ctranslate2', 'nvidia', 'IPython', 'pytest', 'pandas', 'scipy']
     if with_translation:
         for package in ('torch', 'transformers', 'sentencepiece', 'sacremoses'):

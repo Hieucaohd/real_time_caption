@@ -39,6 +39,13 @@ CHATGPT_URL = "https://chatgpt.com/"
 APP_TAB = "real-time-caption-summary"
 VOCAB_TAB = "real-time-caption-vocab"
 CHAT_TAB_PREFIX = "real-time-caption-chat:"
+DICTATION_TAB_PREFIX = "real-time-caption-dictation:"
+
+
+def is_dictation_tab(key):
+    return isinstance(key, str) and key.startswith(DICTATION_TAB_PREFIX)
+
+
 _TAB_SCAN_LOCK = threading.Lock()
 # Summary and Chat prompts are versioned in their own folders (see prompt_versions.py).
 
@@ -241,6 +248,8 @@ def _dedicated_tab(browser, tab_name: str):
 
     Returns ``(page, created)``.
     """
+    if is_dictation_tab(tab_name):
+        raise ChatGPTError('Tab thu âm chỉ dùng cho transcript, không nhận câu hỏi.')
     for context in browser.contexts:
         for page in context.pages:
             if "chatgpt.com" not in page.url:
@@ -268,7 +277,8 @@ def _current_chatgpt_tab(browser):
             if "chatgpt.com" not in page.url:
                 continue
             try:
-                if page.evaluate("window.name") == VOCAB_TAB:
+                key = page.evaluate("window.name")
+                if key == VOCAB_TAB or is_dictation_tab(key):
                     continue
                 focused = bool(page.evaluate("document.hasFocus()"))
                 visible = page.evaluate("document.visibilityState") == "visible"
@@ -284,6 +294,8 @@ def _current_chatgpt_tab(browser):
 
 def _selected_chatgpt_tab(browser, tab_key: str):
     """Return the ordinary ChatGPT tab carrying ``tab_key`` or fail without opening another."""
+    if is_dictation_tab(tab_key):
+        raise ChatGPTError('Tab thu âm chỉ dùng cho transcript, không nhận câu hỏi.')
     for context in browser.contexts:
         for page in context.pages:
             if "chatgpt.com" not in page.url:
@@ -321,7 +333,7 @@ def _list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
                     continue
                 try:
                     key = page.evaluate("window.name")
-                    if key == VOCAB_TAB:
+                    if key == VOCAB_TAB or is_dictation_tab(key):
                         continue
                     if not isinstance(key, str) or not key.startswith(CHAT_TAB_PREFIX):
                         key = CHAT_TAB_PREFIX + uuid.uuid4().hex

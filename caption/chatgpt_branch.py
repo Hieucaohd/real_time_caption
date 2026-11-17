@@ -23,6 +23,8 @@ def _tab_snapshot(browser):
                 continue
             session = None
             try:
+                if chatgpt.is_dictation_tab(page.evaluate('window.name')):
+                    continue
                 session = context.new_cdp_session(page)
                 target_id = session.send('Target.getTargetInfo')['targetInfo']['targetId']
                 result[target_id] = {'page': page, 'url': page.url}

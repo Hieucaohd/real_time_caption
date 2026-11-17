@@ -178,8 +178,9 @@ def create_app(service=None):
 
     @app.post('/api/conversations')
     def create(body: ConversationInput, request: Request):
-        from caption.livecaptions import LABEL
-        return asdict(svc(request).store.create(LABEL, body.title))
+        from caption import livecaptions, chatgpt_dictation
+        label = chatgpt_dictation.LABEL if Settings.load().web_capture_source == 'chatgpt' else livecaptions.LABEL
+        return asdict(svc(request).store.create(label, body.title))
 
     @app.get('/api/conversations/{cid}/export')
     def export_conversation(cid: str, request: Request):
@@ -217,7 +218,7 @@ def create_app(service=None):
 
     @app.post('/api/conversations/{cid}/capture')
     def start(cid: str, request: Request):
-        return svc(request).start(cid)
+        return svc(request).start(cid, return_tab=request.headers.get('X-RTC-Tab', ''))
 
     @app.post('/api/capture/pause')
     def pause(request: Request):
@@ -268,8 +269,15 @@ def create_app(service=None):
 
     @app.patch('/api/settings')
     def settings(body: SettingsPatch, request: Request):
+        with svc(request).lock:
+            return save_settings(body, request)
+
+    def save_settings(body, request):
         current = Settings.load()
         values = body.model_dump(exclude_none=True)
+        capture_keys = {'web_capture_source', 'chatgpt_dictation_interval', 'chatgpt_dictation_overlap'}
+        if svc(request).capture['active'] and any(key in values and values[key] != getattr(current, key) for key in capture_keys):
+            raise ValueError('Bấm Pause và chờ chốt transcript trước khi đổi nguồn hoặc khoảng ghi âm.')
         theme = values.pop('web_theme', None)
         for key, value in values.items():
             if key.endswith('_max_lines') and not 0 <= value <= 1_000_000:
@@ -278,6 +286,8 @@ def create_app(service=None):
                 raise ValueError('Invalid ChatGPT power.')
             setattr(current, key, value)
         batch_options(current.translation_batch_size, current.translation_batch_timeout)
+        from caption.chatgpt_dictation import validate_options
+        validate_options(current.web_capture_source, current.chatgpt_dictation_interval)
         if current.translation_engine not in ENGINES:
             raise ValueError('Invalid translation engine.')
         if current.translation_view not in ('history', 'parallel'):
@@ -285,6 +295,8 @@ def create_app(service=None):
         if not 8 <= current.overlay_font_size <= 96 or not 1 <= current.overlay_lines <= 10 or not .1 <= current.overlay_alpha <= 1:
             raise ValueError('Invalid overlay settings.')
         current.save()
+        if 'web_capture_source' in values and not svc(request).capture['active']:
+            svc(request).capture.update(source=current.web_capture_source, status='Ready', error='', warning='')
         if values.keys() & {'translation_enabled', 'translation_partial', 'translation_engine',
                             'translation_source', 'translation_target'}:
             s = svc(request)
