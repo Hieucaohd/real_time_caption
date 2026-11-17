@@ -9,6 +9,7 @@ import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import TranslationReading from "./TranslationReading";
+import RecopyAnswer from "./RecopyAnswer";
 import ConversationNameModal from "./ConversationNameModal";
 import { chromeTranslator } from "./chromeTranslator";
 import { createChatGPTTabLoader } from "./chatGPTTabs";
@@ -525,6 +526,10 @@ function App() {
   function answerActions(m) {
     return (
       <div className="answer-actions">
+        {m.kind === "chat" && <RecopyAnswer key={m.id} onCopy={async () => {
+          await post(`/conversations/${cid}/answers/${m.id}/recopy`);
+          await refresh();
+        }} />}
         {m.kind === "chat" && !m.header.startsWith("Error") && (
           <Button
             icon={GitBranch}
@@ -1048,7 +1053,7 @@ function App() {
                           <time>{stamp(m.created_at)}</time>
                         </div>
                         {m.role === "bot" ? (
-                          <Md text={m.markdown} />
+                          m.content ? <Md text={m.markdown} /> : <p className="muted">Chưa lấy được nội dung. Bấm “Lấy lại câu trả lời” để copy lại từ ChatGPT.</p>
                         ) : (
                           <p className="user-text">{m.content}</p>
                         )}

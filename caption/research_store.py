@@ -269,7 +269,7 @@ class ResearchStore:
                 node = db.execute('SELECT status, source_message_id FROM research_nodes WHERE id=? AND conversation_id=?', (nid, cid)).fetchone()
                 if node is None:
                     raise KeyError('Research node not found')
-                if node['status'] != 'done':
+                if node['status'] in ('queued', 'working'):
                     raise ValueError('Chờ câu trả lời hoàn tất trước khi cập nhật nguồn.')
                 mid = node['source_message_id']
             assignments = ', '.join(f'{key}=?' for key in source)

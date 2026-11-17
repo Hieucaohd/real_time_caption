@@ -174,6 +174,13 @@ class ChatGPTTabClosed(ChatGPTError):
     """The explicitly selected tab cannot be found before sending a request."""
 
 
+class ChatGPTCopyError(ChatGPTError):
+    def __init__(self, message, source=None, title=''):
+        super().__init__(message)
+        self.source = source or {}
+        self.title = title
+
+
 CANCELLED_MESSAGE = "Cancelled by user. You can press Retry to send the same request again."
 
 
@@ -672,11 +679,12 @@ def _response_source(turn, turn_id: str) -> dict:
     return source
 
 
-def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=None) -> str:
+def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=None, *, copy_last=False) -> str:
     """Read copied Markdown, never save flattened DOM text as a formatted answer."""
     turn = _turn_locator(page, turn_id)
     source = _response_source(turn, turn_id) if on_response_source else None
-    copy_button = turn.locator(REPLY_COPY_BUTTON).first
+    buttons = turn.locator(REPLY_COPY_BUTTON)
+    copy_button = buttons.last if copy_last else buttons.first
     try:
         turn.scroll_into_view_if_needed(timeout=5000)
         turn.hover(timeout=5000)
@@ -710,6 +718,9 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
     for kind in ("text/markdown", "text/plain"):
         for item in captured or []:
             if item.get("k") == kind and (item.get("t") or "").strip():
+                cleaned = clean_answer(item['t'])
+                if not cleaned.strip():
+                    continue
                 if on_response_tab:
                     try:
                         title = page.title()
@@ -719,10 +730,14 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
                     on_response_tab(title)
                 if on_response_source:
                     on_response_source(source)
-                return clean_answer(item["t"])
-    raise ChatGPTError(
+                return cleaned
+    try:
+        title = page.title() if source else ''
+    except Exception:
+        title = ''
+    raise ChatGPTCopyError(
         "ChatGPT answered, but its Markdown could not be copied. "
-        "See the Chrome tab and try again. The answer was not saved as unformatted text."
+        "See the Chrome tab and try again. The answer was not saved as unformatted text.", source, title
     )
 
 

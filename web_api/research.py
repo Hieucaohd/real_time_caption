@@ -233,7 +233,9 @@ class Research:
             with self.service.lock:
                 status = 'cancelled' if cancel.is_set() or self.stop.is_set() else 'error'
                 detail = 'Đã hủy chờ phản hồi.' if status == 'cancelled' else str(exc)
-                finish(status=status, detail=detail, partial=job['partial'])
+                source = ({'response_tab_title': exc.title, **exc.source}
+                          if isinstance(exc, chatgpt.ChatGPTCopyError) else {})
+                finish(status=status, detail=detail, partial=job['partial'], **source)
                 self.service.update_job(job, status=status, error=str(exc), detail=detail)
                 self.active.pop(nid, None)
         finally:

@@ -326,6 +326,11 @@ class Service:
         except Exception as exc:
             log.exception('Web job failed')
             message = str(exc)
+            if job['kind'] == 'chat' and isinstance(exc, chatgpt.ChatGPTCopyError) and not cancel.is_set():
+                mid = self.store.add_message(job['conversation_id'], 'bot', 'ChatGPT', '',
+                    response_tab_title=exc.title, **exc.source)
+                self.update_job(job, answer_id=mid)
+                message = 'ChatGPT chưa copy được nội dung. Bấm “Lấy lại câu trả lời” ở câu trả lời trống để đọc lại, không gửi lại câu hỏi.'
             if job['kind'] == 'chat' and isinstance(exc, chatgpt.ChatGPTTabClosed) and not cancel.is_set():
                 message = self.recover_chat_tab(job, payload)
             self.update_job(job, status='cancelled' if cancel.is_set() else 'error', error=message, detail='Request stopped')

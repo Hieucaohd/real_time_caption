@@ -176,6 +176,12 @@ def save_source(cid: str, nid: str, body: ResponseSourceInput, request: Request)
     return research(request, cid).store.update_response_source(cid, body.model_dump(), nid=nid)
 
 
+@router.post('/{nid}/recopy')
+def recopy_answer(cid: str, nid: str, request: Request):
+    from .recopy import refresh_answer
+    return refresh_answer(research(request, cid).service, cid, nid=nid, return_tab=request.headers.get('X-RTC-Tab', ''))
+
+
 @router.post('/{nid}/children')
 def children(cid: str, nid: str, body: ChildrenInput, request: Request):
     return research(request, cid).children(cid, nid, body.model_dump(exclude_none=True))

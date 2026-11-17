@@ -171,6 +171,11 @@ def create_app(service=None):
         svc(request).conversation(cid)
         return svc(request).research.store.update_response_source(cid, body.model_dump(), mid=mid)
 
+    @app.post('/api/conversations/{cid}/answers/{mid}/recopy')
+    def recopy_answer(cid: str, mid: int, request: Request):
+        from .recopy import refresh_answer
+        return refresh_answer(svc(request), cid, mid=mid, return_tab=request.headers.get('X-RTC-Tab', ''))
+
     @app.post('/api/conversations')
     def create(body: ConversationInput, request: Request):
         from caption.livecaptions import LABEL

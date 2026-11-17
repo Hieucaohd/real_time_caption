@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import RecopyAnswer from "./RecopyAnswer";
 import {
   GitBranch,
   Plus,
@@ -556,7 +557,7 @@ export default function ResearchTab({
                   <p className="research-response-tab" title={reading.response_tab_title || ""}>
                     Tab ChatGPT trả lời: <strong>{reading.response_tab_title || "Chưa có tên tab được lưu"}</strong>
                   </p>
-                  <ResponseSource key={reading.id} response={reading} onSave={reading.status === "done" ? async (values) => {
+                  <ResponseSource key={reading.id} response={reading} onSave={!["queued", "working"].includes(reading.status) ? async (values) => {
                     await api(base + "/" + reading.id + "/source", { method: "PUT", body: values });
                     await refresh();
                   } : undefined} />
@@ -647,6 +648,10 @@ export default function ResearchTab({
                   )}
                 </div>
                 <div className="research-reader-actions">
+                  <RecopyAnswer key={reading.id} disabled={["queued", "working"].includes(reading.status)} onCopy={async () => {
+                    await post(base + "/" + reading.id + "/recopy");
+                    await refresh();
+                  }} />
                   {reading.status === "done" ? (
                     <>
                       <button className="primary" onMouseDown={(e) => e.preventDefault()} onClick={() => createDraft()}>
