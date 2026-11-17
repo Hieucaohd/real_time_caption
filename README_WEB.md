@@ -27,7 +27,7 @@ Export lấy dữ liệu đã lưu tại thời điểm đóng gói. Pause Live 
 
 ## Đóng gói thành EXE
 
-Bấm đúp **`build_web_exe.bat`** tại thư mục dự án. Script cài dependency cần thiết, chạy `npm ci` + build React, đóng gói và tự kiểm tra file EXE. Máy build cần Python và Node.js/npm; máy chạy bản đóng gói chỉ cần Windows và Google Chrome.
+Bấm đúp **`build_web_exe.bat`** tại thư mục dự án. Script yêu cầu Git sạch (đã commit các thay đổi và xử lý file chưa được theo dõi) và có nhánh local `main`. Trước khi build, script tạo annotated tag `web-build-YYYYMMDD-HHMMSS-fff` tại commit hiện tại, tạo/checkout nhánh `build/<tên-tag>`, rồi cài dependency, chạy `npm ci` + build React, đóng gói và tự kiểm tra file EXE. Kết thúc hoặc build lỗi đều checkout về `main`; nếu Git không cho checkout, script báo lỗi và không ép ghi đè file. Tag và nhánh build được giữ ở local để tra cứu, không tự push. Máy build cần Git, Python và Node.js/npm; máy chạy bản đóng gói chỉ cần Windows và Google Chrome.
 
 Kết quả: **`dist\RealTimeCaptionWeb.exe`**, dạng [PyInstaller onefile](https://pyinstaller.org/en/stable/runtime-information.html). Bấm vào EXE để khởi động FastAPI và mở app trong Chrome 9222. File JS/CSS, font, prompt mặc định và thư viện Python nằm trong EXE; không cần mang theo `.venv`, `node_modules` hay `web/dist`.
 
