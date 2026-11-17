@@ -3,3 +3,4 @@
 Lưu ý:
 - không được dùng tiếng việt trong phần công thức, phải dùng tiếng anh
 - Không được chêm thuật ngữ tiếng anh vào lời tiếng việt
+- đối với công thức vi phân, chỉ rõ các tập điểm có thể xét
