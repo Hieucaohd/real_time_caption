@@ -1756,7 +1756,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             Gửi cả chữ đang nói, không đợi chốt câu. Mỗi lần Start / Continue chỉ dịch nội dung mới từ lần đó,
             không gửi lại lịch sử transcript; bản dịch cũ vẫn được lưu và hiển thị.
             Không xóa nguồn trong tab, không thay phần dịch đã hiển thị. Nội dung được lưu vào database.
-            Khi tab đạt 5.000 ký tự, app mở thêm tab để tiếp tục và giữ nguyên các tab cũ.
+            Khi tab đạt 5.000 ký tự, app mở tab tiếp theo. Sau khi đã lấy và lưu bản dịch,
+            app đóng các tab dịch cũ do app quản lý; nội dung vẫn còn trong app và database.
           </p>}
           <div className="form-grid">
             {input("translation_azure_key", "Azure API key", "password")}

@@ -398,6 +398,7 @@ class GoogleTranslateTests(unittest.TestCase):
 
     def test_long_append_is_never_chunked_or_reset(self):
         browser, playwright, manager, page = Mock(), Mock(), Mock(), Mock()
+        browser.contexts = []
         playwright.chromium.connect_over_cdp.return_value = browser
         manager.__enter__ = Mock(return_value=playwright)
         manager.__exit__ = Mock(return_value=False)
@@ -424,7 +425,7 @@ class GoogleTranslateTests(unittest.TestCase):
         cache = {}
         with patch.object(web, '_choose_tab', side_effect=choose), patch.object(web, '_translate_page', side_effect=translate) as run:
             for text in ('a' * 4900, 'a' * 4900 + 'b' * 300, 'a' * 4900 + 'b' * 300 + 'c'):
-                web._translate_stream(Mock(), text, 'en', 'vi', None, 'lesson', None, None, cache)
+                web._translate_stream(Mock(contexts=[]), text, 'en', 'vi', None, 'lesson', None, None, cache)
         self.assertEqual(set(pages), {'lesson', 'lesson:part:1'})
         self.assertEqual(contents[pages['lesson']], 'a' * 4900 + 'b' * 100)
         self.assertEqual(contents[pages['lesson:part:1']], 'b' * 200 + 'c')
@@ -436,6 +437,77 @@ class GoogleTranslateTests(unittest.TestCase):
         self.assertEqual(''.join(parts), text)
         self.assertTrue(all(len(part.encode('utf-16-le')) // 2 <= 5000 for part in parts))
 
+    def test_cleanup_closes_only_old_owned_translate_tabs(self):
+        current, old, utility, manual, unrelated = [tab() for _ in range(5)]
+        current.is_closed.return_value = False
+        old.evaluate.return_value = web.TAB_NAME + ':old-session'
+        utility.evaluate.return_value = web.TAB_NAME
+        manual.evaluate.return_value = ''
+        unrelated.url = 'https://chatgpt.com/'
+        unrelated.evaluate.return_value = web.TAB_NAME + ':navigated-away'
+        browser = Mock(contexts=[SimpleNamespace(pages=[old, manual, current, utility, unrelated])])
+        web._close_previous_tabs(browser, current)
+        old.close.assert_called_once()
+        utility.close.assert_called_once()
+        for page in (current, manual, unrelated):
+            page.close.assert_not_called()
+
+    def test_rollover_saves_complete_result_before_closing_old_tabs(self):
+        old, new = tab(), tab()
+        old.is_closed.return_value = new.is_closed.return_value = False
+        old.evaluate.return_value = web.TAB_NAME + ':old'
+        events = []
+        old.close.side_effect = lambda: events.append('close')
+        browser = Mock(contexts=[SimpleNamespace(pages=[old, new])])
+        with patch.object(web, '_choose_tab', side_effect=[old, new]), \
+             patch.object(web, '_translate_page', side_effect=['First part.', 'Second part.']):
+            result = web._translate_stream(browser, 'a' * 5000 + 'b', 'en', 'vi', None,
+                'session', None, lambda value: events.append(value), {})
+        self.assertEqual(events, ['First part. Second part.', 'close'])
+        self.assertEqual(result, 'First part. Second part.')
+        new.close.assert_not_called()
+
+    def test_new_tab_or_database_failure_preserves_old_tabs(self):
+        old, new = tab(), tab()
+        browser = Mock(contexts=[SimpleNamespace(pages=[old, new])])
+        for failure in ('open', 'translate', 'save'):
+            with self.subTest(failure=failure), \
+                 patch.object(web, '_choose_tab', side_effect=RuntimeError('open') if failure == 'open' else None, return_value=new), \
+                 patch.object(web, '_translate_page', side_effect=RuntimeError('translate') if failure == 'translate' else None, return_value='Result'):
+                save = Mock(side_effect=RuntimeError('save') if failure == 'save' else None)
+                with self.assertRaises(RuntimeError):
+                    web._translate_stream(browser, 'New source', 'en', 'vi', None, 'session', None, save, {})
+                old.close.assert_not_called()
+                new.close.assert_not_called()
+
+    def test_old_tab_closes_on_first_saved_update_without_waiting_for_speech_to_stop(self):
+        old, new = tab(), tab()
+        new.is_closed.return_value = False
+        old.evaluate.return_value = web.TAB_NAME + ':old'
+        saved = []
+        browser = Mock(contexts=[SimpleNamespace(pages=[old, new])])
+        def translate(page, text, *args, **kwargs):
+            kwargs['on_result']('Live translation')
+            self.assertEqual(saved, ['Live translation'])
+            old.close.assert_called_once()
+            kwargs['on_result']('Revised live translation')
+            old.close.assert_called_once()
+            return 'Revised live translation'
+        with patch.object(web, '_choose_tab', return_value=new), \
+             patch.object(web, '_translate_page', side_effect=translate):
+            web._translate_stream(browser, 'Live speech', 'en', 'vi', None, 'session', None, saved.append, {})
+        new.close.assert_not_called()
+
+    def test_closed_parts_are_not_evicted_and_retranslated_in_long_sessions(self):
+        cache = {('other-session', 'en', 'vi', 'source'): 'old'}
+        source = 'a' * (65 * 5000) + 'b'
+        with patch.object(web, '_choose_tab', return_value=Mock()), \
+             patch.object(web, '_translate_page', return_value='Translation') as run:
+            for text in (source, source + 'c'):
+                web._translate_stream(Mock(contexts=[]), text, 'en', 'vi', None, 'session', None, None, cache)
+        self.assertEqual(run.call_count, 67)  # 66 initial parts, then only the current part.
+        self.assertEqual(len(cache), 65)
+
     def test_rewritten_current_tab_keeps_completed_tab_prefix(self):
         cache, published = {}, []
         calls = []
@@ -445,8 +517,8 @@ class GoogleTranslateTests(unittest.TestCase):
             kwargs['on_result'](result)
             return result
         with patch.object(web, '_choose_tab', return_value=Mock()), patch.object(web, '_translate_page', side_effect=translate):
-            web._translate_stream(Mock(), 'a' * 5000 + 'b', 'en', 'vi', None, 'session', None, published.append, cache)
-            result = web._translate_stream(Mock(), 'a' * 5000 + 'bc', 'en', 'vi', None, 'session', None, published.append, cache)
+            web._translate_stream(Mock(contexts=[]), 'a' * 5000 + 'b', 'en', 'vi', None, 'session', None, published.append, cache)
+            result = web._translate_stream(Mock(contexts=[]), 'a' * 5000 + 'bc', 'en', 'vi', None, 'session', None, published.append, cache)
         self.assertEqual(calls, ['a' * 5000, 'b', 'bc'])
         self.assertEqual(result, 'Completed first tab. Rewritten current tab.')
         self.assertEqual(published[-1], result)

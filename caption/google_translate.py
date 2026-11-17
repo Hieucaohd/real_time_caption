@@ -402,9 +402,33 @@ def _stream_parts(text):
     return parts
 
 
+def _close_previous_tabs(browser, keep):
+    """Retire only app-owned Translate tabs after their output has been saved."""
+    if keep.is_closed() or not _is_translate_url(keep.url):
+        return
+    for context in browser.contexts:
+        for page in list(context.pages):
+            if page == keep or not _is_translate_url(page.url):
+                continue
+            try:
+                name = page.evaluate('() => window.name')
+                if name == TAB_NAME or name.startswith(TAB_NAME + ':'):
+                    page.close()
+            except Exception:
+                pass  # A tab may already be closing; cleanup must not fail translation.
+
+
 def _translate_stream(browser, text, source, target, cancel, stream_key, latest, on_result, cache):
     current = {'text': text}
     outputs, index = [], 0
+    current_page = None
+    retired = False
+    def retire_previous():
+        nonlocal retired
+        _check_cancel(cancel)
+        if not retired and current_page is not None:
+            _close_previous_tabs(browser, current_page)
+            retired = True
     while index < len(_stream_parts(current['text'])):
         _check_cancel(cancel)
         parts = _stream_parts(current['text'])
@@ -413,6 +437,8 @@ def _translate_stream(browser, text, source, target, cancel, stream_key, latest,
         value = cache.get(key) if cache is not None and index < len(parts) - 1 else None
         if value is None:
             page = _choose_tab(browser, source, target, cancel, stream_key=part_key, text=parts[index])
+            current_page = page
+            retired = False
             def next_source():
                 updated = latest() if latest else None
                 if updated:
@@ -425,20 +451,32 @@ def _translate_stream(browser, text, source, target, cancel, stream_key, latest,
                 # translation includes the current tail, including after restart.
                 if on_result and index == len(_stream_parts(current['text'])) - 1:
                     on_result(' '.join(outputs + [raw]))
+                    retire_previous()
             value = _translate_page(page, parts[index], source, target, cancel,
                                     append=True, latest=next_source, on_result=publish)
         outputs.append(value)
         parts = _stream_parts(current['text'])
         if cache is not None and index < len(parts) - 1:
             cache[(part_key, source, target, parts[index])] = value
-            if len(cache) > 64:
-                del cache[next(iter(cache))]
+            # Closed parts must remain available throughout this session, even
+            # for long transcripts. Evict other sessions first, never this one.
+            while len(cache) > 64:
+                obsolete = next((k for k in cache if k[0] != stream_key
+                                 and not k[0].startswith(stream_key + ':part:')), None)
+                if obsolete is None:
+                    break
+                del cache[obsolete]
         index += 1
-    return ' '.join(outputs)
+    result = ' '.join(outputs)
+    _check_cancel(cancel)
+    if on_result:
+        on_result(result)  # Persist the complete snapshot before closing any old tab.
+    retire_previous()
+    return result
 
 
 def translate(text, source, target, cancel=None, *, append=False, stream_key='', latest=None, on_result=None, cache=None):
-    """Serialize all chunks and disconnect without closing Chrome or its tabs."""
+    """Serialize all chunks; keep Chrome and the current Translate tab open."""
     from playwright.sync_api import sync_playwright
 
     _check_cancel(cancel)
