@@ -325,11 +325,44 @@ class Service:
                 self.update_job(job, status='done', partial='', result=result, detail='Completed')
         except Exception as exc:
             log.exception('Web job failed')
-            self.update_job(job, status='cancelled' if cancel.is_set() else 'error', error=str(exc), detail='Request stopped')
+            message = str(exc)
+            if job['kind'] == 'chat' and isinstance(exc, chatgpt.ChatGPTTabClosed) and not cancel.is_set():
+                message = self.recover_chat_tab(job, payload)
+            self.update_job(job, status='cancelled' if cancel.is_set() else 'error', error=message, detail='Request stopped')
         finally:
             with self.lock:
                 job['_retry'] = payload
                 self.busy = False
+
+    def recover_chat_tab(self, job, payload):
+        """Repair only the selection. The failed question requires manual Retry."""
+        self.update_job(job, error_code='chatgpt_tab_closed')
+        prepared = payload.get('_prepared', {})
+        old_key = prepared.get('selected_tab') or payload.get('selected_tab', '')
+        try:
+            tabs = chatgpt.list_chrome_chatgpt_tabs()
+            chosen = tabs[0] if tabs else None
+            settings = Settings.load()
+            settings.chatgpt_selected_tab = chosen.key if chosen else ''
+            settings.chatgpt_selected_tab_title = chosen.title if chosen else ''
+            settings.save()
+            self.update_job(job, tab_recovery={
+                'old_key': old_key, 'selected_tab': settings.chatgpt_selected_tab,
+                'selected_tab_title': settings.chatgpt_selected_tab_title,
+                'tabs': [asdict(tab) for tab in tabs],
+            })
+            # Retain the frozen prompt/uploads and change only the destination
+            # for a later user-initiated Retry. Never create another job here.
+            payload['selected_tab'] = settings.chatgpt_selected_tab
+            prepared['selected_tab'] = settings.chatgpt_selected_tab
+            if chosen:
+                return (f'Tab ChatGPT cũ không được open, hiện tại đang chọn tab này: {chosen.title}. '
+                        'Câu hỏi chưa được gửi lại. Bấm Retry nếu bạn muốn gửi lại.')
+            return ('Tab ChatGPT cũ không còn mở và không tìm thấy tab ChatGPT nào đang mở. '
+                    'Hãy mở hoặc chọn một tab rồi gửi lại câu hỏi. App chưa gửi lại câu hỏi.')
+        except Exception as exc:
+            log.exception('Could not refresh ChatGPT tabs after a missing selection')
+            return f'Tab ChatGPT cũ không còn mở. Không quét lại được danh sách tab: {exc}. Câu hỏi chưa được gửi lại.'
 
     def prepare_request(self, cid, kind, payload, settings):
         transcript = self.transcript_for(cid)

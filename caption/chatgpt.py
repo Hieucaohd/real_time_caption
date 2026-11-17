@@ -170,6 +170,10 @@ class ChatGPTError(RuntimeError):
     pass
 
 
+class ChatGPTTabClosed(ChatGPTError):
+    """The explicitly selected tab cannot be found before sending a request."""
+
+
 CANCELLED_MESSAGE = "Cancelled by user. You can press Retry to send the same request again."
 
 
@@ -282,7 +286,7 @@ def _selected_chatgpt_tab(browser, tab_key: str):
                     return page, False
             except Exception:  # noqa: BLE001 - tab closing or crashed
                 continue
-    raise ChatGPTError("The selected ChatGPT tab is no longer open. Press Refresh and choose another tab.")
+    raise ChatGPTTabClosed("The selected ChatGPT tab is no longer open. Press Refresh and choose another tab.")
 
 
 def list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:

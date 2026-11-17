@@ -268,6 +268,20 @@ function App() {
       if (cidRef.current === selected) setDetail(result);
     }
     for (const job of data.jobs) {
+      if (job.kind === "chat" && job.status === "error" && job.tab_recovery && !jobSeen.current.has(job.id)) {
+        jobSeen.current.add(job.id);
+        const recovered = job.tab_recovery;
+        // Do not override a tab the user deliberately selected while waiting.
+        if (chatConfigRef.current.selected_tab === recovered.old_key) {
+          chatPreparation.current += 1;
+          setPreparingChatTab(false);
+          setChromeTabs(recovered.tabs);
+          const next = { ...chatConfigRef.current, selected_tab: recovered.selected_tab,
+            selected_tab_title: recovered.selected_tab_title };
+          chatConfigRef.current = next;
+          setChatDraft(next);
+        }
+      }
       if (job.status === "done" && !jobSeen.current.has(job.id)) {
         jobSeen.current.add(job.id);
         if (
@@ -1523,9 +1537,10 @@ function App() {
                       </Button>
                     ) : ["error", "cancelled"].includes(j.status) ? (
                       <Button
-                        disabled={!!busyJob}
+                        disabled={!!busyJob || (j.error_code === "chatgpt_tab_closed" && !chatSelectedTab)}
                         onClick={() =>
-                          action(() => post("/jobs/" + j.id + "/retry"))
+                          action(() => post("/jobs/" + j.id + "/retry",
+                            j.error_code === "chatgpt_tab_closed" ? { selected_tab: chatConfigRef.current.selected_tab } : undefined))
                         }
                       >
                         Retry

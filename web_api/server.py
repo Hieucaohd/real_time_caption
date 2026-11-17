@@ -43,6 +43,11 @@ class ConversationInput(BaseModel):
     title: str = Field(default='New conversation', min_length=1, max_length=200)
 
 
+class RetryInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    selected_tab: str | None = Field(default=None, max_length=500)
+
+
 class PromptInput(BaseModel):
     name: str = ''
     text: str = Field(min_length=1, max_length=200_000)
@@ -334,14 +339,21 @@ def create_app(service=None):
         return {'ok': True}
 
     @app.post('/api/jobs/{jid}/retry')
-    def retry(jid: str, request: Request):
+    def retry(jid: str, request: Request, body: RetryInput | None = None):
         s = svc(request)
         job = s.jobs[jid]
         if job['kind'] == 'research':
             return s.research.retry(job['conversation_id'], job['node_id'])
         if job['status'] not in ('error', 'cancelled'):
             raise ValueError('Only failed or cancelled requests can be retried.')
-        return s.create_job(job['conversation_id'], job['kind'], job['_retry'])
+        payload = job['_retry']
+        if job['kind'] == 'chat' and job.get('error_code') == 'chatgpt_tab_closed':
+            selected = body.selected_tab if body and body.selected_tab is not None else Settings.load().chatgpt_selected_tab
+            if not selected:
+                raise ValueError('Hãy mở hoặc chọn một tab ChatGPT trước khi gửi lại câu hỏi.')
+            payload = {**payload, 'selected_tab': selected,
+                       '_prepared': {**payload['_prepared'], 'selected_tab': selected}}
+        return s.create_job(job['conversation_id'], job['kind'], payload)
 
     @app.post('/api/conversations/{cid}/translate')
     def translate(cid: str, body: TranslateInput, request: Request):

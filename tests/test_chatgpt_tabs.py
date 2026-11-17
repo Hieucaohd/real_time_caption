@@ -105,7 +105,7 @@ class CurrentChatGPTTabTests(unittest.TestCase):
     def test_closed_selected_tab_requires_a_refresh(self) -> None:
         browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[])])
 
-        with self.assertRaisesRegex(chatgpt.ChatGPTError, "Refresh"):
+        with self.assertRaisesRegex(chatgpt.ChatGPTTabClosed, "Refresh"):
             chatgpt._selected_chatgpt_tab(browser, chatgpt.CHAT_TAB_PREFIX + "closed")
 
     def test_creates_a_tab_when_only_voca_is_open(self) -> None:
