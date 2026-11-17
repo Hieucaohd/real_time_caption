@@ -1279,8 +1279,7 @@ function App() {
                   <TranslationReading cid={cid} lines={detail?.lines || []} reading={detail?.translation_reading}
                     capture={boot.capture} follow={translationFollow}
                     source={settings.translation_source} target={settings.translation_target}
-                    preview={settings.translation_engine === "chrome" && settings.translation_partial &&
-                      boot.capture.active && boot.capture.conversation_id === cid ? boot.translation_preview : ""} />
+                    showRealtime={settings.translation_engine === "chrome" && settings.translation_partial} />
                 ) : <div className="translation-grid">
                   <div className="translation-lines scroll" ref={translationLinesScroll}>
                     {!detail?.lines.length && (

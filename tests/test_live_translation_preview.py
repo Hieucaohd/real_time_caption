@@ -9,6 +9,8 @@ from caption.settings import Settings
 from caption.transcriber import Event
 from caption.translation_worker import Task
 from caption.translation import Config, TranslationError
+from caption.translation_store import TranslationStore
+from caption.realtime_translation import RealtimePassage
 
 
 class LivePreviewTests(unittest.TestCase):
@@ -80,7 +82,56 @@ class LivePreviewTests(unittest.TestCase):
             self.service.on_caption(Event('final', 'I am learning today.', end_of_utterance=True))
             self.wait_until(lambda: any(row['last_state'] == 'chrome: done'
                                        for row in self.service.translations.lines(self.cid)))
-            self.assertEqual(self.service.translation_preview, '')
+            self.assertEqual(self.service.translation_preview, 'Translated: I am learning today')
+            self.service.on_caption(Event('partial', ''))
+            self.wait_until(lambda: self.service.translations.reading(self.cid, Config.from_settings(Settings.load()))['realtime'][0]['text']
+                            == 'Translated: I am learning today.')
+
+    def test_live_history_survives_final_translation_toggle_and_store_reopen(self):
+        self.enable()
+        config = Config.from_settings(Settings.load())
+        def live():
+            return self.service.translations.reading(self.cid, config)['realtime']
+        with patch.object(self.service.worker.translator, 'translate', side_effect=lambda text, *_: 'Live: ' + text), \
+                patch.object(self.service.worker, 'submit_batch'):
+            self.service.on_caption(Event('partial', 'First sentence. Second sentence.'))
+            self.wait_until(lambda: len(live()) == 1)
+            original_id = live()[0]['id']
+            self.service.on_caption(Event('final', 'First sentence.', end_of_utterance=True))
+            self.service.on_caption(Event('partial', 'Second sentence. Third sentence.'))
+            self.wait_until(lambda: live()[0]['text'] == 'Live: First sentence. Second sentence. Third sentence.')
+            self.assertEqual(live()[0]['id'], original_id)
+            for text in ('Second sentence.', 'Third sentence.'):
+                self.service.on_caption(Event('final', text, end_of_utterance=True))
+            self.service.on_caption(Event('partial', ''))
+            self.service.on_caption(Event('partial', 'Next passage.'))
+            self.wait_until(lambda: len(live()) == 2)
+            self.assertEqual(live()[1]['text'], 'Live: Next passage.')
+            expected = live()
+            for line in self.service.translations.lines(self.cid):
+                self.service.translations.finish(self.service.translations.begin(line, config), 'done', 'Official answer')
+            self.assertEqual(live(), expected)
+            self.client.patch('/api/settings', json={'translation_partial': False}, headers=self.headers)
+            self.assertEqual(live(), expected)
+            reopened = TranslationStore(self.service.store.db_path)
+            self.assertEqual(reopened.reading(self.cid, config)['realtime'], expected)
+            self.assertEqual(reopened.reading(self.cid, Config(engine='chrome', target='fr'))['realtime'], [])
+            other = self.service.store.create('Test', 'Other conversation')
+            self.assertEqual(reopened.reading(other.id, config)['realtime'], [])
+            response = self.client.get(f'/api/conversations/{self.cid}').json()
+            self.assertEqual(response['translation_reading']['realtime'], expected)
+
+    def test_continuous_passages_only_consume_confirmed_prefix(self):
+        passage = RealtimePassage()
+        text = 'A sentence with several words. ' * 40
+        source = passage.source(text)
+        self.assertLessEqual(len(source), passage.LIMIT + 10)
+        passage.rendered_source = source
+        self.assertFalse(passage.advance(text))
+        passage.final(text)
+        self.assertTrue(passage.advance('Still speaking'))
+        self.assertEqual(source + ' ' + passage.committed, text.strip())
+        self.assertTrue((passage.committed + ' Still speaking').startswith(passage.source('Still speaking')))
 
     def test_cloud_engine_and_disabled_preview_do_not_queue_any_draft(self):
         self.enable('google_web')

@@ -41,6 +41,9 @@ def main():
             page.locator('nav button').nth(4).click()
             page.get_by_role('button', name='Đọc song song', exact=True).click()
             left, right = page.get_by_label('Đoạn nguyên văn', exact=True), page.get_by_label('Đoạn bản dịch', exact=True)
+            live = page.get_by_label('Đoạn dịch realtime', exact=True)
+            expect(live).to_be_visible()
+            expect(page.locator('.translation-reading-head header')).to_have_count(3)
             expect(left.locator('p')).to_have_text('First source sentence. Second source sentence.')
             expect(right.locator('p')).to_have_text('Second translated sentence.')
             untranslated = left.locator(f'[data-line-id="{first["id"]}"]')
@@ -98,11 +101,23 @@ def main():
             with fixture.service.lock:
                 fixture.service.capture.update(active=True, conversation_id=fixture.cid, partial='Still speaking')
                 fixture.service.translation_preview = 'Temporary translation'
-            expect(right.get_by_label('Bản dịch tạm', exact=True)).to_have_text('Temporary translation')
+            store.save_realtime(fixture.cid, 'live-1', config, 'Still speaking', 'Temporary translation')
+            expect(live).to_contain_text('Temporary translation')
+            expect(right).not_to_contain_text('Temporary translation')
+            store.save_realtime(fixture.cid, 'live-2', config, 'More speech', 'Another live passage')
+            expect(live.locator('p')).to_have_text('Temporary translation Another live passage')
             with fixture.service.lock:
                 fixture.service.capture.update(active=False, partial='')
                 fixture.service.translation_preview = ''
-            expect(right.get_by_label('Bản dịch tạm', exact=True)).to_have_count(0)
+            expect(live.locator('p')).to_have_text('Temporary translation Another live passage')
+            live_toggle = page.get_by_role('checkbox', name='Dịch ngay khi đang nói', exact=True)
+            live_toggle.click()
+            expect(live_toggle).not_to_be_checked()
+            expect(live).to_have_count(0)
+            expect(page.locator('.translation-reading-head header')).to_have_count(2)
+            live_toggle.click()
+            expect(live_toggle).to_be_checked()
+            expect(live.locator('p')).to_have_text('Temporary translation Another live passage')
             page.get_by_role('button', name='Lưu cài đặt', exact=True).click()
             expect(page.locator('.toast')).to_contain_text('Đã lưu cài đặt dịch')
             saved = Settings.load()
@@ -110,12 +125,15 @@ def main():
             assert saved.translation_partial and saved.translation_engine == 'chrome'
             page.reload(); page.locator('nav button').nth(4).click()
             expect(left).to_be_visible()
+            expect(live.locator('p')).to_have_text('Temporary translation Another live passage')
+            bottoms = [panel.locator('p').bounding_box()['y'] + panel.locator('p').bounding_box()['height'] for panel in (left, live, right)]
+            assert max(bottoms) - min(bottoms) < 2, bottoms
             expect(page.get_by_role('checkbox', name='Tự cuộn xuống cuối', exact=True)).not_to_be_checked()
             page.evaluate("document.documentElement.dataset.theme = 'dark'")
             page.screenshot(path='cache/translation-reading-dark.png')
             page.set_viewport_size({'width': 760, 'height': 900})
             expect(left).to_be_visible(); expect(right).to_be_visible()
-            assert left.bounding_box()['x'] < right.bounding_box()['x']
+            assert left.bounding_box()['x'] < live.bounding_box()['x'] < right.bounding_box()['x']
             page.get_by_role('button', name='Theo từng câu', exact=True).click()
             expect(page.locator('.translation-grid')).to_be_visible()
             assert not errors, errors

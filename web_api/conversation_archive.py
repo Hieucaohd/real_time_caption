@@ -23,7 +23,7 @@ MAX_EXPANDED = 2 * 1024 * 1024 * 1024
 MAX_MANIFEST = 32 * 1024 * 1024
 MAX_FILES = 10000
 TABLES = ('chat_messages', 'chat_attachments', 'research_nodes', 'research_node_assets',
-          'research_graph_layouts', 'translation_lines', 'line_translations')
+          'research_graph_layouts', 'translation_lines', 'line_translations', 'realtime_translations')
 
 
 def safe_name(name):
@@ -65,6 +65,7 @@ def export_conversation(service, cid, destination):
             'research_node_assets': rows('SELECT a.* FROM research_node_assets a JOIN research_nodes n ON n.id=a.node_id WHERE n.conversation_id=? ORDER BY a.node_id,a.position'),
             'research_graph_layouts': rows('SELECT l.* FROM research_graph_layouts l JOIN research_nodes n ON n.id=l.root_id WHERE n.conversation_id=?'),
             'translation_lines': rows('SELECT * FROM translation_lines WHERE conversation_id=? ORDER BY id'),
+            'realtime_translations': rows('SELECT * FROM realtime_translations WHERE conversation_id=? ORDER BY id'),
             'line_translations': rows('SELECT t.* FROM line_translations t JOIN translation_lines l ON l.id=t.line_id WHERE l.conversation_id=? ORDER BY t.id'),
             'files': {}}
         total = 0
@@ -171,6 +172,8 @@ def _unpack(archive, stage):
     data = json_object(archive.read(infos['manifest.json']))
     if data.get('format') != FORMAT or type(data.get('version')) is not int or data['version'] != 1:
         raise ValueError('Đây không phải gói hội thoại được hỗ trợ. Hãy dùng bản app mới nhất.')
+    # Older v1 exports predate the independent realtime translation history.
+    data.setdefault('realtime_translations', [])
     if set(data) != {'format', 'version', 'conversation', 'files', *TABLES}:
         raise ValueError('Cấu trúc gói hội thoại không hợp lệ.')
     if not isinstance(data['files'], dict) or set(data['files']) != set(infos) - {'manifest.json'}:
@@ -321,6 +324,9 @@ def _restore(store, data, stage, final, publication):
             if row['status'] in ('queued', 'working'):
                 row.update(status='error', error='Tác vụ chưa hoàn tất trên thiết bị nguồn. Dịch lại khi cần.')
             _insert(db, 'line_translations', row)
+        for item in data['realtime_translations']:
+            row = {**item, 'conversation_id': cid}; del row['id']
+            _insert(db, 'realtime_translations', row)
         manifest = {key: conv[key] for key in ('id', 'title', 'source', 'created_at', 'updated_at', 'last_started_at', 'status')}
         (stage / 'files' / 'conversation.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
         history = [f"# Chat history — {conv['title']}", '']

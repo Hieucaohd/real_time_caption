@@ -660,6 +660,8 @@ pre {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .translation-reading-head { flex-shrink: 0; }
+.translation-reading.with-realtime .translation-reading-head,
+.translation-reading.with-realtime .translation-reading-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .translation-reading-scroll { flex: 1; min-height: 0; scrollbar-gutter: stable; overflow-anchor: none; }
 .translation-reading-columns { min-height: 100%; }
 .translation-reading-text + .translation-reading-text,

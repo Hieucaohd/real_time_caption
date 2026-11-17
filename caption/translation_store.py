@@ -38,6 +38,15 @@ class TranslationStore:
                     status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS translation_history ON line_translations(line_id,id);
+                CREATE TABLE IF NOT EXISTS realtime_translations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    passage_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
+                    source_text TEXT NOT NULL, translated_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(conversation_id, passage_key)
+                );
+                CREATE INDEX IF NOT EXISTS realtime_reading ON realtime_translations(conversation_id,fingerprint,id);
             """)
             # Existing databases keep all their single-line translation history.
             columns = {row["name"] for row in db.execute("PRAGMA table_info(line_translations)")}
@@ -88,6 +97,14 @@ class TranslationStore:
             row = db.execute("SELECT * FROM translation_lines WHERE id=?", (line_id,)).fetchone()
             return dict(row) if row else None
 
+    def save_realtime(self, conversation_id, passage_key, config, source, text):
+        with self.connect() as db:
+            db.execute('''INSERT INTO realtime_translations
+                (conversation_id,passage_key,fingerprint,source_text,translated_text,created_at)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(conversation_id,passage_key) DO UPDATE SET
+                source_text=excluded.source_text, translated_text=excluded.translated_text''',
+                (conversation_id, passage_key, config.fingerprint, source, text, datetime.now().isoformat()))
+
     def reading(self, conversation_id, config):
         """Latest successful text in source order, without repeating batch answers."""
         with self.connect() as db:
@@ -97,6 +114,9 @@ class TranslationStore:
                 (conversation_id, config.fingerprint))]
             sources = {row['id']: row['source_text'] for row in db.execute(
                 'SELECT id, source_text FROM translation_lines WHERE conversation_id=? ORDER BY id', (conversation_id,))}
+            realtime = [dict(row) for row in db.execute(
+                'SELECT id, source_text, translated_text AS text FROM realtime_translations '
+                'WHERE conversation_id=? AND fingerprint=? ORDER BY id', (conversation_id, config.fingerprint))]
         latest, legacy_counts, group_members = {}, {}, {}
         for row in rows:
             group = row['batch_id'] or str(row['id'])
@@ -119,7 +139,7 @@ class TranslationStore:
             if group not in seen:
                 seen.add(group)
                 segments.append({'line_id': line_id, 'line_ids': group_members[group], 'text': text})
-        return {'segments': segments, 'translated_lines': len(latest), 'total_lines': len(sources)}
+        return {'segments': segments, 'realtime': realtime, 'translated_lines': len(latest), 'total_lines': len(sources)}
 
     def missing(self, conversation_id, config):
         with self.connect() as db:

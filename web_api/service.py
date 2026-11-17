@@ -18,6 +18,7 @@ from caption.translation import Config, Translator, download_offline
 from caption.translation_store import TranslationStore
 from caption.translation_worker import TranslationWorker
 from caption.translation_batch import SentenceBatcher
+from caption.realtime_translation import RealtimePassage
 from caption.voca_client import VocaClient
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class Service:
         self.preview_timer = None
         self.preview_snapshot = None
         self.preview_context = None
+        self.realtime_passage = RealtimePassage()
         self.last_final = ''
         self.final_revision = 0
         self.batcher = SentenceBatcher(self.schedule, lambda timer: timer.cancel(), self.submit_batch, self.translation_error)
@@ -123,7 +125,8 @@ class Service:
                     self.capture['partial'] = event.text
                     self.update_preview(Settings.load())
                 elif event.kind == 'final' and self.transcript:
-                    self.clear_preview()
+                    if self.preview_context:
+                        self.realtime_passage.final(event.text)
                     self.last_final = event.text
                     self.final_revision += 1
                     self.on_lines(self.transcript.write(event.text, event.end_of_utterance))
@@ -152,8 +155,10 @@ class Service:
                 except Exception as exc:
                     self.translation_error(exc)
 
-    def clear_preview(self):
-        """Invalidate an utterance/settings epoch, not every new word."""
+    def clear_preview(self, reset_passage=True):
+        """Cancel live work; persisted passages are never cleared by final jobs."""
+        if reset_passage:
+            self.realtime_passage = RealtimePassage()
         self.preview_revision += 1
         self.preview_snapshot = self.preview_context = None
         if self.preview_timer:
@@ -164,7 +169,7 @@ class Service:
 
     def update_preview(self, settings):
         text = self.capture['partial'].strip()
-        if not (self.capture['active'] and self.transcript and text and settings.translation_enabled
+        if not (self.capture['active'] and self.transcript and settings.translation_enabled
                 and settings.translation_partial and settings.translation_engine == 'chrome'):
             self.clear_preview()
             return
@@ -173,7 +178,12 @@ class Service:
         if context != self.preview_context:
             self.clear_preview()
             self.preview_context = context
-        combined = ' '.join(part for part in (self.transcript.pending_text, text) if part)
+        if self.realtime_passage.advance(text):
+            self.clear_preview(reset_passage=False)
+            self.preview_context = context
+        combined = self.realtime_passage.source(text)
+        if not combined:
+            return
         snapshot = (self.capture['conversation_id'], combined, config, self.preview_revision)
         if snapshot == self.preview_snapshot:
             return
@@ -218,7 +228,17 @@ class Service:
                             and task.line['conversation_id'] == self.capture['conversation_id']
                             and self.capture['active'])
                         if task.preview and current_preview and status == 'done':
+                            try:
+                                self.translations.save_realtime(task.line['conversation_id'], self.realtime_passage.key,
+                                    task.config, task.line['source_text'], value)
+                            except Exception as exc:
+                                log.exception('Could not save realtime translation')
+                                self.translation_error(exc)
+                                continue
+                            self.realtime_passage.rendered_source = task.line['source_text']
                             self.translation_preview = value
+                            if not self.capture['partial'].strip():
+                                self.update_preview(Settings.load())
                         if status == 'error' and (not task.preview or current_preview):
                             self.translation_issue = value
                         elif status == 'done' and (not task.preview or current_preview):

@@ -14,6 +14,7 @@ from caption import conversations
 from caption.conversations import ConversationStore, ConversationTranscript
 from caption.research_store import ResearchStore
 from caption.translation_store import TranslationStore
+from caption.translation import Config
 from caption.shared_access import capture_lock
 from web_api.conversation_archive import import_conversation, export_conversation
 
@@ -54,6 +55,7 @@ class ConversationArchiveTests(unittest.TestCase):
             'collapsed':[self.child['id']], 'camera':{'x':12, 'y':23, 'zoom':.75}})
         self.service.translations.sync_transcript(ConversationTranscript(self.conv, self.store))
         self.lines = self.service.translations.lines(self.cid)
+        self.service.translations.save_realtime(self.cid, 'live-passage', Config(engine='chrome'), 'Hello', 'Realtime hello')
         with self.store._connect() as db:
             for line, status in zip(self.lines, ('done', 'working')):
                 db.execute('''INSERT INTO line_translations(line_id,engine,model,source_lang,target_lang,fingerprint,source_text,
@@ -138,6 +140,7 @@ class ConversationArchiveTests(unittest.TestCase):
             self.assertEqual([line['source_text'] for line in imported_lines], [line['source_text'] for line in self.lines])
             self.assertEqual(translations.history(imported_lines[0]['id'])[0]['translated_text'], 'Xin chào')
             self.assertEqual(translations.history(imported_lines[1]['id'])[0]['status'], 'error')
+            self.assertEqual(translations.reading(imported.id, Config(engine='chrome'))['realtime'][0]['text'], 'Realtime hello')
             translations.sync_transcript(ConversationTranscript(imported, target))
             self.assertEqual(len(translations.lines(imported.id)), 2)
             sidecar = json.loads((imported.folder / 'conversation.json').read_text(encoding='utf-8'))
@@ -158,6 +161,12 @@ class ConversationArchiveTests(unittest.TestCase):
         self.assertEqual(len({self.cid, first.json()['id'], second.json()['id']}), 3)
         self.assertEqual(len(self.store.messages(self.cid)), 4)
         self.assertEqual(self.research.get(self.cid, self.grand['id'])['status'], 'queued')
+
+    def test_legacy_archive_without_realtime_history_remains_importable(self):
+        content = self.mutate(self.exported(), lambda data: data.pop('realtime_translations'))
+        result = self.upload(content)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(self.service.translations.reading(result.json()['id'], Config(engine='chrome'))['realtime'], [])
 
     def test_invalid_archives_leave_no_rows_or_files(self):
         content = self.exported()
