@@ -81,15 +81,59 @@ class GoogleTranslateTests(unittest.TestCase):
         malicious.evaluate.assert_not_called()
         self.assertEqual(focused.evaluate.call_count, 1)  # Scan only, never rename.
 
-    def test_first_scan_prefers_focused_tab_and_missing_tab_does_not_create_one(self):
+    def test_first_scan_prefers_focused_tab_without_creating_another(self):
         first, focused = tab(), tab(focused=True)
         browser = Mock(contexts=[SimpleNamespace(pages=[first, focused])])
-        self.assertIs(web._choose_tab(browser), focused)
-        browser.contexts = [SimpleNamespace(pages=[tab("https://chatgpt.com/")])]
-        with self.assertRaises(translation.TranslationError):
-            web._choose_tab(browser)
+        with patch.object(web, '_open_background_tab') as create:
+            self.assertIs(web._choose_tab(browser), focused)
+        create.assert_not_called()
         browser.new_page.assert_not_called()
         browser.close.assert_not_called()
+
+    def test_missing_tab_is_opened_in_existing_chrome_and_reused(self):
+        existing = tab("https://chatgpt.com/")
+        context = SimpleNamespace(pages=[existing])
+        browser = Mock(contexts=[context])
+        created = tab(pinned=True)
+        def navigate(url, **kwargs):
+            created.url = url
+            context.pages.append(created)
+        created.goto.side_effect = navigate
+        with patch.object(web, '_open_background_tab', return_value=created) as create:
+            self.assertIs(web._choose_tab(browser, 'ja', 'zh'), created)
+            self.assertIs(web._choose_tab(browser, 'ja', 'zh'), created)
+        create.assert_called_once_with(browser)
+        created.goto.assert_called_once_with(
+            'https://translate.google.com/?sl=ja&tl=zh-CN&op=translate&hl=en',
+            wait_until='domcontentloaded', timeout=30_000)
+        created.close.assert_not_called()
+        browser.new_context.assert_not_called()
+        browser.close.assert_not_called()
+        existing.evaluate.assert_not_called()
+
+    def test_failed_open_closes_only_new_tab_and_can_retry(self):
+        existing = tab('https://chatgpt.com/')
+        browser = Mock(contexts=[SimpleNamespace(pages=[existing])])
+        failed, ready = Mock(), tab()
+        failed.goto.side_effect = RuntimeError('navigation failed')
+        with patch.object(web, '_open_background_tab', side_effect=[failed, ready]):
+            with self.assertRaises(RuntimeError):
+                web._choose_tab(browser)
+            self.assertIs(web._choose_tab(browser), ready)
+        failed.close.assert_called_once()
+        ready.close.assert_not_called()
+        existing.close.assert_not_called()
+        browser.close.assert_not_called()
+
+    def test_cancel_and_missing_context_do_not_open_tab(self):
+        browser = Mock(contexts=[])
+        with patch.object(web, '_open_background_tab') as create:
+            with self.assertRaisesRegex(translation.TranslationError, 'no available window'):
+                web._choose_tab(browser)
+            event = threading.Event(); event.set()
+            with self.assertRaisesRegex(translation.TranslationError, 'cancelled'):
+                web._choose_tab(browser, cancel=event)
+        create.assert_not_called()
 
     def test_source_and_result_are_reset_before_reading_a_fresh_translation(self):
         page, source, _ = self.page()

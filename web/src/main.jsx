@@ -1747,6 +1747,10 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           />}
           {draft.translation_engine === "chrome" && <ChromeTranslatorSettings
             source={draft.translation_source} target={draft.translation_target} />}
+          {draft.translation_engine === "google_web" && <p className="muted">
+            Không cần API key. App dùng lại tab Google Translate trong Chrome 9222; nếu chưa có, app tự mở tab khi dịch.
+            Nội dung ô nguồn trong tab đó sẽ được thay bằng transcript cần dịch.
+          </p>}
           <div className="form-grid">
             {input("translation_azure_key", "Azure API key", "password")}
             {input("translation_azure_region", "Azure region")}

@@ -1,7 +1,7 @@
-"""Translate through an existing Google Translate tab in the app's CDP Chrome.
+"""Translate through a reused or newly opened Translate tab in the app's CDP Chrome.
 
 Only the Translate UI is used: no undocumented translation HTTP endpoint, new
-browser/profile/tab, permission grants, or OS clipboard. Test and queued jobs
+browser/profile, permission grants, or OS clipboard. Test and queued jobs
 share a cancellable lock so they cannot overwrite each other's source text.
 """
 
@@ -11,7 +11,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from .chatgpt import CDP_URL
+from .chatgpt import CDP_URL, _open_background_tab
 from .translation import TranslationError, _chunks
 
 TAB_NAME = "real-time-caption-google-translate"
@@ -75,7 +75,13 @@ def _is_translate_url(url):
     return parsed.scheme == "https" and parsed.hostname in _HOSTS and parsed.path in ("", "/")
 
 
-def _choose_tab(browser):
+def _translation_params(source, target):
+    codes = {"zh": "zh-CN"}
+    return {"sl": codes.get(source, source), "tl": codes.get(target, target), "op": "translate", "hl": "en"}
+
+
+def _choose_tab(browser, source="en", target="vi", cancel=None):
+    _check_cancel(cancel)
     candidates = []
     for context in browser.contexts:
         for page in context.pages:
@@ -91,7 +97,23 @@ def _choose_tab(browser):
             except Exception:
                 continue  # The tab may have closed while scanning.
     if not candidates:
-        raise TranslationError("Open a Google Translate tab (translate.google.com) in the Chrome started by launch_chrome.bat, then Retry.")
+        if not browser.contexts:
+            raise TranslationError("Chrome has no available window. Reopen the app or launch_chrome.bat and Retry.")
+        _check_cancel(cancel)
+        chosen = _open_background_tab(browser)
+        try:
+            chosen.goto('https://translate.google.com/?' + urlencode(_translation_params(source, target)),
+                        wait_until='domcontentloaded', timeout=30_000)
+            _check_cancel(cancel)
+            chosen.evaluate("name => window.name = name", TAB_NAME)
+            return chosen
+        except Exception:
+            # Only close the tab we created; leave all existing user tabs alone.
+            try:
+                chosen.close()
+            except Exception:
+                pass
+            raise
     chosen = max(candidates, key=lambda item: item[0])[1]
     chosen.evaluate("name => window.name = name", TAB_NAME)
     return chosen
@@ -139,9 +161,8 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30):
     _check_cancel(cancel)
     if not _is_translate_url(page.url):
         raise TranslationError("The Google Translate tab navigated away. Open Translate again and Retry.")
-    codes = {"zh": "zh-CN"}
-    source, target = codes.get(source, source), codes.get(target, target)
-    params = {"sl": source, "tl": target, "op": "translate", "hl": "en"}
+    params = _translation_params(source, target)
+    source, target = params['sl'], params['tl']
     parsed = urlsplit(page.url)
     current = parse_qs(parsed.query)
     clean_url = f"https://{parsed.hostname}/?{urlencode(params)}"
@@ -209,8 +230,8 @@ def translate(text, source, target, cancel=None):
             try:
                 browser = playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
             except Exception:
-                raise TranslationError("Could not connect to Chrome on port 9222. Start launch_chrome.bat, open Google Translate and Retry.") from None
-            page = _choose_tab(browser)
+                raise TranslationError("Could not connect to Chrome on port 9222. Reopen the app or start launch_chrome.bat and Retry.") from None
+            page = _choose_tab(browser, source, target, cancel)
             result = [_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text)]
             if not result:
                 raise TranslationError("Enter some text to translate.")
