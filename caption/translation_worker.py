@@ -38,6 +38,7 @@ class TranslationWorker:
         self._tasks = deque()
         self._keys = set()
         self._preview = None
+        self._google_completed = {}
         self._active = {}
         self._closed = False
         self._paused = False
@@ -218,7 +219,7 @@ class TranslationWorker:
                             self.store.append_google(cid, task.config, self.store.google_source(cid, task.config), raw)
                     value = translate(text, task.config.source, task.config.target, task.cancel,
                                       append=True, stream_key=task.line['conversation_id'] + ':' + task.config.fingerprint,
-                                      latest=latest, on_result=publish)
+                                      latest=latest, on_result=publish, cache=self._google_completed)
                 else:
                     value = self.translator.translate(text, task.config, task.cancel)
             except Exception as error:

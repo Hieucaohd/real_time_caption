@@ -322,7 +322,56 @@ def _wait_result(page, input_box, text, source, target, cancel, timeout_s, previ
     raise TranslationError(f"Google Translate did not finish within {timeout_s:g} seconds. Check connection, consent/CAPTCHA or changes to the page, then Retry manually.")
 
 
-def translate(text, source, target, cancel=None, *, append=False, stream_key='', latest=None, on_result=None):
+def _stream_parts(text):
+    """Stable UTF-16 boundaries: growing text never shortens an existing tab."""
+    parts, start, size = [], 0, 0
+    for index, char in enumerate(text):
+        width = 2 if ord(char) > 0xffff else 1
+        if size + width > 5000:
+            parts.append(text[start:index])
+            start, size = index, 0
+        size += width
+    if start < len(text):
+        parts.append(text[start:])
+    return parts
+
+
+def _translate_stream(browser, text, source, target, cancel, stream_key, latest, on_result, cache):
+    current = {'text': text}
+    outputs, index = [], 0
+    while index < len(_stream_parts(current['text'])):
+        _check_cancel(cancel)
+        parts = _stream_parts(current['text'])
+        part_key = stream_key if index == 0 else stream_key + ':part:' + str(index)
+        key = (part_key, source, target, parts[index])
+        value = cache.get(key) if cache is not None and index < len(parts) - 1 else None
+        if value is None:
+            page = _choose_tab(browser, source, target, cancel, stream_key=part_key, text=parts[index])
+            def next_source():
+                updated = latest() if latest else None
+                if updated:
+                    if not updated.startswith(current['text']):
+                        raise TranslationError('Transcript đã thay đổi phần cũ. App giữ nguyên các tab Google Translate.')
+                    current['text'] = updated
+                return _stream_parts(current['text'])[index]
+            def publish(raw):
+                # Earlier tabs are complete; only publish when the entire visible
+                # translation includes the current tail, including after restart.
+                if on_result and index == len(_stream_parts(current['text'])) - 1:
+                    on_result(' '.join(outputs + [raw]))
+            value = _translate_page(page, parts[index], source, target, cancel,
+                                    append=True, latest=next_source, on_result=publish)
+        outputs.append(value)
+        parts = _stream_parts(current['text'])
+        if cache is not None and index < len(parts) - 1:
+            cache[(part_key, source, target, parts[index])] = value
+            if len(cache) > 64:
+                del cache[next(iter(cache))]
+        index += 1
+    return ' '.join(outputs)
+
+
+def translate(text, source, target, cancel=None, *, append=False, stream_key='', latest=None, on_result=None, cache=None):
     """Serialize all chunks and disconnect without closing Chrome or its tabs."""
     from playwright.sync_api import sync_playwright
 
@@ -337,8 +386,7 @@ def translate(text, source, target, cancel=None, *, append=False, stream_key='',
             except Exception:
                 raise TranslationError("Could not connect to Chrome on port 9222. Reopen the app or start launch_chrome.bat and Retry.") from None
             if append:
-                page = _choose_tab(browser, source, target, cancel, stream_key=stream_key, text=text)
-                return _translate_page(page, text, source, target, cancel, append=True, latest=latest, on_result=on_result)
+                return _translate_stream(browser, text, source, target, cancel, stream_key, latest, on_result, cache)
             else:
                 # Utility tests must not overwrite a live conversation's tab.
                 page = _choose_tab(browser, source, target, cancel)

@@ -401,6 +401,31 @@ class GoogleTranslateTests(unittest.TestCase):
         self.assertEqual([len(call.args[1]) for call in translate.call_args_list], [4020, 4021])
         self.assertTrue(all(call.kwargs['append'] for call in translate.call_args_list))
 
+    def test_rollover_opens_another_tab_and_never_shortens_previous_sources(self):
+        pages, contents = {}, {}
+        def choose(browser, source, target, cancel, *, stream_key, text):
+            return pages.setdefault(stream_key, Mock())
+        def translate(page, text, *args, **kwargs):
+            previous = contents.get(page, '')
+            self.assertTrue(text.startswith(previous))
+            self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 5000)
+            contents[page] = text
+            return text
+        cache = {}
+        with patch.object(web, '_choose_tab', side_effect=choose), patch.object(web, '_translate_page', side_effect=translate) as run:
+            for text in ('a' * 4900, 'a' * 4900 + 'b' * 300, 'a' * 4900 + 'b' * 300 + 'c'):
+                web._translate_stream(Mock(), text, 'en', 'vi', None, 'lesson', None, None, cache)
+        self.assertEqual(set(pages), {'lesson', 'lesson:part:1'})
+        self.assertEqual(contents[pages['lesson']], 'a' * 4900 + 'b' * 100)
+        self.assertEqual(contents[pages['lesson:part:1']], 'b' * 200 + 'c')
+        self.assertEqual(run.call_count, 4)
+
+    def test_stream_boundaries_preserve_all_text_and_unicode(self):
+        text = 'a' * 4999 + '😀' + 'b' * 5000
+        parts = web._stream_parts(text)
+        self.assertEqual(''.join(parts), text)
+        self.assertTrue(all(len(part.encode('utf-16-le')) // 2 <= 5000 for part in parts))
+
     def test_cancel_before_connection_and_while_waiting_for_lock(self):
         event = threading.Event()
         event.set()
