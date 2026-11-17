@@ -137,7 +137,7 @@ def main():
             page.get_by_role('button', name='Theo từng câu', exact=True).click()
             expect(page.locator('.translation-grid')).to_be_visible()
             # Google tab sync always shows the full paragraph, even when the
-            # saved view was per-line history; updates replace rather than append.
+            # saved view was per-line history; new output appends without rewriting.
             google = Settings.load()
             google.translation_engine = 'google_web'
             google.translation_view = 'history'
@@ -145,15 +145,15 @@ def main():
             google_config = Config.from_settings(google)
             source_text = '\n'.join(item['source_text'] for item in store.lines(fixture.cid))
             key = 'google-sync:' + google_config.fingerprint
-            store.save_realtime(fixture.cid, key, google_config, source_text, 'First synchronized paragraph.')
+            store.append_google(fixture.cid, google_config, source_text, 'First synchronized paragraph.')
             page.reload(); page.locator('nav button').nth(4).click()
             expect(page.get_by_role('button', name='Theo từng câu', exact=True)).to_have_count(0)
             expect(right.locator('p[lang]')).to_have_text('First synchronized paragraph.')
-            store.save_realtime(fixture.cid, key, google_config, source_text, 'Updated synchronized paragraph.')
-            expect(right.locator('p[lang]')).to_have_text('Updated synchronized paragraph.')
+            store.append_google(fixture.cid, google_config, source_text, 'Rephrased synchronized paragraph. Added translation.')
+            expect(right.locator('p[lang]')).to_have_text('First synchronized paragraph. Added translation.')
             expect(right.locator('[data-line-id]')).to_have_count(1)
             page.reload(); page.locator('nav button').nth(4).click()
-            expect(right.locator('p[lang]')).to_have_text('Updated synchronized paragraph.')
+            expect(right.locator('p[lang]')).to_have_text('First synchronized paragraph. Added translation.')
             page.get_by_role('button', name='Settings', exact=True).click()
             expect(page.get_by_role('spinbutton', name='Số câu mỗi nhóm', exact=True)).to_have_count(0)
             assert not errors, errors

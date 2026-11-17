@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+import hashlib
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .chatgpt import CDP_URL, _open_background_tab
@@ -80,19 +81,36 @@ def _translation_params(source, target):
     return {"sl": codes.get(source, source), "tl": codes.get(target, target), "op": "translate", "hl": "en"}
 
 
-def _choose_tab(browser, source="en", target="vi", cancel=None):
+def _choose_tab(browser, source="en", target="vi", cancel=None, *, stream_key='', text=''):
     _check_cancel(cancel)
     candidates = []
+    name = TAB_NAME + ':' + hashlib.sha256(stream_key.encode()).hexdigest()[:24] if stream_key else TAB_NAME
     for context in browser.contexts:
         for page in context.pages:
             if not _is_translate_url(page.url):
                 continue
             try:
+                if stream_key:
+                    existing_name = page.evaluate('() => window.name')
+                    if existing_name == name:
+                        return page
+                    if existing_name.startswith(TAB_NAME + ':'):
+                        continue  # Other conversations keep their source text.
+                    params = parse_qs(urlsplit(page.url).query)
+                    wanted = _translation_params(source, target)
+                    if any(params.get(k, [''])[0] != wanted[k] for k in ('sl', 'tl')):
+                        continue
+                    box = _visible(page, SOURCE)
+                    if not box.count() or not text.startswith(box.first.input_value(timeout=1500)):
+                        continue  # Never replace an unrelated paragraph.
                 score = page.evaluate("""() => ({
                     pinned: window.name === 'real-time-caption-google-translate',
+                    stream: window.name.startsWith('real-time-caption-google-translate:'),
                     focused: document.hasFocus(),
                     visible: document.visibilityState === 'visible'
                 })""")
+                if not stream_key and score.get('stream'):
+                    continue
                 candidates.append(((bool(score["pinned"]), bool(score["focused"]), bool(score["visible"])), page))
             except Exception:
                 continue  # The tab may have closed while scanning.
@@ -108,7 +126,7 @@ def _choose_tab(browser, source="en", target="vi", cancel=None):
             # initialize; typing immediately can be erased during hydration.
             _pause(cancel, 1.0)
             _check_cancel(cancel)
-            chosen.evaluate("name => window.name = name", TAB_NAME)
+            chosen.evaluate("name => window.name = name", name)
             return chosen
         except Exception:
             # Only close the tab we created; leave all existing user tabs alone.
@@ -118,7 +136,7 @@ def _choose_tab(browser, source="en", target="vi", cancel=None):
                 pass
             raise
     chosen = max(candidates, key=lambda item: item[0])[1]
-    chosen.evaluate("name => window.name = name", TAB_NAME)
+    chosen.evaluate("name => window.name = name", name)
     return chosen
 
 
@@ -160,7 +178,7 @@ def _copy_result(page, rendered, cancel):
     return rendered
 
 
-def _translate_page(page, text, source, target, cancel, timeout_s=30, append=False):
+def _translate_page(page, text, source, target, cancel, timeout_s=30, append=False, latest=None, on_result=None):
     _check_cancel(cancel)
     if not _is_translate_url(page.url):
         raise TranslationError("The Google Translate tab navigated away. Open Translate again and Retry.")
@@ -169,6 +187,13 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30, append=Fal
     parsed = urlsplit(page.url)
     current = parse_qs(parsed.query)
     clean_url = f"https://{parsed.hostname}/?{urlencode(params)}"
+    if append:
+        # A stream never navigates/reloads or clears its source, including Retry.
+        if any(current.get(k, [''])[0] != params[k] for k in ('sl', 'tl')):
+            raise TranslationError('Ngôn ngữ trong tab Google Translate đã đổi. Chọn lại ngôn ngữ trong app để tiếp tục; nội dung tab được giữ nguyên.')
+        box = _visible(page, SOURCE).first
+        box.wait_for(state='visible', timeout=10_000)
+        return _append_stream(page, box, text, cancel, timeout_s, latest, on_result)
     if any(current.get(key, [""])[0] != value for key, value in params.items()):
         page.goto(clean_url, wait_until="load" if append else "domcontentloaded", timeout=10_000)
         if append:
@@ -177,19 +202,67 @@ def _translate_page(page, text, source, target, cancel, timeout_s=30, append=Fal
     input_box = _visible(page, SOURCE).first
     input_box.wait_for(state="visible", timeout=10_000)
     _check_cancel(cancel)
-    previous_input = input_box.input_value(timeout=1500) if append else ''
-    previous_output = _read_output(page) if previous_input else ''
-    extending = bool(append and previous_input and text.startswith(previous_input) and text != previous_input)
-    if extending:
-        # Append just the new suffix without clearing the paragraph or using the
-        # OS clipboard. setRangeText preserves the previous source characters.
-        input_box.evaluate('''(el, suffix) => {
-            el.setRangeText(suffix, el.value.length, el.value.length, 'end');
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-        }''', text[len(previous_input):])
-    else:
-        return _replace_and_translate(page, input_box, text, source, target, cancel, clean_url, timeout_s)
-    return _wait_result(page, input_box, text, source, target, cancel, timeout_s, previous_output)
+    return _replace_and_translate(page, input_box, text, source, target, cancel, clean_url, timeout_s)
+
+
+def _append_source(box, text):
+    current = box.input_value(timeout=1500)
+    if not text.startswith(current):
+        raise TranslationError('Ô nguồn Google Translate đã thay đổi. App giữ nguyên nội dung, không xóa hoặc ghi đè. Hãy khôi phục nội dung nguồn rồi Đồng bộ lại.')
+    if text == current:
+        return False
+    status = box.evaluate('''(el, args) => {
+        if (el.value !== args.before) return 'changed';
+        if (el.maxLength > 0 && args.text.length > el.maxLength) return 'limit';
+        el.setRangeText(args.text.slice(args.before.length), el.value.length, el.value.length, 'end');
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        return 'ok';
+    }''', {'before': current, 'text': text})
+    if status == 'limit':
+        raise TranslationError('Ô nguồn Google Translate đã đạt giới hạn ký tự. App giữ nguyên nội dung, không tự xóa hoặc chia lại đoạn.')
+    if status != 'ok':
+        raise TranslationError('Ô nguồn Google Translate đang được chỉnh sửa. App không ghi đè; hãy Đồng bộ lại.')
+    return True
+
+
+def _append_stream(page, box, text, cancel, timeout_s, latest, on_result):
+    language_query = parse_qs(urlsplit(page.url).query)
+    languages = (language_query.get('sl'), language_query.get('tl'))
+    previous = _read_output(page)
+    wrote = _append_source(box, text)
+    last, changed = '', time.monotonic()
+    source_changed, published = changed, ''
+    fresh = not wrote or not previous
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _check_cancel(cancel)
+        query = parse_qs(urlsplit(page.url).query)
+        if not _is_translate_url(page.url) or (query.get('sl'), query.get('tl')) != languages:
+            raise TranslationError('Tab Google Translate đã đổi trang hoặc ngôn ngữ. App giữ nguyên nội dung; hãy kiểm tra tab rồi Đồng bộ lại.')
+        # Continue appending incoming transcript while Google is still translating.
+        incoming = latest() if latest else None
+        if incoming and incoming != text:
+            _append_source(box, incoming)
+            text = incoming
+            source_changed = time.monotonic()
+            deadline = time.monotonic() + timeout_s
+        if box.input_value(timeout=1500) != text:
+            raise TranslationError('Ô nguồn Google Translate đã thay đổi hoặc không nhận đủ chữ. App giữ nguyên nội dung; hãy Đồng bộ lại.')
+        result = _read_output(page)
+        if result != previous:
+            fresh = True
+        if result != last:
+            last, changed = result, time.monotonic()
+        if fresh and result and time.monotonic() - changed >= .3:
+            if on_result and result != published:
+                _check_cancel(cancel)
+                on_result(result)
+                published = result
+            if time.monotonic() - changed >= .8 and time.monotonic() - source_changed >= 1.2:
+                # Read the right-hand text directly; copying is unnecessary for sync.
+                return result
+        _pause(cancel)
+    raise TranslationError('Google Translate chưa cập nhật bản dịch. Nội dung nguồn vẫn được giữ nguyên; bấm Đồng bộ để đọc lại.')
 
 
 def _replace_and_translate(page, input_box, text, source, target, cancel, clean_url, timeout_s):
@@ -245,7 +318,7 @@ def _wait_result(page, input_box, text, source, target, cancel, timeout_s, previ
     raise TranslationError(f"Google Translate did not finish within {timeout_s:g} seconds. Check connection, consent/CAPTCHA or changes to the page, then Retry manually.")
 
 
-def translate(text, source, target, cancel=None, *, append=False, cache=None):
+def translate(text, source, target, cancel=None, *, append=False, stream_key='', latest=None, on_result=None):
     """Serialize all chunks and disconnect without closing Chrome or its tabs."""
     from playwright.sync_api import sync_playwright
 
@@ -259,23 +332,12 @@ def translate(text, source, target, cancel=None, *, append=False, cache=None):
                 browser = playwright.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
             except Exception:
                 raise TranslationError("Could not connect to Chrome on port 9222. Reopen the app or start launch_chrome.bat and Retry.") from None
-            page = _choose_tab(browser, source, target, cancel)
             if append:
-                # Fixed boundaries keep completed paragraphs immutable as new
-                # transcript arrives; stay comfortably below the text box limit.
-                chunks = list(_chunks(text, maximum=4000))
-                result = []
-                for index, chunk in enumerate(chunks):
-                    _check_cancel(cancel)
-                    key = (source, target, chunk)
-                    cached = cache.get(key) if cache is not None else None
-                    value = cached or _translate_page(page, chunk, source, target, cancel, append=True)
-                    result.append(value)
-                    if cache is not None and index < len(chunks) - 1:
-                        cache[key] = value
-                        if len(cache) > 64:
-                            del cache[next(iter(cache))]
+                page = _choose_tab(browser, source, target, cancel, stream_key=stream_key, text=text)
+                return _translate_page(page, text, source, target, cancel, append=True, latest=latest, on_result=on_result)
             else:
+                # Utility tests must not overwrite a live conversation's tab.
+                page = _choose_tab(browser, source, target, cancel)
                 result = [_translate_page(page, chunk, source, target, cancel) for chunk in _chunks(text)]
             if not result:
                 raise TranslationError("Enter some text to translate.")

@@ -14,7 +14,7 @@ class GoogleSyncTests(unittest.TestCase):
     line = fixtures.TranslationPersistenceTests.line
     worker = fixtures.TranslationPersistenceTests.worker
 
-    def test_pending_updates_coalesce_and_result_replaces_previous_snapshot_in_database(self):
+    def test_pending_updates_coalesce_and_only_new_output_is_appended_in_database(self):
         config = Config(engine='google_web')
         entered, release = threading.Event(), threading.Event()
         calls = []
@@ -67,6 +67,46 @@ class GoogleSyncTests(unittest.TestCase):
         self.assertEqual(reading['segments'][0]['text'], 'Saved')
         self.assertEqual(reading['translated_lines'], 1)
         self.assertEqual(self.store.reading(self.item.id, Config(engine='google_web', target='ja'))['segments'], [])
+
+    def test_old_output_is_immutable_when_google_rephrases_and_retry_does_not_duplicate(self):
+        config = Config(engine='google_web')
+        self.line('one', 'Hello.')
+        self.store.append_google(self.item.id, config, 'Hello.', 'Xin chào.')
+        self.line('two', 'How are you?')
+        self.store.append_google(self.item.id, config, 'Hello.\nHow are you?', 'Chào bạn. Bạn khỏe không?')
+        self.assertEqual(self.store.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không?')
+        reopened = TranslationStore(self.store.db_path)
+        reopened.append_google(self.item.id, config, 'Hello.\nHow are you?', 'Chào bạn. Bạn khỏe không?')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không?')
+        reopened.append_google(self.item.id, config, 'Hello.\nHow are you?\nBye.', 'Chào bạn. Bạn khỏe không? Tạm biệt.')
+        self.assertEqual(reopened.reading(self.item.id, config)['segments'][0]['text'], 'Xin chào. Bạn khỏe không? Tạm biệt.')
+
+    def test_running_sync_picks_up_new_source_and_publishes_without_waiting_for_completion(self):
+        config = Config(engine='google_web')
+        first = self.line('one', 'One')
+        entered, release, published, finish = (threading.Event() for _ in range(4))
+        def translate(text, *args, **kwargs):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            self.assertEqual(kwargs['latest'](), 'One\nTwo')
+            kwargs['on_result']('First translated. Second translated.')
+            published.set()
+            self.assertTrue(finish.wait(3))
+            return 'First translated. Second translated.'
+        worker = self.worker()
+        with patch('caption.google_translate.translate', side_effect=translate) as run:
+            worker.submit(first, config)
+            self.assertTrue(entered.wait(3))
+            second = self.line('two', 'Two')
+            worker.submit(second, config)
+            release.set()
+            self.assertTrue(published.wait(3))
+            self.assertEqual(self.store.reading(self.item.id, config)['segments'][0]['text'], 'First translated. Second translated.')
+            self.assertEqual(self.store.google_source(self.item.id, config), '')
+            finish.set()
+            self.assertEqual(worker.results.get(timeout=3)[1], 'done')
+            run.assert_called_once()
+        self.assertEqual(self.store.google_source(self.item.id, config), 'One\nTwo')
 
 
 class GoogleSyncApiTests(unittest.TestCase):

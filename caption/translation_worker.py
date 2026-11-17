@@ -38,7 +38,6 @@ class TranslationWorker:
         self._tasks = deque()
         self._keys = set()
         self._preview = None
-        self._google_cache = {}
         self._active = {}
         self._closed = False
         self._paused = False
@@ -203,8 +202,23 @@ class TranslationWorker:
                 text = "\n".join(line["source_text"] for line in task.members)
                 if task.sync:
                     from .google_translate import translate
+                    def latest():
+                        with self._condition:
+                            for candidate in list(self._tasks):
+                                if (candidate.sync and candidate.config == task.config
+                                        and candidate.line['conversation_id'] == task.line['conversation_id']):
+                                    self._tasks.remove(candidate)
+                                    task.line, task.lines = candidate.line, candidate.lines
+                            return task.line['source_text']
+                    def publish(raw):
+                        if not task.cancel.is_set():
+                            cid = task.line['conversation_id']
+                            # Publish additions immediately, but advance the source
+                            # checkpoint only when the final read succeeds.
+                            self.store.append_google(cid, task.config, self.store.google_source(cid, task.config), raw)
                     value = translate(text, task.config.source, task.config.target, task.cancel,
-                                      append=True, cache=self._google_cache)
+                                      append=True, stream_key=task.line['conversation_id'] + ':' + task.config.fingerprint,
+                                      latest=latest, on_result=publish)
                 else:
                     value = self.translator.translate(text, task.config, task.cancel)
             except Exception as error:
@@ -217,8 +231,8 @@ class TranslationWorker:
                 status, value = "cancelled", "Cancelled; the provider may already have received this request."
             try:
                 if task.sync and status == 'done':
-                    self.store.save_realtime(task.line['conversation_id'], 'google-sync:' + task.config.fingerprint,
-                                             task.config, task.line['source_text'], value)
+                    value = self.store.append_google(task.line['conversation_id'], task.config,
+                                                     task.line['source_text'], value)
                 if not task.preview:
                     for attempt in task.attempts:
                         self.store.finish(attempt, status, value if status == "done" else "", value if status != "done" else "")

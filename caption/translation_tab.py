@@ -24,7 +24,7 @@ NOTES = {
     "chrome": "On-device Chrome Translator API. Open the web app in Chrome 9222 and initialize the language pair in its Settings first. Live preview translates unfinished speech; finalized translations are saved normally.",
     "azure": "Cloud: sends transcript text to Microsoft. Configure a Translator resource/key and region. Quota depends on your plan.",
     "google": "Cloud: sends text to Google Cloud Translation Basic v2. Enable the API in the project that owns this key. Billing/quota depends on the project.",
-    "google_web": "No API key. Automatically opens or reuses Google Translate in Chrome 9222. Appends recorded transcript to the source box and synchronizes the full translated paragraph to SQLite. Batch size/wait are ignored. Long passages roll over at 4,000 characters; completed translations are retained. Text is sent to Google. Other tabs and the system clipboard are left alone.",
+    "google_web": "No API key. Appends new transcript to Google Translate in Chrome 9222 and appends newly translated text to the app and SQLite. Never clears, reloads or splits the source; previously displayed translation stays unchanged. Batch size/wait are ignored. Each conversation/language pair keeps its own tab. Text is sent to Google.",
     "gemini": "Cloud: sends text to Gemini API, not the Chrome tab. Free-tier data may be used to improve Google's products. Check your API quota.",
     "vinai": "Offline: English → Vietnamese only. CPU is the safe default. CUDA shares GPU resources with Whisper. Model: VinAI Translate (AGPL-3.0). Download is explicit, never automatic.",
 }

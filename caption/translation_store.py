@@ -56,6 +56,9 @@ class TranslationStore:
                                      ("owner_pid", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE line_translations ADD COLUMN {name} {definition}")
+            realtime_columns = {row['name'] for row in db.execute('PRAGMA table_info(realtime_translations)')}
+            if 'raw_text' not in realtime_columns:
+                db.execute("ALTER TABLE realtime_translations ADD COLUMN raw_text TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connect(self):
@@ -110,6 +113,27 @@ class TranslationStore:
             row = db.execute('SELECT source_text FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
                 (conversation_id, 'google-sync:' + config.fingerprint)).fetchone()
             return row['source_text'] if row else ''
+
+    def append_google(self, conversation_id, config, source, raw):
+        from .append_translation import added_tail
+        key = 'google-sync:' + config.fingerprint
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            old = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND passage_key=?',
+                             (conversation_id, key)).fetchone()
+            displayed = old['translated_text'] if old else ''
+            baseline = (old['raw_text'] or displayed) if old else ''
+            tail = added_tail(baseline, raw)
+            if tail:
+                if displayed and not tail[0].isspace() and tail[0].isalnum():
+                    tail = ' ' + tail
+                displayed += tail
+            db.execute('''INSERT INTO realtime_translations
+                (conversation_id,passage_key,fingerprint,source_text,translated_text,raw_text,created_at)
+                VALUES(?,?,?,?,?,?,?) ON CONFLICT(conversation_id,passage_key) DO UPDATE SET
+                source_text=excluded.source_text,translated_text=excluded.translated_text,raw_text=excluded.raw_text''',
+                (conversation_id,key,config.fingerprint,source,displayed,raw,datetime.now().isoformat()))
+            return displayed
 
     def reading(self, conversation_id, config):
         """Latest successful text in source order, without repeating batch answers."""

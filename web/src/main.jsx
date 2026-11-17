@@ -1749,9 +1749,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             source={draft.translation_source} target={draft.translation_target} />}
           {draft.translation_engine === "google_web" && <p className="muted">
             Không cần API key. App tự mở hoặc dùng lại tab Google Translate trong Chrome 9222,
-            nối transcript đã ghi vào ô nguồn và đồng bộ toàn bộ bản dịch bên phải về đây.
-            Bản dịch cả đoạn được cập nhật và lưu vào database, không dịch từng câu riêng lẻ.
-            Đoạn dài được chia ở mốc 4.000 ký tự; phần đã dịch được giữ lại khi chuyển sang đoạn tiếp theo.
+            nối chữ mới vào cuối ô nguồn, đồng thời nối phần dịch mới vào cuối bản dịch của app.
+            Không xóa nguồn, không tự chia đoạn, không thay phần dịch đã hiển thị. Nội dung được lưu vào database.
           </p>}
           <div className="form-grid">
             {input("translation_azure_key", "Azure API key", "password")}

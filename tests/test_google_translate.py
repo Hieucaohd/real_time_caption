@@ -135,6 +135,26 @@ class GoogleTranslateTests(unittest.TestCase):
                 web._choose_tab(browser, cancel=event)
         create.assert_not_called()
 
+    def test_stream_reuses_its_own_tab_without_touching_other_conversations(self):
+        own, other = tab(), tab()
+        name = web.TAB_NAME + ':' + web.hashlib.sha256(b'conversation').hexdigest()[:24]
+        own.evaluate.return_value = name
+        other.evaluate.return_value = web.TAB_NAME + ':other'
+        browser = Mock(contexts=[SimpleNamespace(pages=[other, own])])
+        with patch.object(web, '_open_background_tab') as create:
+            self.assertIs(web._choose_tab(browser, stream_key='conversation', text='Hello'), own)
+        create.assert_not_called()
+        own.goto.assert_not_called()
+        other.goto.assert_not_called()
+        own.locator.assert_not_called()
+
+    def test_utility_translation_does_not_select_a_conversation_stream(self):
+        stream, utility = tab(), tab()
+        stream.evaluate.return_value = {'pinned':False, 'focused':True, 'visible':True, 'stream':True}
+        browser = Mock(contexts=[SimpleNamespace(pages=[stream, utility])])
+        self.assertIs(web._choose_tab(browser), utility)
+        stream.goto.assert_not_called()
+
     def test_source_and_result_are_reset_before_reading_a_fresh_translation(self):
         page, source, _ = self.page()
         results = iter(["old result", "", "partial", "full translation"])
@@ -157,7 +177,7 @@ class GoogleTranslateTests(unittest.TestCase):
         source.fill.reset_mock()
         current = {'value': 'Hello'}
         source.input_value.side_effect = lambda **kwargs: current['value']
-        source.evaluate.side_effect = lambda script, suffix: current.update(value=current['value'] + suffix)
+        source.evaluate.side_effect = lambda script, args: (current.update(value=args['text']) or 'ok')
         results = iter(['Old result', 'Old result', 'Old result', 'Updated paragraph'])
         with patch.object(web, '_read_output', side_effect=lambda p: next(results, 'Updated paragraph')), \
              patch.object(web, '_copy_result', side_effect=lambda p, text, cancel: text) as copy:
@@ -165,18 +185,58 @@ class GoogleTranslateTests(unittest.TestCase):
         self.assertEqual(result, 'Updated paragraph')
         self.assertEqual(current['value'], 'Hello\nWorld')
         source.fill.assert_not_called()
-        self.assertEqual(source.evaluate.call_args.args[1], '\nWorld')
-        copy.assert_called_once_with(page, 'Updated paragraph', None)
+        self.assertEqual(source.evaluate.call_args.args[1], {'before': 'Hello', 'text': 'Hello\nWorld'})
+        copy.assert_not_called()
+        page.goto.assert_not_called()
 
     def test_append_never_accepts_unchanged_old_output(self):
         page, source, _ = self.page()
         current = {'value': 'Hello'}
         source.input_value.side_effect = lambda **kwargs: current['value']
-        source.evaluate.side_effect = lambda script, suffix: current.update(value=current['value'] + suffix)
+        source.evaluate.side_effect = lambda script, args: (current.update(value=args['text']) or 'ok')
         with patch.object(web, '_read_output', return_value='Old result'), patch.object(web, '_copy_result') as copy:
             with self.assertRaises(translation.TranslationError):
                 web._translate_page(page, 'Hello more words', 'en', 'vi', None, timeout_s=1, append=True)
         copy.assert_not_called()
+
+    def test_retry_same_source_reads_without_filling_or_reloading(self):
+        page, source, _ = self.page()
+        source.input_value.side_effect = lambda **kw: 'Hello'
+        with patch.object(web, '_read_output', return_value='Xin chao'):
+            self.assertEqual(web._translate_page(page, 'Hello', 'en', 'vi', None, append=True), 'Xin chao')
+        source.fill.assert_not_called()
+        source.evaluate.assert_not_called()
+        page.goto.assert_not_called()
+
+    def test_mismatch_limit_and_language_change_never_clear_source(self):
+        page, source, _ = self.page()
+        source.input_value.side_effect = lambda **kw: 'Keep this'
+        with patch.object(web, '_read_output', return_value='Old'):
+            with self.assertRaises(translation.TranslationError):
+                web._translate_page(page, 'Different source', 'en', 'vi', None, append=True)
+            source.evaluate.return_value = 'limit'
+            with self.assertRaises(translation.TranslationError):
+                web._translate_page(page, 'Keep this and more', 'en', 'vi', None, append=True)
+            with self.assertRaises(translation.TranslationError):
+                web._translate_page(page, 'Keep this', 'ja', 'vi', None, append=True)
+        source.fill.assert_not_called()
+        page.goto.assert_not_called()
+
+    def test_incoming_transcript_is_appended_while_waiting_for_translation(self):
+        page, source, _ = self.page()
+        current = {'value': ''}
+        source.input_value.side_effect = lambda **kw: current['value']
+        source.evaluate.side_effect = lambda script, args: (current.update(value=args['text']) or 'ok')
+        updates = iter([None, 'One\nTwo', 'One\nTwo\nThree'])
+        published = []
+        with patch.object(web, '_read_output', side_effect=lambda p: 'Result: ' + current['value']):
+            result = web._translate_page(page, 'One', 'en', 'vi', None, append=True,
+                latest=lambda: next(updates, None), on_result=published.append)
+        self.assertEqual(result, 'Result: One\nTwo\nThree')
+        self.assertEqual([c.args[1]['before'] for c in source.evaluate.call_args_list], ['', 'One', 'One\nTwo'])
+        self.assertTrue(published)
+        source.fill.assert_not_called()
+        page.goto.assert_not_called()
 
     def test_identical_successive_answers_are_still_accepted_after_empty_baseline(self):
         page, _, _ = self.page()
@@ -318,20 +378,19 @@ class GoogleTranslateTests(unittest.TestCase):
         browser.new_page.assert_not_called()
         self.assertTrue(all(c.args[0] is page for c in translate.call_args_list))
 
-    def test_long_append_keeps_completed_passages_and_only_updates_tail(self):
+    def test_long_append_is_never_chunked_or_reset(self):
         browser, playwright, manager, page = Mock(), Mock(), Mock(), Mock()
         playwright.chromium.connect_over_cdp.return_value = browser
         manager.__enter__ = Mock(return_value=playwright)
         manager.__exit__ = Mock(return_value=False)
-        cache = {}
         with patch('playwright.sync_api.sync_playwright', return_value=manager), \
              patch.object(web, '_choose_tab', return_value=page), \
              patch.object(web, '_translate_page', side_effect=lambda p, chunk, *a, **k: chunk) as translate:
-            first = web.translate('a' * 4000 + 'b' * 20, 'en', 'vi', append=True, cache=cache)
-            second = web.translate('a' * 4000 + 'b' * 20 + 'c', 'en', 'vi', append=True, cache=cache)
-        self.assertEqual(first, 'a' * 4000 + ' ' + 'b' * 20)
+            first = web.translate('a' * 4000 + 'b' * 20, 'en', 'vi', append=True, stream_key='conversation')
+            second = web.translate('a' * 4000 + 'b' * 20 + 'c', 'en', 'vi', append=True, stream_key='conversation')
+        self.assertEqual(first, 'a' * 4000 + 'b' * 20)
         self.assertEqual(second, first + 'c')
-        self.assertEqual([len(call.args[1]) for call in translate.call_args_list], [4000, 20, 21])
+        self.assertEqual([len(call.args[1]) for call in translate.call_args_list], [4020, 4021])
         self.assertTrue(all(call.kwargs['append'] for call in translate.call_args_list))
 
     def test_cancel_before_connection_and_while_waiting_for_lock(self):
