@@ -17,8 +17,6 @@ log = logging.getLogger(__name__)
 @dataclass
 class Settings:
     web_capture_source: str = 'windows'
-    chatgpt_dictation_interval: int = 15
-    chatgpt_dictation_overlap: bool = True
     device_label: str = ""
     model: str = "small.en"
     compute: str = "auto"

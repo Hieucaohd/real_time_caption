@@ -29,9 +29,11 @@ Export lấy dữ liệu đã lưu tại thời điểm đóng gói. Pause Live 
 
 Chọn **Windows Live Captions** hoặc **ChatGPT · Micro** ở thanh Start / Continue, hoặc trong Settings → Nguồn transcript. App chỉ thu một nguồn tại một thời điểm. Bấm Pause và chờ đoạn cuối được chốt trước khi đổi nguồn. Lựa chọn được lưu trong cài đặt dùng chung; transcript của cả hai nguồn đi vào cùng conversation, database và luồng dịch hiện có.
 
-Nguồn ChatGPT dùng **Dictate** (nút micro), không dùng chế độ hội thoại Voice và không gửi văn bản thành câu hỏi. Khi bấm Start, app mở tab thu âm riêng trong Chrome 9222; cần đăng nhập ChatGPT và cho phép micro nếu Chrome hỏi. Âm thanh micro được ChatGPT xử lý trên máy chủ. Nguồn này không tự thu âm thanh hệ thống. Settings cho phép đặt khoảng ghi từ 5–120 giây (mặc định 15); văn bản xuất hiện sau mỗi đoạn cộng thêm thời gian ChatGPT chuyển thành chữ, không phải theo từng từ trong lúc đang nói.
+Nguồn ChatGPT dùng **Dictate** (nút micro), không dùng chế độ hội thoại Voice và không gửi văn bản thành câu hỏi. Khi bấm Start, app mở một tab thu âm riêng trong Chrome 9222; cần đăng nhập ChatGPT và cho phép micro nếu Chrome hỏi. Âm thanh micro được ChatGPT xử lý trên máy chủ. Nguồn này không tự thu âm thanh hệ thống.
 
-Mặc định bật **Luân phiên 2 tab để giảm khoảng trống**: chuẩn bị tab kế tiếp, bật nghe rồi chốt tab cũ, lấy văn bản và đóng tab cũ. Tối đa 2 tab; chuyển tiếp có thể trùng một ít lời nói và khoảng thực tế có thể dài hơn nếu tải tab/chuyển chữ chậm. Tắt tùy chọn này để thu lần lượt từng tab (có khoảng nghỉ khi chờ chuyển chữ). Các tab này bị loại khỏi danh sách Chat/Summary/nghiên cứu và không nhận câu hỏi. Pause chốt phần đang thu rồi đóng tab; đóng ứng dụng sẽ đóng các tab do bộ thu tạo. Nếu ChatGPT đổi giao diện, từ chối micro hoặc kết nối lỗi, app báo lỗi và dừng thu, giữ transcript đã lưu.
+App đọc chữ đang cập nhật trực tiếp trong ô nhập khoảng mỗi 200 ms. Phần đang nói hiển thị tạm thời và có thể được ChatGPT sửa; phần ổn định được thêm vào transcript/database và luồng dịch mà micro vẫn tiếp tục nghe. App theo dõi phần đã đọc để không thêm lại toàn bộ ô nhập. Nội dung có sẵn lúc Start không cản việc bật micro và không tính là lời nói mới. Đã bỏ interval ghi âm và luân phiên tab: chỉ một tab, không dừng/bật micro định kỳ, không xóa ô nhập trong lúc đang nghe.
+
+Tab thu âm bị loại khỏi danh sách Chat/Summary/nghiên cứu và không nhận câu hỏi. Pause lưu phần chữ cuối, dừng micro và đóng tab; đóng backend cũng đóng tab do bộ thu tạo. Đóng riêng tab giao diện app không dừng backend. Nếu ChatGPT tự dừng nghe, tab bị đóng hoặc kết nối lỗi, app báo trạng thái và giữ phần đã đọc; bấm Start để tiếp tục.
 
 ## Đóng gói thành EXE
 

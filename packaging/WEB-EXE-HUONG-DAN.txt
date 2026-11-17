@@ -6,10 +6,11 @@ REAL-TIME CAPTION WEB
 
 Google Chrome must be installed. Choose one transcript source: Windows Live
 Captions or ChatGPT Dictate (microphone). For ChatGPT, log in and allow microphone
-access in Chrome. Settings controls the recording interval and optional two-tab
-handoff. Audio is transcribed by ChatGPT; dedicated recording tabs cannot receive
-questions from the app and close after their text is collected. Pause flushes the
-last recording. Closing only the app's browser tab does not stop recording.
+access in Chrome. One dedicated tab listens continuously while the app reads live
+text from its composer. There is no recording interval or tab handoff. Stable text
+is saved while listening continues; the dedicated tab cannot receive questions.
+Pause saves the last visible words, stops the microphone and closes that tab.
+Closing only the app's browser tab does not stop recording.
 The standard build includes online translation and Word/PDF export. Optional VinAI
 offline translation requires a build with --with-translation and its model files.
 

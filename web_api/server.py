@@ -275,9 +275,9 @@ def create_app(service=None):
     def save_settings(body, request):
         current = Settings.load()
         values = body.model_dump(exclude_none=True)
-        capture_keys = {'web_capture_source', 'chatgpt_dictation_interval', 'chatgpt_dictation_overlap'}
+        capture_keys = {'web_capture_source'}
         if svc(request).capture['active'] and any(key in values and values[key] != getattr(current, key) for key in capture_keys):
-            raise ValueError('Bấm Pause và chờ chốt transcript trước khi đổi nguồn hoặc khoảng ghi âm.')
+            raise ValueError('Bấm Pause và chờ chốt transcript trước khi đổi nguồn.')
         theme = values.pop('web_theme', None)
         for key, value in values.items():
             if key.endswith('_max_lines') and not 0 <= value <= 1_000_000:
@@ -286,8 +286,8 @@ def create_app(service=None):
                 raise ValueError('Invalid ChatGPT power.')
             setattr(current, key, value)
         batch_options(current.translation_batch_size, current.translation_batch_timeout)
-        from caption.chatgpt_dictation import validate_options
-        validate_options(current.web_capture_source, current.chatgpt_dictation_interval)
+        from caption.chatgpt_dictation import validate_source
+        validate_source(current.web_capture_source)
         if current.translation_engine not in ENGINES:
             raise ValueError('Invalid translation engine.')
         if current.translation_view not in ('history', 'parallel'):

@@ -90,7 +90,7 @@ class Service:
                 raise ValueError('Pause the active recording before starting another one.')
             self.clear_preview()
             settings = Settings.load()
-            chatgpt_dictation.validate_options(settings.web_capture_source, settings.chatgpt_dictation_interval)
+            chatgpt_dictation.validate_source(settings.web_capture_source)
             source = settings.web_capture_source
             transcript = self.transcript_for(cid)
             transcript.begin_segment(chatgpt_dictation.LABEL if source == 'chatgpt' else livecaptions.LABEL)
@@ -99,8 +99,7 @@ class Service:
                 self.transcript = transcript
                 self.capture = dict(active=True, conversation_id=cid, partial='', source=source,
                     status='Đang mở tab thu âm ChatGPT…' if source == 'chatgpt' else 'Connecting to Windows Live Captions…', error='', warning='')
-                self.reader = (chatgpt_dictation.ChatGPTDictationReader(self.on_caption,
-                    settings.chatgpt_dictation_interval, settings.chatgpt_dictation_overlap, return_tab)
+                self.reader = (chatgpt_dictation.ChatGPTDictationReader(self.on_caption, return_tab)
                     if source == 'chatgpt' else livecaptions.LiveCaptionsReader(self.on_caption))
                 self.reader.start()
             except Exception:

@@ -863,7 +863,7 @@ function App() {
                 {captureSource === "chatgpt" && boot.capture.warning || boot.capture.status}
               </small>
             </div>
-            <span className="source-tag">{captureSource === "chatgpt" ? `${settings.chatgpt_dictation_interval || 15}s / đoạn` : "Win + Ctrl + L"}</span>
+            <span className="source-tag">{captureSource === "chatgpt" ? "Realtime" : "Win + Ctrl + L"}</span>
             <Button
               className={active ? "stop" : "primary"}
               icon={active ? Pause : Play}
@@ -1003,7 +1003,7 @@ function App() {
                     <Empty
                       icon={AudioLines}
                       title="Sẵn sàng lắng nghe"
-                      text={captureSource === "chatgpt" ? "Bấm Start để mở tab ChatGPT thu micro. Văn bản được thêm sau mỗi đoạn ghi âm; cho phép micro trong Chrome nếu được hỏi." : "Bấm Start, mở Windows Live Captions rồi phát âm thanh có lời nói."}
+                      text={captureSource === "chatgpt" ? "Bấm Start để mở tab ChatGPT thu micro. App đọc chữ đang hiện trong ô nhập theo thời gian thực; cho phép micro trong Chrome nếu được hỏi." : "Bấm Start, mở Windows Live Captions rồi phát âm thanh có lời nói."}
                     />
                   )}
                   {!hiddenTranscript && <pre>{detail?.transcript}</pre>}
@@ -1679,18 +1679,10 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           </Field>
           {boot.capture.active && <p className="muted">Bấm Pause và chờ chốt transcript trước khi đổi cấu hình thu âm.</p>}
           {draft.web_capture_source === "chatgpt" ? <section className="livecaptions-settings">
-            <h3>Thu âm bằng ChatGPT</h3>
-            <Field label="Khoảng lấy văn bản (giây)">
-              <input type="number" min="5" max="120" step="1" aria-label="Khoảng lấy văn bản (giây)"
-                disabled={boot.capture.active} value={draft.chatgpt_dictation_interval ?? 15}
-                onChange={(e) => set("chatgpt_dictation_interval", +e.target.value)} />
-            </Field>
-            <label className="inline"><input type="checkbox" disabled={boot.capture.active}
-              checked={draft.chatgpt_dictation_overlap !== false}
-              onChange={(e) => set("chatgpt_dictation_overlap", e.target.checked)} />Luân phiên 2 tab để giảm khoảng trống</label>
+            <h3>Thu âm realtime bằng ChatGPT</h3>
             <p>ChatGPT dùng micro được chọn trong Chrome và xử lý âm thanh trên máy chủ. Nguồn này không tự thu âm thanh hệ thống như Windows Live Captions.</p>
-            <p>Văn bản được thêm sau khi chốt mỗi đoạn và chờ ChatGPT chuyển thành chữ. Khi luân phiên, tab mới bắt đầu nghe trước khi tab cũ chốt; có thể trùng vài từ ở chỗ chuyển. Tối đa 2 tab thu âm.</p>
-            <p>Các tab thu âm không nhận câu hỏi từ app và tự đóng sau khi lấy văn bản. Pause sẽ chốt đoạn cuối trước khi dừng.</p>
+            <p>Một tab ChatGPT nghe liên tục. App đọc chữ đang cập nhật trong ô nhập; phần đang nói hiện ngay và phần ổn định được lưu vào transcript, đồng thời dùng cho dịch.</p>
+            <p>Tab thu âm không nhận câu hỏi từ app. Pause lưu phần chữ cuối, dừng micro và đóng tab thu âm.</p>
           </section> : <LiveCaptionsSettings api={api} warning={boot.capture.warning} />}
           <h3>Translation</h3>
           <div className="form-grid">
