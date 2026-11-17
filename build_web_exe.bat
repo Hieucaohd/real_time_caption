@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
 set "RTC_BUILD_RESULT=1"
 set "RTC_BUILD_SWITCHED="
@@ -21,9 +21,27 @@ if defined RTC_BUILD_DIRTY (
     goto :error
 )
 set "RTC_BUILD_TAG="
-for /f %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss-fff"') do set "RTC_BUILD_TAG=web-build-%%T"
+set "RTC_BUILD_VERSION="
+set /p "RTC_BUILD_VERSION=Enter version (example: 1.2.3 or 1.2.3.4): "
+rem Read untrusted input through the environment, never as a shell command.
+powershell.exe -NoProfile -Command "$v=$env:RTC_BUILD_VERSION; if (-not $v) { exit 1 }; $v=$v.Trim(); if ($v -cnotmatch '\Av?(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){2,3}\z') { exit 1 }; foreach ($part in $v.TrimStart('v').Split('.')) { if ([int]$part -gt 65535) { exit 1 } }; exit 0"
+if errorlevel 1 (
+    echo Invalid version. Use 3 or 4 numbers separated by dots, each from 0 to 65535.
+    goto :error
+)
+for /f %%T in ('powershell.exe -NoProfile -Command "'v' + $env:RTC_BUILD_VERSION.Trim().TrimStart('v')"') do set "RTC_BUILD_TAG=%%T"
 if not defined RTC_BUILD_TAG goto :error
 set "RTC_BUILD_BRANCH=build/%RTC_BUILD_TAG%"
+git show-ref --verify --quiet "refs/tags/%RTC_BUILD_TAG%"
+if not errorlevel 1 (
+    echo Tag %RTC_BUILD_TAG% already exists. Run again with a new version.
+    goto :error
+)
+git show-ref --verify --quiet "refs/heads/%RTC_BUILD_BRANCH%"
+if not errorlevel 1 (
+    echo Branch %RTC_BUILD_BRANCH% already exists. Run again with a new version.
+    goto :error
+)
 echo Creating tag %RTC_BUILD_TAG% and branch %RTC_BUILD_BRANCH%...
 git tag -a "%RTC_BUILD_TAG%" -m "Web EXE build %RTC_BUILD_TAG%" || goto :error
 git checkout -b "%RTC_BUILD_BRANCH%" "%RTC_BUILD_TAG%" || goto :error

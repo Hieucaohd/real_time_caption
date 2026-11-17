@@ -17,7 +17,7 @@ spec.loader.exec_module(builder)
 class WebBuildVersionTests(unittest.TestCase):
     def test_tag_embedded_in_executable_matches_output_name(self):
         from PyInstaller.utils.win32 import versioninfo
-        tag = 'web-build-20261117-235959-999'
+        tag = 'v1.2.3'
         with tempfile.TemporaryDirectory(prefix='rtc version ') as folder:
             folder = Path(folder)
             resource = folder / 'version-info.txt'
@@ -35,13 +35,16 @@ class WebBuildVersionTests(unittest.TestCase):
             self.assertEqual(strings['FileVersion'], tag)
             self.assertEqual(strings['ProductVersion'], tag)
             self.assertEqual(strings['OriginalFilename'], executable.name)
-            self.assertEqual(actual.ffi.fileVersionMS, (2026 << 16) | 1117)
-            self.assertEqual(actual.ffi.fileVersionLS, (2359 << 16) | 59999)
+            self.assertEqual(actual.ffi.fileVersionMS, (1 << 16) | 2)
+            self.assertEqual(actual.ffi.fileVersionLS, 3 << 16)
 
     def test_unsafe_or_unrepresentable_tags_are_rejected(self):
-        for tag in ('../escape', 'web-build-20261117-235999-999', 'v1.0', 'web-build-20261117-235959-999.exe'):
+        for tag in ('../escape', 'v65536.1.2', 'v1.0', 'v1.2.3.exe', 'v01.2.3', 'v1.2.3-beta'):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 builder.build_identity(tag)
+
+    def test_four_part_version_matches_windows_numeric_version(self):
+        self.assertEqual(builder.build_identity('v1.2.3.65535'), ('RealTimeCaptionWeb-v1.2.3.65535', (1, 2, 3, 65535)))
 
 
 if __name__ == '__main__':

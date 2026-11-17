@@ -15,13 +15,13 @@ WORK = ROOT / 'build' / 'web-exe'
 
 
 def build_identity(tag):
-    match = re.fullmatch(r'web-build-(\d{4})(\d{4})-(\d{4})(\d{2})-(\d{3})', tag, flags=re.ASCII)
+    match = re.fullmatch(r'v((?:0|[1-9][0-9]{0,4})(?:\.(?:0|[1-9][0-9]{0,4})){2,3})', tag, flags=re.ASCII)
     if not match:
-        raise ValueError('Expected build tag: web-build-YYYYMMDD-HHMMSS-fff')
-    year, month_day, hour_minute, second, millis = map(int, match.groups())
+        raise ValueError('Expected build tag: v1.2.3 or v1.2.3.4')
     # Windows fixed version fields are four 16-bit integers. The visible string
     # versions below retain the complete Git tag, including its prefix.
-    version = (year, month_day, hour_minute, second * 1000 + millis)
+    parts = tuple(map(int, match.group(1).split('.')))
+    version = parts + (0,) * (4 - len(parts))
     if any(value > 65535 for value in version):
         raise ValueError('Build tag cannot be represented as a Windows version')
     return f'RealTimeCaptionWeb-{tag}', version
