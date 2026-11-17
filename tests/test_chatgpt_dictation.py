@@ -1,5 +1,6 @@
 """Dictation runs in an isolated browser with simulated controls, never a real mic."""
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -160,6 +161,72 @@ class DictationBrowserTests(unittest.TestCase):
             self.reader._capture(self.browser)
         self.reader._cleanup()
         self.assertEqual(self.actions, [])
+
+    def test_disabled_dictate_can_become_ready_after_old_two_second_timeout(self):
+        segment = self.reader._new_segment(self.browser)
+        segment.page.evaluate('''() => {
+            const button = document.querySelector('[aria-label="Dictate"]');
+            button.disabled = true;
+            setTimeout(() => button.disabled = false, 2500);
+        }''')
+        self.reader._begin(segment, self.browser)
+        self.assertEqual(self.actions, [(1, 'start')])
+        self.reader.shutdown()
+        self.reader._cleanup()
+
+    def test_permanently_disabled_button_has_friendly_error_and_never_records(self):
+        segment = self.reader._new_segment(self.browser)
+        segment.page.locator('[aria-label="Dictate"]').evaluate('b => b.disabled = true')
+        with patch.object(dictation, 'START_READY_TIMEOUT', .3):
+            with self.assertRaisesRegex(chatgpt.ChatGPTError, 'chưa sẵn sàng') as caught:
+                self.reader._begin(segment, self.browser)
+        self.assertNotIn('Locator.click', str(caught.exception))
+        self.assertIsNone(segment.started)
+        self.reader._cleanup()
+        self.assertEqual(self.actions, [])
+
+    def test_pause_interrupts_wait_for_disabled_button(self):
+        segment = self.reader._new_segment(self.browser)
+        segment.page.locator('[aria-label="Dictate"]').evaluate('b => b.disabled = true')
+        timer = threading.Timer(.2, self.reader.stop)
+        timer.start()
+        try:
+            with self.assertRaises(dictation.Interrupted):
+                self.reader._begin(segment, self.browser)
+        finally:
+            timer.cancel()
+            self.reader._cleanup()
+        self.assertEqual(self.actions, [])
+
+    def test_start_waits_until_loading_overlay_is_gone(self):
+        segment = self.reader._new_segment(self.browser)
+        segment.page.evaluate('''() => {
+            const overlay = document.createElement('div');
+            overlay.style = 'position:fixed;inset:0;z-index:1000;background:white';
+            document.body.append(overlay);
+            setTimeout(() => overlay.remove(), 700);
+        }''')
+        self.reader._begin(segment, self.browser)
+        self.assertEqual(self.actions, [(1, 'start')])
+        self.reader.shutdown()
+        self.reader._cleanup()
+
+    def test_browser_error_details_stay_in_log_instead_of_user_notification(self):
+        from playwright.sync_api import TimeoutError
+        from unittest.mock import Mock
+        fake = Mock()
+        fake.chromium.connect_over_cdp.return_value = self.browser
+        with patch('playwright.sync_api.sync_playwright') as factory, \
+             patch.object(self.reader, '_capture', side_effect=TimeoutError('Locator.click: Call log: internal selector')):
+            factory.return_value.__enter__.return_value = fake
+            with self.assertLogs('caption.chatgpt_dictation', level='ERROR') as logged:
+                self.reader._run()
+        message, = [e.text for e in self.events if e.kind == 'error']
+        self.assertNotIn('Locator.click', message)
+        self.assertNotIn('internal selector', message)
+        self.assertIn('caption-web.log', message)
+        self.assertIn('internal selector', '\n'.join(logged.output))
+        self.assertEqual(self.events[-1].kind, 'stopped')
 
 
 if __name__ == '__main__':

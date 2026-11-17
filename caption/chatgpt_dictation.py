@@ -23,6 +23,9 @@ LABEL = 'ChatGPT Dictation (microphone)'
 START = re.compile(r'^(Dictate|Dictation|Use microphone|Đọc chính tả|Nhập bằng giọng nói|Đọc bằng giọng nói)$', re.I)
 FINISH = re.compile(r'^(Submit dictation|Stop dictation|Finish dictation|Submit recording|Stop recording|Submit|Confirm|Dừng ghi âm|Gửi bản ghi|Xác nhận|Gửi)$', re.I)
 CANCEL = re.compile(r'^(Cancel dictation|Cancel recording|Cancel|Hủy|Hủy ghi âm)$', re.I)
+START_READY_TIMEOUT = 30
+START_NOT_READY = ('Nút Dictate của ChatGPT chưa sẵn sàng sau 30 giây. '
+                   'Hãy kiểm tra trang ChatGPT đã tải xong và cho phép dùng micro trong Chrome, rồi bấm Start lại.')
 
 
 class Interrupted(Exception):
@@ -119,6 +122,25 @@ class ChatGPTDictationReader:
             return ''
         return composer.evaluate("el => (el.value ?? el.innerText ?? '').trim()")
 
+    def _wait_start_ready(self, page):
+        from playwright.sync_api import TimeoutError
+
+        def ready():
+            button = self._button(page, START)
+            composer = chatgpt._visible(page, chatgpt.COMPOSER)
+            if not button.count() or not button.is_enabled() or not composer.count() or not composer.is_editable():
+                return False
+            try:
+                # A visible/enabled button can still be moving during hydration or
+                # covered by a loading overlay. Trial never starts the microphone.
+                button.click(trial=True, timeout=300)
+            except TimeoutError:
+                return False
+            return True
+
+        self._emit(Event('status', 'Đang chờ nút Dictate sẵn sàng trên ChatGPT…'))
+        self._wait(page, ready, START_READY_TIMEOUT, START_NOT_READY)
+
     def _begin(self, segment, browser, first=False):
         self._check()
         page = segment.page
@@ -127,8 +149,21 @@ class ChatGPTDictationReader:
         with chatgpt._return_to_web_tab(browser, self.return_tab) if first else nullcontext():
             if first:
                 page.bring_to_front()
+            self._wait_start_ready(page)
+            self._check()
+            # The editor can restore a saved draft while ChatGPT initializes.
+            if self._text(chatgpt._visible(page, chatgpt.COMPOSER)):
+                raise chatgpt.ChatGPTError('Tab mới có bản nháp ChatGPT. Hãy lưu/xóa bản nháp đó trước khi thu âm.')
             self._emit(Event('status', 'Đang bật micro ChatGPT… Cho phép micro trong Chrome nếu được hỏi.'))
-            self._button(page, START).click(timeout=2000)
+            try:
+                self._button(page, START).click(timeout=2000)
+            except Exception as exc:
+                from playwright.sync_api import TimeoutError
+                if not isinstance(exc, TimeoutError):
+                    raise
+                # Do not force-click or repeat a real click: recording might have
+                # begun just as the DOM changed. Cleanup closes our owned tab.
+                raise chatgpt.ChatGPTError('Nút Dictate thay đổi hoặc chưa bấm được. Hãy chờ ChatGPT tải xong rồi bấm Start lại.') from exc
             segment.started = time.monotonic()
             self._wait(page, lambda: self._button(page, CANCEL).count() and self._button(page, FINISH).count(), 20,
                        'ChatGPT chưa bắt đầu ghi âm. Kiểm tra quyền micro và nút Dictate trong Chrome.')
@@ -241,6 +276,9 @@ class ChatGPTDictationReader:
                     self._cleanup()
         except Exception as exc:
             log.exception('ChatGPT dictation stopped')
-            self._emit(Event('error', f'Không lấy được transcript ChatGPT: {exc}'))
+            message = str(exc) if isinstance(exc, chatgpt.ChatGPTError) else (
+                'Không thao tác được với tab thu âm. Kiểm tra ChatGPT đã tải xong, quyền micro và kết nối, rồi bấm Start lại. '
+                'Chi tiết kỹ thuật được lưu trong caption-web.log.')
+            self._emit(Event('error', f'Không lấy được transcript ChatGPT: {message}'))
         finally:
             self._emit(Event('stopped'))
