@@ -6,6 +6,7 @@ import re
 import os
 import sqlite3
 import uuid
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from .shared_access import process_alive
@@ -21,6 +22,8 @@ class TranslationStore:
     )
     def __init__(self, db_path):
         self.db_path = db_path
+        self._sync_lock = threading.Lock()
+        self._synced_files = {}
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS translation_lines (
@@ -81,15 +84,34 @@ class TranslationStore:
     def sync_transcript(self, transcript):
         # Stable byte offsets work across resume, rename and transcript splitting.
         # No file is changed and translations of identical repeated lines remain distinct.
-        with self.connect() as db:
-            for path in transcript.parts():
+        with self._sync_lock:
+            parts = transcript.parts()
+            signature = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) for path in parts)
+            cid = transcript.conversation_id
+            if self._synced_files.get(cid) == signature:
+                return
+            # File IO and parsing must not hold SQLite's single writer lock.
+            records = []
+            for path in parts:
                 offset = 0
                 with path.open("rb") as stream:
                     for raw in stream:
                         match = _CAPTION.match(raw.decode("utf-8", errors="replace").rstrip())
                         if match and match[2].strip():
-                            db.execute(self.UPSERT_LINE, (transcript.conversation_id, f"{path.name}:{offset}", match[1], match[2].strip()))
+                            records.append((cid, f"{path.name}:{offset}", match[1], match[2].strip()))
                         offset += len(raw)
+            with self.connect() as db:
+                existing = {row['origin']: row['source_text'] for row in db.execute(
+                    'SELECT origin,source_text FROM translation_lines WHERE conversation_id=?', (cid,))}
+            changed = [row for row in records if existing.get(row[1]) != row[3]]
+            # Existing capture events already index most rows. Only missing or
+            # revised rows need a write; release the lock between small batches.
+            for start in range(0, len(changed), 128):
+                with self.connect() as db:
+                    db.executemany(self.UPSERT_LINE, changed[start:start+128])
+            self._synced_files[cid] = signature
+            if len(self._synced_files) > 128:
+                del self._synced_files[next(iter(self._synced_files))]
 
     def lines(self, conversation_id):
         with self.connect() as db:
@@ -130,10 +152,10 @@ class TranslationStore:
                 (conversation_id,key,config.fingerprint,source,displayed,raw,datetime.now().isoformat(),source_anchor))
             return displayed
 
-    def reading(self, conversation_id, config):
+    def reading(self, conversation_id, config, lines=None):
         """Latest successful text in source order, without repeating batch answers."""
         if config.engine == 'google_web':
-            lines = self.lines(conversation_id)
+            lines = self.lines(conversation_id) if lines is None else lines
             with self.connect() as db:
                 rows = db.execute('SELECT * FROM realtime_translations WHERE conversation_id=? AND fingerprint=? AND passage_key LIKE ? ORDER BY id',
                     (conversation_id, config.fingerprint, 'google-sync:' + config.fingerprint + '%')).fetchall()
@@ -141,15 +163,19 @@ class TranslationStore:
                 # The result belongs to the entire paragraph, never to arbitrary
                 # individual sentences. Only highlight fully synchronized lines.
                 segments, covered = [], set()
+                anchors = {line['origin']: i + 1 for i, line in enumerate(lines)}
+                normalized = [' '.join(line['source_text'].split()) for line in lines]
                 for row in rows:
-                    start = next((i + 1 for i, line in enumerate(lines) if line['origin'] == row['source_anchor']), len(lines)) if row['source_anchor'] else 0
-                    ids, prefix = [], ''
+                    start = anchors.get(row['source_anchor'], len(lines)) if row['source_anchor'] else 0
+                    ids, position = [], 0
                     source = ' '.join(row['source_text'].split())
-                    for line in lines[start:]:
-                        prefix += (' ' if prefix else '') + ' '.join(line['source_text'].split())
-                        if not (source == prefix or source.startswith(prefix + ' ')):
+                    for index in range(start, len(lines)):
+                        text = normalized[index]
+                        end = position + len(text)
+                        if not source.startswith(text, position) or (end < len(source) and source[end] != ' '):
                             break
-                        ids.append(line['id'])
+                        ids.append(lines[index]['id'])
+                        position = end + 1
                     covered.update(ids)
                     segments.append({'line_id': 'google-sync:' + str(row['id']), 'line_ids': ids, 'text': row['translated_text']})
                 return {'segments': segments, 'realtime': [], 'translated_lines': len(covered), 'total_lines': len(lines),

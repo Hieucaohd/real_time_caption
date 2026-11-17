@@ -14,8 +14,17 @@ export default function TranslationReading({ cid, lines, reading, capture, showR
     return groups;
   }, [segments]);
   const highlighted = hovered?.cid === cid ? hovered.ids.filter((id) => sourceGroups.has(id)) : [];
+  const highlightedIds = new Set(highlighted);
+  const groupHighlights = new Map();
+  const isHighlighted = (ids) => {
+    // Hundreds of source spans may share one translated paragraph. Compute
+    // the intersection once per group, rather than scanning it for every span.
+    if (!groupHighlights.has(ids))
+      groupHighlights.set(ids, ids.some((id) => highlightedIds.has(id)));
+    return groupHighlights.get(ids);
+  };
   const sentenceProps = (ids) => ids.length ? ({
-    className: `translation-sentence${ids.some((id) => highlighted.includes(id)) ? " is-highlighted" : ""}`,
+    className: `translation-sentence${isHighlighted(ids) ? " is-highlighted" : ""}`,
     tabIndex: 0,
     onMouseEnter: () => setHovered({ cid, ids }),
     onMouseLeave: () => setHovered(null),

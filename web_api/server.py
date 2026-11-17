@@ -166,7 +166,7 @@ def create_app(service=None):
         lines = s.translations.lines(cid)
         return {'conversation': asdict(s.conversation(cid)), 'transcript': transcript.read_text(),
                 'messages': messages, 'lines': lines,
-                'translation_reading': s.translations.reading(cid, Config.from_settings(Settings.load()))}
+                'translation_reading': s.translations.reading(cid, Config.from_settings(Settings.load()), lines=lines)}
 
     @app.put('/api/conversations/{cid}/answers/{mid}/source')
     def save_answer_source(cid: str, mid: int, body: ResponseSourceInput, request: Request):

@@ -158,13 +158,18 @@ def _read_output(page):
 def _observe_output(page, callback):
     """Forward target DOM changes while connected; never use the clipboard."""
     name = '__rtcTranslation_' + uuid.uuid4().hex
-    state = {'active': True, 'error': None}
+    state = {'active': True, 'pending': None}
     def changed(_, value):
         if state['active'] and isinstance(value, str):
-            try:
-                callback(value)
-            except Exception as error:
-                state['error'] = error
+            # Playwright runs bindings inside its dispatcher. Never call sync
+            # Playwright APIs (including closing tabs) or SQLite from here.
+            state['pending'] = value
+    def flush():
+        value = state['pending']
+        state['pending'] = None
+        if value is not None and state['active']:
+            callback(value)
+    state['flush'] = flush
     page.expose_binding(name, changed)
     try:
         page.evaluate('''({name, primary, fallback}) => {
@@ -302,8 +307,7 @@ def _follow_output(page, box, text, cancel, timeout_s, latest, on_result, observ
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         _check_cancel(cancel)
-        if observer['error']:
-            raise observer['error']
+        observer['flush']()  # Back in the owning worker, outside the binding.
         query = parse_qs(urlsplit(page.url).query)
         if not _is_translate_url(page.url) or (query.get('sl'), query.get('tl')) != languages:
             raise TranslationError('Tab Google Translate đã đổi trang hoặc ngôn ngữ. App giữ nguyên nội dung; hãy kiểm tra tab rồi Đồng bộ lại.')
@@ -419,7 +423,7 @@ def _close_previous_tabs(browser, keep):
 
 
 def _translate_stream(browser, text, source, target, cancel, stream_key, latest, on_result, cache):
-    current = {'text': text}
+    current = {'text': text, 'parts': _stream_parts(text)}
     outputs, index = [], 0
     current_page = None
     retired = False
@@ -429,9 +433,9 @@ def _translate_stream(browser, text, source, target, cancel, stream_key, latest,
         if not retired and current_page is not None:
             _close_previous_tabs(browser, current_page)
             retired = True
-    while index < len(_stream_parts(current['text'])):
+    while index < len(current['parts']):
         _check_cancel(cancel)
-        parts = _stream_parts(current['text'])
+        parts = current['parts']
         part_key = stream_key if index == 0 else stream_key + ':part:' + str(index)
         key = (part_key, source, target, parts[index])
         value = cache.get(key) if cache is not None and index < len(parts) - 1 else None
@@ -441,21 +445,22 @@ def _translate_stream(browser, text, source, target, cancel, stream_key, latest,
             retired = False
             def next_source():
                 updated = latest() if latest else None
-                if updated:
+                if updated and updated != current['text']:
                     if not updated.startswith(current['text']):
                         raise TranslationError('Transcript đã thay đổi phần cũ. App giữ nguyên các tab Google Translate.')
                     current['text'] = updated
-                return _stream_parts(current['text'])[index]
+                    current['parts'] = _stream_parts(updated)
+                return current['parts'][index]
             def publish(raw):
                 # Earlier tabs are complete; only publish when the entire visible
                 # translation includes the current tail, including after restart.
-                if on_result and index == len(_stream_parts(current['text'])) - 1:
+                if on_result and index == len(current['parts']) - 1:
                     on_result(' '.join(outputs + [raw]))
                     retire_previous()
             value = _translate_page(page, parts[index], source, target, cancel,
                                     append=True, latest=next_source, on_result=publish)
         outputs.append(value)
-        parts = _stream_parts(current['text'])
+        parts = current['parts']
         if cache is not None and index < len(parts) - 1:
             cache[(part_key, source, target, parts[index])] = value
             # Closed parts must remain available throughout this session, even

@@ -216,6 +216,30 @@ class TranslationPersistenceTests(unittest.TestCase):
         self.assertEqual([line["source_text"] for line in self.store.lines(self.item.id)], ["First fragment", "Second fragment"])
         transcript.close()
 
+    def test_unchanged_transcript_does_not_acquire_database_writer(self):
+        transcript = conversations.ConversationTranscript(self.item, self.conversations)
+        path = transcript.folder / 'transcript.txt'
+        path.write_text('[now] First\n', encoding='utf-8')
+        self.store.sync_transcript(transcript)
+        with patch.object(self.store, 'connect', side_effect=AssertionError('Unchanged files should not access SQLite')):
+            self.store.sync_transcript(transcript)
+        with path.open('a', encoding='utf-8') as stream:
+            stream.write('[later] Second\n')
+        self.store.sync_transcript(transcript)
+        self.assertEqual([line['source_text'] for line in self.store.lines(self.item.id)], ['First', 'Second'])
+        path.write_text('[now] Fixed\n[later] Second\n', encoding='utf-8')
+        self.store.sync_transcript(transcript)
+        self.assertEqual([line['source_text'] for line in self.store.lines(self.item.id)], ['Fixed', 'Second'])
+
+    def test_failed_index_write_is_retried_instead_of_marked_synchronized(self):
+        transcript = conversations.ConversationTranscript(self.item, self.conversations)
+        (transcript.folder / 'transcript.txt').write_text('[now] Retry me\n', encoding='utf-8')
+        with patch.object(self.store, 'UPSERT_LINE', 'INVALID SQL'):
+            with self.assertRaises(Exception):
+                self.store.sync_transcript(transcript)
+        self.store.sync_transcript(transcript)
+        self.assertEqual(self.store.lines(self.item.id)[0]['source_text'], 'Retry me')
+
     def test_retry_and_new_engine_keep_all_previous_answers(self):
         line = self.line()
         worker = self.worker()
