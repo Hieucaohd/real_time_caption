@@ -99,3 +99,42 @@ class ComposerTests(unittest.TestCase):
         with patch.object(self.editor, 'fill', side_effect=PlaywrightTimeout('Timeout')):
             chatgpt._fill_composer(self.page, self.editor, self.prompt)
         self.assertEqual(self.editor.input_value(), self.prompt)
+
+    def test_paragraph_editor_does_not_reject_a_complete_multiline_prompt(self):
+        prompt = self.prompt + '\n\n```python\n    value = 1\n```\n\nEnd'
+        def render_paragraphs(text, **kwargs):
+            self.editor.evaluate('''(el, text) => el.replaceChildren(...text.split('\\n').map(line => {
+                const p = document.createElement('p');
+                if (line) p.textContent = line;
+                else { const br = document.createElement('br'); br.className = 'ProseMirror-trailingBreak'; p.append(br); }
+                return p;
+            }))''', text)
+        # ChatGPT's rich editor renders paragraphs with visual blank lines.
+        render_paragraphs(prompt)
+        self.assertNotEqual(self.editor.inner_text().strip('\n'), prompt)
+        with patch.object(self.editor, 'fill', side_effect=render_paragraphs) as fill:
+            chatgpt._fill_composer(self.page, self.editor, prompt)
+        fill.assert_called_once()
+        self.assertEqual(self.page.evaluate('window.inputs'), 0)  # No unnecessary fallback/replacement.
+        self.assertEqual(self.page.evaluate('window.sent'), 0)
+
+    def test_logical_lines_preserve_blanks_inline_markup_and_indentation(self):
+        cases = [
+            ('<p>First</p><p>Second</p>', 'First\nSecond'),
+            ('<p>First</p><p><br></p><p>Third</p>', 'First\n\nThird'),
+            ('<p>First</p><p><br class="ProseMirror-trailingBreak"></p><p>Third</p>', 'First\n\nThird'),
+            ('<p><strong>First</strong> &lt;tag&gt;<br>Second<br class="ProseMirror-trailingBreak"></p>', 'First <tag>\nSecond'),
+            ('<p>Code:</p><pre>    one\n        two</pre>', 'Code:\n    one\n        two'),
+            ('First<div>Second</div><div><br></div><div>Fourth</div>', 'First\nSecond\n\nFourth'),
+        ]
+        for markup, expected in cases:
+            with self.subTest(markup=markup):
+                self.page.set_content('<div id="editor" contenteditable="true">' + markup + '</div>')
+                self.assertEqual(self.editor.evaluate(chatgpt._COMPOSER_TEXT), expected)
+
+    def test_truncated_paragraph_prompt_is_still_rejected(self):
+        self.page.evaluate("editor.addEventListener('input', () => editor.innerHTML = '<p>Only the start</p>')")
+        with patch.object(self.editor, 'fill', side_effect=PlaywrightTimeout('Timeout')):
+            with self.assertRaises(chatgpt.ChatGPTError):
+                chatgpt._fill_composer(self.page, self.editor, 'Only the start\nMissing transcript')
+        self.assertEqual(self.page.evaluate('window.sent'), 0)

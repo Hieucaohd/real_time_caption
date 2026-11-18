@@ -529,7 +529,36 @@ def _check_cancel(cancel_event):
         raise ChatGPTCancelled(CANCELLED_MESSAGE)
 
 
-_COMPOSER_TEXT = "el => typeof el.value === 'string' ? el.value : el.innerText"
+_COMPOSER_TEXT = """el => {
+    if (typeof el.value === 'string') return el.value;
+    // innerText inserts layout-dependent blank lines between <p> elements.
+    // Read logical editor lines instead, preserving empty paragraphs and code
+    // indentation. textContent alone would concatenate adjacent paragraphs.
+    const blocks = new Set(['P', 'DIV', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
+    const read = node => {
+        if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        if (node.tagName === 'BR') return node.classList.contains('ProseMirror-trailingBreak') ? '' : '\\n';
+        const children = [...node.childNodes];
+        // A sole BR is the placeholder of an empty paragraph, not two lines.
+        if (blocks.has(node.tagName) && children.length === 1 && children[0].nodeName === 'BR') return '';
+        const hasBlocks = children.some(child => blocks.has(child.nodeName));
+        const parts = [];
+        let inline = '';
+        for (const child of children) {
+            if (blocks.has(child.nodeName)) {
+                if (inline) { parts.push(inline); inline = ''; }
+                parts.push(read(child));
+            } else {
+                if (hasBlocks && child.nodeType === Node.TEXT_NODE && !child.nodeValue.trim()) continue;
+                inline += read(child);
+            }
+        }
+        if (inline) parts.push(inline);
+        return parts.join('\\n');
+    };
+    return read(el);
+}"""
 _INSERT_COMPOSER_TEXT = """(el, text) => {
     if (!el.isConnected || !el.getClientRects().length ||
         getComputedStyle(el).visibility === 'hidden' || el.disabled || el.readOnly ||
@@ -589,9 +618,9 @@ def _fill_composer(page, composer, prompt, cancel_event=None):
     _check_cancel(cancel_event)
     _check_context_full(page)
     raise ChatGPTError(
-        'Không nhập được câu hỏi vào ChatGPT sau khi thử lại. Chưa bấm gửi. '
-        'Kiểm tra tab ChatGPT có bị khóa, yêu cầu đăng nhập/xác minh hoặc đang tải '
-        'hay không, rồi thử lại.'
+        'Chưa xác nhận được đầy đủ nội dung câu hỏi trong ô ChatGPT sau khi thử lại. '
+        'Ô nhập có thể đã có chữ nhưng nội dung chưa khớp. App chưa bấm gửi. '
+        'Hãy kiểm tra tab ChatGPT rồi thử lại.'
     ) from None
 
 
