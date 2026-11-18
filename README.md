@@ -40,6 +40,8 @@ Mã build nằm trong `packaging/`: `build_exe.py` (tham số PyInstaller), `mak
 
 Chỉnh **`config/defaults.json`** trước khi build. File này được đóng gói trong cả EXE web và native; không lấy các cài đặt cá nhân trong `settings.json` hoặc database trên máy build.
 
+Xem [tài liệu giải thích từng config](config/README.md) để biết ý nghĩa, giá trị hợp lệ, cách kế thừa, phạm vi web/native và ví dụ chỉnh trước khi build.
+
 | Nhóm trong JSON | Nội dung |
 | --- | --- |
 | `settings` | Cài đặt chung: nguồn transcript, Chat/Summary, dịch, popup transcript, cài đặt native |
