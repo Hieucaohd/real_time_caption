@@ -242,34 +242,91 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual(self.rt.state(self.cid)['actions'][0]['label'], 'Recovered')
         self.assertEqual(self.calls, [])
 
-    def test_manual_priority_and_stop_cancels_without_sending_queued_requests(self):
-        entered, release = threading.Event(), threading.Event()
+    def test_user_request_preempts_both_lanes_and_blocks_auto_until_answered(self):
+        automatic = {key: threading.Event() for key in ('actions-tab', 'summary-tab')}
+        cancelled = {key: threading.Event() for key in automatic}
+        manual_entered, finish_manual = threading.Event(), threading.Event()
         normal = self.ask
         def slow(prompt, *args, **kwargs):
-            if kwargs['selected_tab'] == 'actions-tab':
-                entered.set()
-                while not release.wait(.01):
-                    if kwargs['cancel_event'].is_set():
-                        raise ChatGPTCancelled('Stopped')
+            key = kwargs['selected_tab']
+            if 'Priority question' in prompt:
+                manual_entered.set()
+                self.assertTrue(finish_manual.wait(4))
+                return normal(prompt, *args, **kwargs)
+            if not automatic[key].is_set():
+                kwargs['on_sent']()
+                automatic[key].set()
+                self.assertTrue(kwargs['cancel_event'].wait(4))
+                cancelled[key].set()
+                raise ChatGPTCancelled('Preempted')
             return normal(prompt, *args, **kwargs)
         with patch('web_api.realtime_chat.chatgpt.ask', side_effect=slow):
             self.start()
-            self.assertTrue(entered.wait(3))
-            self.post(self.base + '/messages', {'message':'Priority question'})
+            self.assertTrue(all(event.wait(3) for event in automatic.values()))
+            before = self.rt.store.settings(self.cid, {})[1]
+            self.assertTrue(all(before.values()))
+            self.assertEqual(self.post(self.base + '/messages', {'message':'Priority question'}).status_code, 200)
+            self.assertTrue(manual_entered.wait(2))
+            self.assertTrue(all(event.wait(2) for event in cancelled.values()))
+            self.assertEqual(self.rt.store.settings(self.cid, {})[1], before)
+            self.add_line('Added during priority reply')
             self.due()
+            time.sleep(.5)
+            self.assertFalse(self.calls, 'Automatic lanes ran during user reply')
+            finish_manual.set()
+            self.wait_for(lambda: self.done('chat') and not any(self.rt.busy.values()))
+            self.assertNotIn('First new transcript', self.calls[0][1])
+            self.due()
+            self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        for _, prompt, _, _ in self.calls[1:]:
+            self.assertIn('Added during priority reply', prompt)
+            self.assertNotIn('First new transcript', prompt)
+        cancelled_events = [e for e in self.rt.store.history(self.cid) if e['status'] == 'cancelled']
+        self.assertEqual({e['kind'] for e in cancelled_events}, {'actions','summary'})
+
+    def test_latest_action_replaces_active_and_queued_questions(self):
+        # An already prepared tab accepts user questions even with auto mode stopped.
+        entered, release = threading.Event(), threading.Event()
+        eid = self.rt.store.create(self.cid, 'actions')
+        self.rt.store.update(eid, 'done', json.dumps(parse_actions('{"actions":[{"label":"Latest","prompt":"Latest action"}]}')))
+        aid = self.rt.state(self.cid)['actions'][0]['id']
+        normal = self.ask
+        def slow(prompt, *args, **kwargs):
+            if 'Old active question' in prompt:
+                entered.set()
+                self.assertTrue(kwargs['cancel_event'].wait(4))
+                self.assertTrue(release.wait(4))
+                raise ChatGPTCancelled('Superseded')
+            return normal(prompt, *args, **kwargs)
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=slow):
+            self.post(self.base + '/messages', {'message':'Old active question'})
+            self.assertTrue(entered.wait(3))
+            self.post(self.base + '/messages', {'message':'Old queued question'})
+            self.post(self.base + '/messages', {'action_id':aid})
             release.set()
             self.wait_for(lambda: self.done('chat'))
-            actions_calls = [call for call in self.calls if call[0] == 'actions-tab']
-            self.assertIn('Priority question', actions_calls[1][1])
-            release.clear(); entered.clear()
-            self.post(self.base + '/messages', {'message':'Cancel active'})
-            self.assertTrue(entered.wait(3))
-            self.post(self.base + '/messages', {'message':'Cancel queued'})
-            self.post(self.base + '/stop')
-            self.wait_for(lambda: not any(self.rt.busy.values()))
-        events = self.rt.store.history(self.cid)
-        self.assertEqual([e['status'] for e in events if e['question'].startswith('Cancel')], ['cancelled', 'cancelled'])
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn('Latest action', self.calls[0][1])
+        events = [e for e in self.rt.store.history(self.cid) if e['kind'] == 'chat']
+        self.assertEqual([e['status'] for e in events], ['cancelled','cancelled','done'])
         self.assertFalse(self.rt.state(self.cid)['running'])
+
+    def test_stop_cancels_priority_request_before_previous_worker_releases(self):
+        entered, release = threading.Event(), threading.Event()
+        def slow(*args, **kwargs):
+            entered.set()
+            self.assertTrue(kwargs['cancel_event'].wait(4))
+            self.assertTrue(release.wait(4))
+            raise ChatGPTCancelled('Stopped')
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=slow):
+            self.post(self.base + '/messages', {'message':'Old active question'})
+            self.assertTrue(entered.wait(3))
+            self.post(self.base + '/messages', {'message':'New priority question'})
+            self.post(self.base + '/stop')
+            release.set()
+            self.wait_for(lambda: not any(self.rt.busy.values()))
+        self.assertEqual([e['status'] for e in self.rt.store.history(self.cid)], ['cancelled','cancelled'])
+        self.assertEqual(self.calls, [])
 
     def test_bad_json_pauses_lane_without_resending_received_delta(self):
         normal = self.ask

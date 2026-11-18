@@ -243,10 +243,22 @@ class RealtimeChat:
         for name in files:
             self.service.file_path(cid, name)
         with self.lock:
-            if self.preparing or len(self.manual) >= 20:
+            if self.preparing or sum(task['cid'] != cid for task in self.manual) >= 20:
                 raise BusyError('Đang chuẩn bị tab hoặc hàng đợi đã đầy.')
             eid = self.store.create(cid, 'chat', message.strip(), files)
-            self.manual.append(dict(id=eid, cid=cid, kind='chat', message=message.strip(), files=files,
+            # A new user request supersedes work for this conversation. Signal
+            # cancellation; the lane worker must release its tab before reusing it.
+            detail = 'Đã hủy để ưu tiên câu hỏi mới của bạn.'
+            for task in list(self.manual):
+                if task['cid'] == cid:
+                    self.store.update(task['id'], 'cancelled', detail=detail)
+                    self.manual.remove(task)
+            for lane, task in self.busy.items():
+                if task and task['cid'] == cid:
+                    task['cancel_detail'] = detail
+                    task['cancel'].set()
+                    self.status(cid, lane, detail='Đang dừng lượt hiện tại để trả lời câu hỏi của bạn…')
+            self.manual.appendleft(dict(id=eid, cid=cid, kind='chat', message=message.strip(), files=files,
                                     config=config, cancel=threading.Event()))
         return {'id': eid}
 
@@ -257,6 +269,10 @@ class RealtimeChat:
                     task = self.manual.popleft()
                 elif self.active:
                     cid = self.active
+                    # Both automatic lanes yield until the user's reply finishes.
+                    if any(task['cid'] == cid for task in self.manual) or any(
+                            task and task['cid'] == cid and task['kind'] == 'chat' for task in self.busy.values()):
+                        continue
                     runtime = self.runtime[cid, lane]
                     if runtime['status'] == 'error' or runtime['due'] > time.monotonic():
                         continue
@@ -273,6 +289,11 @@ class RealtimeChat:
             finally:
                 with self.lock:
                     self.busy[lane] = None
+                    if task['kind'] == 'chat' and self.active == task['cid']:
+                        for name in self.busy:
+                            runtime = self.runtime.get((task['cid'], name))
+                            if runtime:
+                                runtime['due'] = time.monotonic() + task['config']['interval']
 
     def status(self, cid, lane, **values):
         with self.lock:
@@ -356,9 +377,10 @@ class RealtimeChat:
             cancel.wait(1)
         except Exception as exc:
             status = 'cancelled' if cancel.is_set() else 'error'
+            detail = task.get('cancel_detail', str(exc)) if cancel.is_set() else str(exc)
             if eid:
-                self.store.update(eid, status, answer=answer, detail=str(exc), source=response_source)
-            self.status(cid, lane, status=status, detail=str(exc), partial='')
+                self.store.update(eid, status, answer=answer, detail=detail, source=response_source)
+            self.status(cid, lane, status=status, detail=detail, partial='')
 
     def close(self):
         self.closed.set()
