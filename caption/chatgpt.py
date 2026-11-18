@@ -847,12 +847,15 @@ def ask(
     on_partial: Callable[[str], None] | None = None,
     on_response_tab: Callable[[str], None] | None = None,
     on_response_source: Callable[[dict], None] | None = None,
+    on_sent: Callable[[], None] | None = None,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
     ``power`` sets ChatGPT's Power slider first (index into POWER_LEVELS); None leaves it.
     ``on_partial`` receives growing rendered answer text on this worker thread.
     The returned final answer still comes from the response's Copy button.
+    ``on_sent`` runs once on this worker after the submitted turn appears, before
+    waiting for the answer, so consumers can durably acknowledge delivered text.
 
     ``new_chat`` starts a fresh conversation. With ``use_current_tab``, the current ordinary
     ChatGPT tab in Chrome is used; otherwise the dedicated tab ``tab_name`` is used. A tab is
@@ -933,6 +936,8 @@ def ask(
                 )
             except Exception as exc:  # noqa: BLE001
                 raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
+            if on_sent:
+                on_sent()
             log.info(
                 "Sent message to ChatGPT (%s, attachments %s)",
                 "selected Chrome tab" if selected_tab else (

@@ -77,25 +77,22 @@ class RealtimeChat:
         suggestions = self.store.latest_actions(cid)
         with self.lock:
             return dict(config=config, running=self.active == cid, preparing=self.preparing,
+                settings_locked=self.settings_locked(cid),
                 lanes={lane: dict(self.runtime.get((cid, lane), {})) for lane in self.busy},
                 events=events, actions=suggestions)
+
+    def settings_locked(self, cid):
+        # Call with self.lock held so Start, Save and queue mutations are atomic.
+        return self.preparing or self.active == cid or any(
+            task and task['cid'] == cid for task in self.busy.values()) or any(task['cid'] == cid for task in self.manual)
 
     def save(self, cid, config):
         self.service.conversation(cid)
         with self.lock:
-            if self.preparing:
-                raise BusyError('Đang chuẩn bị tab ChatGPT, hãy chờ một chút rồi lưu cài đặt.')
+            if self.settings_locked(cid):
+                raise BusyError('Bấm Stop và chờ yêu cầu đang xử lý dừng xong trước khi đổi cài đặt Chat realtime.')
             config = self.config(cid, config)
             self.store.save(cid, config)
-            # In-flight requests keep their snapshot. Queued and future turns
-            # use the saved preferences without cancelling or resending anything.
-            for task in self.manual:
-                if task['cid'] == cid:
-                    task['config'] = dict(config)
-            for lane in self.busy:
-                runtime = self.runtime.get((cid, lane))
-                if runtime:
-                    runtime['due'] = min(runtime['due'], time.monotonic() + config['interval'])
         return config
 
     def start(self, cid, config, return_tab=''):
@@ -239,6 +236,7 @@ class RealtimeChat:
             answer = chatgpt.ask(prompt, attachments, lambda value: self.status(cid, lane, detail=value),
                 selected_tab=config['selected_tab'] if lane == 'actions' else config['summary_tab'],
                 new_chat=fresh, power=None if config['power'] < 0 else config['power'], cancel_event=cancel,
+                on_sent=lambda: self.store.update(eid, 'working', detail='ChatGPT đã nhận transcript, đang chờ phản hồi.', cursor=cursor, lane=lane),
                 on_partial=lambda value: self.status(cid, lane, partial=value),
                 on_response_source=response_source.update)
             if cancel.is_set():

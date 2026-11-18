@@ -74,6 +74,7 @@ class RealtimeChatTests(unittest.TestCase):
             self.calls.append((kwargs['selected_tab'], prompt, files, kwargs['new_chat']))
             self.powers.append((kwargs['selected_tab'], kwargs['power']))
         on_status('Fake response')
+        kwargs['on_sent']()
         kwargs['on_response_source']({'response_conversation_url':'https://chatgpt.com/c/test', 'response_position':2})
         if kwargs['selected_tab'] == 'summary-tab':
             return 'Summary of new content'
@@ -208,7 +209,7 @@ class RealtimeChatTests(unittest.TestCase):
             self.start()
             self.assertEqual(opener.call_count, 2)
         result = self.client.put(self.base+'/settings', json=self.config, headers=self.headers)
-        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.status_code, 409)
         self.assertEqual(self.post(self.base+'/messages', {'message':'Bad path','files':['../../secrets']}).status_code, 400)
 
     def test_duplicate_stored_tab_is_replaced_for_summary_only(self):
@@ -218,39 +219,87 @@ class RealtimeChatTests(unittest.TestCase):
             self.assertEqual(opener.call_count, 1)
         self.wait_for(lambda: self.done('actions') and self.done('summary'))
 
-    def test_live_power_save_updates_queued_and_future_turns_without_resetting_context(self):
+    def test_settings_are_locked_while_running_even_when_waiting_for_transcript(self):
+        self.config['power'] = 2
+        self.start()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        self.assertTrue(self.rt.state(self.cid)['settings_locked'])
+        response = self.client.put(self.base+'/settings', headers=self.headers, json={**self.config, 'power':0, 'interval':60})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.rt.state(self.cid)['config']['power'], 2)
+        self.assertEqual(self.rt.state(self.cid)['config']['interval'], 5)
+        self.assertEqual(self.post(self.base+'/messages', {'message':'Question while settings are locked'}).status_code, 200)
+        self.wait_for(lambda: self.done('chat'))
+        self.post(self.base+'/stop')
+        self.wait_for(lambda: not self.rt.state(self.cid)['settings_locked'])
         self.config['power'] = 0
-        entered, release = threading.Event(), threading.Event()
-        normal = self.ask
-        def blocked(*args, **kwargs):
-            if kwargs['selected_tab']=='actions-tab' and not entered.is_set():
-                entered.set()
-                self.assertTrue(release.wait(4))
-            return normal(*args, **kwargs)
-        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=blocked):
-            self.start()
-            self.assertTrue(entered.wait(3))
-            self.post(self.base+'/messages', {'message':'Queued question'})
-            response = self.client.put(self.base+'/settings', headers=self.headers, json={**self.config, 'power':2,
-                'new_chat':True, 'attach_transcript':False, 'attach_history':True, 'max_lines':1, 'selected_tab':'untrusted-tab'})
-            self.assertEqual(response.status_code, 200, response.text)
-            saved = response.json()
-            self.assertEqual(saved['selected_tab'], 'actions-tab')
-            self.assertTrue(saved['attach_transcript'])
-            self.assertFalse(saved['new_chat'])
-            self.assertFalse(saved['attach_history'])
-            self.assertEqual(saved['max_lines'], 0)
-            release.set()
-            self.wait_for(lambda: self.done('chat') and self.done('summary'))
-        self.assertEqual([power for key, power in self.powers if key=='actions-tab'], [0,2])
+        response = self.client.put(self.base+'/settings', headers=self.headers, json={**self.config,
+            'new_chat':True, 'attach_transcript':False, 'attach_history':True, 'max_lines':1, 'selected_tab':'untrusted-tab'})
+        self.assertEqual(response.status_code, 200)
+        saved = response.json()
+        self.assertEqual(saved['selected_tab'], 'actions-tab')
+        self.assertTrue(saved['attach_transcript'])
+        self.assertFalse(saved['new_chat'])
+        self.assertFalse(saved['attach_history'])
+        self.assertEqual(saved['max_lines'], 0)
+        self.start()
         self.add_line('Added after changing Power')
         self.due()
         self.wait_for(lambda: len(self.done('actions'))==2 and len(self.done('summary'))==2)
-        self.assertTrue(all(power==2 for _, power in self.powers[-2:]))
+        self.assertTrue(all(power==0 for _, power in self.powers[-2:]))
         for _, prompt, _, fresh in self.calls[-2:]:
             self.assertNotIn('First new transcript', prompt)
             self.assertIn('Added after changing Power', prompt)
             self.assertFalse(fresh)
+
+    def test_stop_after_delivery_then_restart_does_not_resend_without_new_transcript(self):
+        release = threading.Event()
+        def delivered_then_waiting(*args, **kwargs):
+            self.ask(*args, **kwargs)  # Includes the send acknowledgement.
+            self.assertTrue(kwargs['cancel_event'].wait(4))
+            self.assertTrue(release.wait(4))
+            raise ChatGPTCancelled('Stopped after delivery')
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=delivered_then_waiting):
+            self.start()
+            self.wait_for(lambda: all(self.rt.store.settings(self.cid, {})[1].values()))
+            self.post(self.base+'/stop')
+            self.assertTrue(self.rt.state(self.cid)['settings_locked'])
+            self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers, json=self.config).status_code, 409)
+            release.set()
+            self.wait_for(lambda: not self.rt.state(self.cid)['settings_locked'])
+        before = len(self.calls)
+        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab') as opener:
+            self.start()
+            for _ in range(3):
+                self.due()
+                time.sleep(.3)
+            opener.assert_not_called()
+        self.assertEqual(len(self.calls), before)
+        self.add_line('Only this new transcript')
+        self.due()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        self.assertEqual(len(self.calls), before+2)
+        self.assertEqual({c[0] for c in self.calls[-2:]}, {'actions-tab','summary-tab'})
+        for _, prompt, _, fresh in self.calls[-2:]:
+            self.assertIn('Only this new transcript', prompt)
+            self.assertNotIn('First new transcript', prompt)
+            self.assertFalse(fresh)
+
+    def test_cancel_before_delivery_keeps_transcript_pending(self):
+        entered = threading.Event()
+        def unsent(*args, **kwargs):
+            entered.set()
+            self.assertTrue(kwargs['cancel_event'].wait(4))
+            raise ChatGPTCancelled('Not sent')
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=unsent):
+            self.start()
+            self.assertTrue(entered.wait(3))
+            self.post(self.base+'/stop')
+            self.wait_for(lambda: not self.rt.state(self.cid)['settings_locked'])
+        self.assertEqual(self.rt.store.settings(self.cid, {})[1], {'actions':{}, 'summary':{}})
+        self.start()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        self.assertTrue(all('First new transcript' in c[1] for c in self.calls))
 
     def test_history_pagination_keeps_older_chat_and_latest_actions_accessible(self):
         self.rt.store.save(self.cid, self.config)
