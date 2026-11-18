@@ -83,7 +83,7 @@
     "height": 760
   },
   "web": {
-    "theme": "light",
+    "theme": "dark",
     "initial_tab": "transcript",
     "sidebar_hidden": false,
     "reading_focus": false,
