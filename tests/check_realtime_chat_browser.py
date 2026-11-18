@@ -119,6 +119,17 @@ def main():
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not errors, errors
             assert not fixture.rt.state(fixture.cid)['running']
+            from caption.chatgpt import ChatGPTVerificationRequired
+            for lane in ('actions', 'summary'):
+                fixture.rt.status(fixture.cid, lane, status='error',
+                                  error_code='chatgpt_verification_required',
+                                  detail=str(ChatGPTVerificationRequired()))
+            expect(panel.get_by_role('alert')).to_have_count(2)
+            expect(panel.get_by_role('alert').first).to_contain_text('Verify you are human')
+            expect(panel.get_by_role('alert').last).to_contain_text('Stop')
+            for lane in ('actions', 'summary'):
+                fixture.rt.status(fixture.cid, lane, status='waiting', error_code='')
+            expect(panel.get_by_role('alert')).to_have_count(0)
             browser.close()
             print('Chat realtime browser checks passed: settings, two tabs, suggestions, manual chat, attachment preview, incremental summaries, Stop, reload, light/dark and narrow layout.')
     finally:

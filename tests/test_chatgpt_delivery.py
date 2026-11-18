@@ -74,6 +74,20 @@ class DeliveryTests(unittest.TestCase):
             self.ask()
         self.ack.assert_called_once_with()
 
+    def test_verification_before_send_preserves_unconsumed_transcript(self):
+        self.context_check.side_effect = chatgpt.ChatGPTVerificationRequired()
+        with self.assertRaises(chatgpt.ChatGPTVerificationRequired):
+            self.ask()
+        self.fill.assert_not_called()
+        self.send.click.assert_not_called()
+        self.ack.assert_not_called()
+
+    def test_verification_after_send_keeps_delivery_ack_and_specific_error(self):
+        self.wait.side_effect = chatgpt.ChatGPTVerificationRequired()
+        with self.assertRaises(chatgpt.ChatGPTVerificationRequired):
+            self.ask()
+        self.ack.assert_called_once()
+
     def test_attachment_and_send_wait_share_one_upload_budget(self):
         from pathlib import Path
         now = [0]

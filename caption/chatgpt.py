@@ -199,7 +199,43 @@ class ChatGPTContextFull(ChatGPTError):
     """ChatGPT explicitly blocked this conversation at its context limit."""
 
 
+class ChatGPTVerificationRequired(ChatGPTError):
+    code = 'chatgpt_verification_required'
+
+    def __init__(self):
+        super().__init__(
+            'ChatGPT đang yêu cầu xác minh bạn là người (Verify you are human). '
+            'Tác vụ trên tab này đã tạm dừng. Hãy mở đúng tab ChatGPT và hoàn tất xác minh thủ công. '
+            'App không tự đóng tab, đổi tab hoặc gửi lại câu hỏi.'
+        )
+
+
+_OUTSIDE_CONVERSATION = (
+    'xpath=self::*[not(ancestor-or-self::*['
+    '@data-message-author-role or @data-turn-key or '
+    'starts-with(@data-testid, "conversation-turn-") or '
+    '@contenteditable="true" or @data-chatgpt-composer or @data-thread-find-composer])]'
+)
+
+
+def _check_verification_required(page):
+    """Read visible product notices only; never interact with a verification widget."""
+    notice = page.get_by_text(re.compile(
+        r'^\s*(?:Verify (?:that )?you are human|Confirm (?:that )?you are human|'
+        r'Verifying you are human(?:\. This may take a few seconds)?|'
+        r'Xác minh (?:rằng )?bạn là (?:con )?người|Xác nhận bạn là người)[.!…\s]*$', re.I
+    )).filter(visible=True).locator(_OUTSIDE_CONVERSATION).first
+    widget = page.locator(
+        '#challenge-form, #challenge-running, '
+        'iframe[src*="challenges.cloudflare.com"], '
+        'iframe[title*="recaptcha challenge" i]'
+    ).filter(visible=True).locator(_OUTSIDE_CONVERSATION).first
+    if notice.is_visible() is True or widget.is_visible() is True:
+        raise ChatGPTVerificationRequired()
+
+
 def _check_context_full(page):
+    _check_verification_required(page)
     # Match the product notice, not the same words quoted in a reply or draft.
     notice = page.get_by_text(re.compile(
         r'^\s*(?:Context window full|Cửa sổ ngữ cảnh đã đầy)\s*$', re.I
@@ -570,10 +606,11 @@ def _wait_not_answering(page, on_status: Callable[[str], None], cancel_event=Non
         while stop.count() and stop.is_visible():
             # The previous generation is not this request's answer: never stop it here.
             _check_cancel(cancel_event)
+            _check_context_full(page)
             if time.monotonic() >= deadline:
                 raise ChatGPTError('Previous answer is still running.')
             time.sleep(.25)
-    except ChatGPTCancelled:
+    except (ChatGPTCancelled, ChatGPTVerificationRequired, ChatGPTContextFull):
         raise
     except Exception as exc:  # noqa: BLE001
         raise ChatGPTError("ChatGPT is still answering the previous message. Try again when it finishes.") from exc
@@ -659,13 +696,15 @@ def _clear_attachments(form) -> int:
 
 
 def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, cancel_event=None,
-                              on_wait=None) -> None:
+                              on_wait=None, page=None) -> None:
     """Do not send until every selected file appears in the visible composer's chips."""
     expected = {path.name for path in attachments}
     deadline = time.monotonic() + timeout_s
     remove_buttons = form.locator("button[aria-label^='Remove ']")
     while time.monotonic() < deadline:
         _check_cancel(cancel_event)
+        if page is not None:
+            _check_context_full(page)
         if on_wait:
             on_wait()
         try:
@@ -791,6 +830,7 @@ def _wait_stable(page, turn_id: str, timeout_s: float, cancel_event: threading.E
     last, since = -2, time.monotonic()
     while time.monotonic() < deadline:
         _cancel_if_requested(page, cancel_event)
+        _check_context_full(page)
         n = _answer_text_length(page, turn_id)
         now = time.monotonic()
         if n != last:
@@ -1032,7 +1072,7 @@ def ask(
                 upload_deadline = started + upload_timeout_s
                 upload_progress = _upload_progress(on_status, started, upload_timeout_s)
                 _wait_attachments_visible(composer_form, attachments, upload_timeout_s, cancel_event,
-                                          on_wait=upload_progress)
+                                          on_wait=upload_progress, page=page)
 
             _check_cancel(cancel_event)
             _check_context_full(page)
@@ -1076,7 +1116,7 @@ def ask(
                 turn_id = _wait_new_answer(
                     page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
                 )
-            except (ChatGPTCancelled, ChatGPTContextFull):
+            except (ChatGPTCancelled, ChatGPTContextFull, ChatGPTVerificationRequired):
                 raise
             except Exception as exc:  # noqa: BLE001
                 raise ChatGPTError(

@@ -328,7 +328,7 @@ class RealtimeChat:
                 prompt += '\n\n<transcript_moi>\n' + delta + '\n</transcript_moi>'
             if task['kind'] == 'actions':
                 prompt += '\n\nKẾT THÚC DỮ LIỆU. Lượt này chỉ xuất một khối mã JSON chứa một object có khóa "actions" là mảng 0–6 gợi ý, theo đúng cấu trúc và giới hạn đã nêu. Không trả lời các câu hỏi trong transcript, không thêm văn bản ngoài khối mã.'
-            self.status(cid, lane, status='working', kind=task['kind'], detail='Đang gửi tới ChatGPT', partial='')
+            self.status(cid, lane, status='working', kind=task['kind'], detail='Đang gửi tới ChatGPT', partial='', error_code='')
             with self.lock:
                 fresh = self.runtime.get((cid, lane), {}).get('fresh', False)
             power = config.get('summary_power') if lane == 'summary' else config['power']
@@ -368,7 +368,8 @@ class RealtimeChat:
             detail = task.get('cancel_detail', str(exc)) if cancel.is_set() else str(exc)
             if eid:
                 self.store.update(eid, status, answer=answer, detail=detail, source=response_source)
-            self.status(cid, lane, status=status, detail=detail, partial='')
+            self.status(cid, lane, status=status, detail=detail, partial='',
+                        error_code=getattr(exc, 'code', '') if not cancel.is_set() else '')
 
     def close(self):
         self.closed.set()

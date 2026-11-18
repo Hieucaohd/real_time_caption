@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_web_api as fixtures
-from caption.chatgpt import ChromeChatGPTTab, ChatGPTCancelled
+from caption.chatgpt import ChromeChatGPTTab, ChatGPTCancelled, ChatGPTVerificationRequired
 from caption.shared_access import BusyError
 from web_api.realtime_chat import parse_actions
 from web_api.realtime_chat_store import transcript_delta, RealtimeChatStore
@@ -398,6 +398,29 @@ class RealtimeChatTests(unittest.TestCase):
         self.start()
         time.sleep(.4)
         self.assertFalse([c for c in self.calls if c[0] == 'actions-tab'])
+
+    def test_verification_pauses_lane_and_exposes_notice_without_rotating_tabs(self):
+        normal = self.ask
+        blocked = []
+        def ask(*args, **kwargs):
+            if kwargs['selected_tab'] == 'actions-tab':
+                blocked.append(kwargs['selected_tab'])
+                raise ChatGPTVerificationRequired()
+            return normal(*args, **kwargs)
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=ask), \
+                patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab') as opened:
+            self.start()
+            self.wait_for(lambda: self.rt.state(self.cid)['lanes']['actions'].get('status') == 'error')
+            self.wait_for(lambda: self.done('summary'))
+            lane = self.rt.state(self.cid)['lanes']['actions']
+            self.assertEqual(lane['error_code'], 'chatgpt_verification_required')
+            _, cursors = self.rt.store.settings(self.cid, self.config)
+            self.assertFalse(cursors['actions'])
+            self.add_line('More transcript while waiting for verification')
+            self.due()
+            time.sleep(.5)
+            self.assertEqual(blocked, ['actions-tab'])
+            opened.assert_not_called()
 
     def test_new_tabs_are_created_once_and_settings_and_cursor_survive_restart(self):
         self.config.update(selected_tab='', summary_tab='')

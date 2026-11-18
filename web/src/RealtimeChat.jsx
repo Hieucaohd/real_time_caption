@@ -132,6 +132,14 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
       <p className="muted rt-help">Power gợi ý / hỏi đáp và Power tóm tắt áp dụng riêng cho từng tab. “Giữ nguyên” không đổi mức của tab tương ứng. Stop rồi Start dùng lại hai tab cũ nếu còn mở; chưa có transcript mới thì không gửi lượt tự động. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
     </details>}
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}
+    {Object.entries(lanes).filter(([, lane]) => lane.status === "error" && lane.error_code === "chatgpt_verification_required").map(([key, lane]) => (
+      <div className="rt-error" role="alert" key={key}>
+        <div><strong>Cần xác minh ChatGPT — {key === "actions" ? "Gợi ý / hỏi đáp" : "Tóm tắt"}</strong>
+          <p>{lane.detail}</p>
+          <p>Tab: {(key === "actions" ? config.selected_tab_title : config.summary_tab_title) || "ChatGPT"}. Sau khi xác minh, bấm Stop rồi Start để tiếp tục theo dõi.</p>
+        </div>
+      </div>
+    ))}
     {notice && <p className="rt-notice" role="status">{notice}</p>}
     <div className="rt-columns">
       <section className="rt-chat-column" aria-label="Hỏi đáp realtime">
