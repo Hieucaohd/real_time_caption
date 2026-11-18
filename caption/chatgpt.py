@@ -195,6 +195,28 @@ class ChatGPTCancelled(ChatGPTError):
     pass
 
 
+class ChatGPTContextFull(ChatGPTError):
+    """ChatGPT explicitly blocked this conversation at its context limit."""
+
+
+def _check_context_full(page):
+    # Match the product notice, not the same words quoted in a reply or draft.
+    notice = page.get_by_text(re.compile(
+        r'^\s*(?:Context window full|Cửa sổ ngữ cảnh đã đầy)\s*$', re.I
+    )).filter(visible=True).locator(
+        'xpath=self::*[not(ancestor-or-self::*['
+        '@data-message-author-role or @data-turn-key or '
+        'starts-with(@data-testid, "conversation-turn-") or '
+        '@contenteditable="true" or @data-chatgpt-composer or @data-thread-find-composer])]').first
+    if notice.is_visible() is True:
+        raise ChatGPTContextFull(
+            'Cuộc hội thoại ChatGPT đã đầy ngữ cảnh (Context window full). '
+            'Mở tab ChatGPT này để chuyển sang cuộc trò chuyện mới kèm tóm tắt. '
+            'Cần xử lý giới hạn ngữ cảnh trước khi tiếp tục trong app. '
+            'App đã dừng lượt xử lý, không tự gửi lại câu hỏi.'
+        )
+
+
 @dataclass(frozen=True)
 class ChromeChatGPTTab:
     key: str
@@ -593,12 +615,14 @@ def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, c
     )
 
 
-def _wait_send_enabled(scope, timeout_s: float, cancel_event=None):
+def _wait_send_enabled(scope, timeout_s: float, cancel_event=None, page=None):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
     button = _visible(scope, SEND_BUTTON)
     while time.monotonic() < deadline:
         _check_cancel(cancel_event)
+        if page is not None:
+            _check_context_full(page)
         try:
             if button.is_visible() and button.is_enabled():
                 return button
@@ -637,6 +661,7 @@ def _wait_new_answer(
     target = None
     while time.monotonic() < deadline:
         _cancel_if_requested(page, cancel_event)
+        _check_context_full(page)
         snapshot = page.evaluate(
             "(a) => {" + _TURN_ID_JS + _RESPONSE_TEXT_JS + """
               const known = new Set(a.known);
@@ -887,10 +912,12 @@ def ask(
             else:
                 on_status("Continuing the current ChatGPT chat…")
 
+            _check_context_full(page)
             composer = _visible(page, COMPOSER)
             try:
                 composer.wait_for(state="visible", timeout=30_000)
             except Exception as exc:  # noqa: BLE001
+                _check_context_full(page)
                 raise ChatGPTError(
                     "ChatGPT's message box did not appear. Is this Chrome profile logged in to ChatGPT?"
                 ) from exc
@@ -913,9 +940,20 @@ def ask(
                 file_input.set_input_files([str(p) for p in attachments])
                 _wait_attachments_visible(composer_form, attachments, UPLOAD_TIMEOUT_S, cancel_event)
 
-            composer.click()
-            composer.fill(prompt)
-            send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S, cancel_event)
+            _check_cancel(cancel_event)
+            _check_context_full(page)
+            try:
+                composer.fill(prompt, timeout=10_000)
+            except Exception:
+                _check_cancel(cancel_event)
+                _check_context_full(page)
+                # Playwright's fill error embeds the complete private prompt.
+                raise ChatGPTError(
+                    'Không nhập được câu hỏi vào ChatGPT. Chưa bấm gửi. '
+                    'Kiểm tra tab ChatGPT có bị khóa, yêu cầu đăng nhập/xác minh '
+                    'hoặc đang tải hay không, rồi thử lại.'
+                ) from None
+            send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S, cancel_event, page=page)
             if dry_run:
                 on_status("Dry run: message prepared, not sent")
                 return ""
@@ -935,6 +973,7 @@ def ask(
                     timeout=SENT_TIMEOUT_S * 1000,
                 )
             except Exception as exc:  # noqa: BLE001
+                _check_context_full(page)
                 raise ChatGPTError("Clicked send, but the message did not show up in ChatGPT. Check the tab.") from exc
             if on_sent:
                 on_sent()
@@ -951,7 +990,7 @@ def ask(
                 turn_id = _wait_new_answer(
                     page, answered_before, ANSWER_TIMEOUT_S, cancel_event, on_partial, turns_before
                 )
-            except ChatGPTCancelled:
+            except (ChatGPTCancelled, ChatGPTContextFull):
                 raise
             except Exception as exc:  # noqa: BLE001
                 raise ChatGPTError(

@@ -10,6 +10,7 @@ class DeliveryTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.page, self.composer, self.send, self.ack = Mock(), Mock(), Mock(), Mock()
+        self.context_check = self.stack.enter_context(patch.object(chatgpt, '_check_context_full'))
         self.stack.enter_context(patch('playwright.sync_api.sync_playwright'))
         request = self.stack.enter_context(patch.object(chatgpt, '_request_page'))
         request.return_value.__enter__.return_value = (self.page, False)
@@ -48,4 +49,26 @@ class DeliveryTests(unittest.TestCase):
 
     def test_successful_answer_acknowledges_exactly_once(self):
         self.assertEqual(self.ask(), 'Answer')
+        self.ack.assert_called_once_with()
+
+    def test_context_full_before_fill_never_sends_or_consumes_transcript(self):
+        self.context_check.side_effect = chatgpt.ChatGPTContextFull('Context window full')
+        with self.assertRaises(chatgpt.ChatGPTContextFull):
+            self.ask()
+        self.composer.fill.assert_not_called()
+        self.send.click.assert_not_called()
+        self.ack.assert_not_called()
+
+    def test_fill_failure_does_not_expose_private_prompt_or_send(self):
+        self.composer.fill.side_effect = RuntimeError('fill("PRIVATE TRANSCRIPT") timed out')
+        with self.assertRaises(chatgpt.ChatGPTError) as raised:
+            self.ask()
+        self.assertNotIn('PRIVATE TRANSCRIPT', str(raised.exception))
+        self.send.click.assert_not_called()
+        self.ack.assert_not_called()
+
+    def test_context_full_while_waiting_keeps_specific_error_and_delivery_ack(self):
+        self.wait.side_effect = chatgpt.ChatGPTContextFull('Context window full')
+        with self.assertRaisesRegex(chatgpt.ChatGPTContextFull, 'Context window full'):
+            self.ask()
         self.ack.assert_called_once_with()
