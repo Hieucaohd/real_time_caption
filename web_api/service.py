@@ -406,13 +406,20 @@ class Service:
                 job['_retry'] = payload
                 self.busy = False
 
+    def list_chatgpt_tabs(self):
+        """Only ordinary tabs are selectable by Chat, Summary, and research."""
+        tabs = chatgpt.list_chrome_chatgpt_tabs()
+        reserved = self.realtime_chat.store.tab_keys()
+        return [tab for tab in tabs if tab.key not in reserved
+                and tab.key != chatgpt.VOCAB_TAB and not chatgpt.is_dictation_tab(tab.key)]
+
     def recover_chat_tab(self, job, payload):
         """Repair only the selection. The failed question requires manual Retry."""
         self.update_job(job, error_code='chatgpt_tab_closed')
         prepared = payload.get('_prepared', {})
         old_key = prepared.get('selected_tab') or payload.get('selected_tab', '')
         try:
-            tabs = chatgpt.list_chrome_chatgpt_tabs()
+            tabs = self.list_chatgpt_tabs()
             chosen = tabs[0] if tabs else None
             settings = Settings.load()
             settings.chatgpt_selected_tab = chosen.key if chosen else ''

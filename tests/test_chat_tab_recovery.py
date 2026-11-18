@@ -72,3 +72,39 @@ class ChatTabRecoveryTests(unittest.TestCase):
             self.assertEqual(job['error'], 'Not logged in')
             self.assertNotIn('tab_recovery', job)
             scan.assert_not_called()
+
+    def test_scan_excludes_saved_realtime_lanes_and_reserved_tabs(self):
+        from web_api.realtime_chat_store import RealtimeChatStore
+        self.service.realtime_chat.store.save(self.cid, {
+            'selected_tab': 'rt-actions', 'summary_tab': 'rt-summary'})
+        # Reopening the store must retain the reservation even when realtime is stopped.
+        reopened = RealtimeChatStore(self.service.store)
+        self.assertEqual(reopened.tab_keys(), {'rt-actions', 'rt-summary'})
+        with patch('web_api.service.chatgpt.list_chrome_chatgpt_tabs', return_value=[
+            tab('rt-actions', 'ChatGPT'), tab('rt-summary', 'ChatGPT'),
+            tab(chatgpt.VOCAB_TAB, 'New words'),
+            tab(chatgpt.DICTATION_TAB_PREFIX + 'mic', 'ChatGPT'),
+            tab('ordinary', 'ChatGPT'),
+        ]):
+            response = self.client.get('/api/chrome-tabs')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([t['key'] for t in response.json()], ['ordinary'])
+
+    def test_recovery_skips_realtime_lanes_without_retrying_question(self):
+        self.service.realtime_chat.store.save(self.cid, {
+            'selected_tab': 'rt-actions', 'summary_tab': 'rt-summary'})
+        with patch('web_api.service.chatgpt.ask', side_effect=chatgpt.ChatGPTTabClosed('Closed')) as ask, \
+                patch('web_api.service.chatgpt.list_chrome_chatgpt_tabs', return_value=[
+                    tab('rt-actions', 'Actions'), tab('rt-summary', 'Summary'), tab('ordinary', 'Ordinary')]):
+            job = self.wait_job(self.send()['id'])
+            self.assertEqual(job['tab_recovery']['selected_tab'], 'ordinary')
+            self.assertEqual(Settings.load().chatgpt_selected_tab, 'ordinary')
+            ask.assert_called_once()
+
+    def test_only_realtime_tabs_returns_empty_without_changing_their_ids(self):
+        config = {'selected_tab': 'rt-actions', 'summary_tab': 'rt-summary'}
+        self.service.realtime_chat.store.save(self.cid, config)
+        with patch('web_api.service.chatgpt.list_chrome_chatgpt_tabs', return_value=[
+            tab('rt-actions', 'Actions'), tab('rt-summary', 'Summary')]):
+            self.assertEqual(self.client.get('/api/chrome-tabs').json(), [])
+        self.assertEqual(self.service.realtime_chat.store.settings(self.cid, {})[0], config)

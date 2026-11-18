@@ -39,6 +39,19 @@ class RealtimeChatStore:
         return ({**defaults, **json.loads(row['config'])},
                 {lane: json.loads(row[lane+'_cursor']) for lane in ('actions', 'summary')}) if row else (defaults, {'actions': {}, 'summary': {}})
 
+    def tab_keys(self):
+        """Reserve both lanes across conversations, including stopped/saved sessions."""
+        with self.conversations._connect() as db:
+            rows = db.execute('SELECT config FROM realtime_chat_settings').fetchall()
+        keys = set()
+        for row in rows:
+            config = json.loads(row['config'])
+            for field in ('selected_tab', 'summary_tab'):
+                key = config.get(field)
+                if isinstance(key, str) and key:
+                    keys.add(key)
+        return keys
+
     def repair_actions(self, parse):
         """Recover saved copy-format failures locally; never consume a cursor or send."""
         last, repaired = 0, 0

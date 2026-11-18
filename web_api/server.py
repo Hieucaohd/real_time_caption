@@ -324,8 +324,8 @@ def create_app(service=None):
         return {**asdict(Settings.load()), 'web_theme': svc(request).store.web_theme()}
 
     @app.get('/api/chrome-tabs')
-    def tabs():
-        return [asdict(tab) for tab in chatgpt.list_chrome_chatgpt_tabs()]
+    def tabs(request: Request):
+        return [asdict(tab) for tab in svc(request).list_chatgpt_tabs()]
 
     @app.post('/api/chrome-tabs')
     def open_chatgpt_tab(request: Request):
