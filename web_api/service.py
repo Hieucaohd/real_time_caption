@@ -132,6 +132,7 @@ class Service:
 
     def pause(self):
         with self.lock:
+            self.realtime_chat.stop()
             if self.reader:
                 self.capture['status'] = 'Stopping…'
                 self.reader.stop()

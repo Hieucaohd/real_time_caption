@@ -328,6 +328,61 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual([e['status'] for e in self.rt.store.history(self.cid)], ['cancelled','cancelled'])
         self.assertEqual(self.calls, [])
 
+    def test_capture_pause_stops_both_realtime_lanes_for_either_source(self):
+        for source in ('windows', 'chatgpt'):
+            with self.subTest(source=source):
+                settings = fixtures.settings.Settings.load()
+                settings.web_capture_source = source
+                settings.save()
+                entered = {key: threading.Event() for key in ('actions-tab', 'summary-tab')}
+
+                def slow(*args, **kwargs):
+                    entered[kwargs['selected_tab']].set()
+                    self.assertTrue(kwargs['cancel_event'].wait(4))
+                    raise ChatGPTCancelled('Stopped')
+
+                with patch('web_api.service.chatgpt_dictation.ChatGPTDictationReader',
+                           side_effect=lambda emit, return_tab: fixtures.FakeReader(emit)), \
+                     patch('web_api.realtime_chat.chatgpt.ask', side_effect=slow):
+                    self.assertEqual(self.post(f'/api/conversations/{self.cid}/capture').status_code, 200)
+                    self.start()
+                    self.assertTrue(all(event.wait(3) for event in entered.values()))
+                    response = self.post('/api/capture/pause')
+                    self.assertEqual(response.status_code, 200)
+                    self.assertFalse(response.json()['capture']['active'])
+                    self.assertFalse(self.rt.state(self.cid)['running'])
+                    self.wait_for(lambda: not any(self.rt.busy.values()))
+                    self.assertTrue(all(e['status'] == 'cancelled' for e in self.rt.store.history(self.cid)))
+                    # Resuming capture alone must not restart realtime chat.
+                    self.post(f'/api/conversations/{self.cid}/capture')
+                    self.assertFalse(self.rt.state(self.cid)['running'])
+                    self.post('/api/capture/pause')
+
+    def test_capture_pause_during_tab_preparation_prevents_late_start(self):
+        entered, release = threading.Event(), threading.Event()
+        result = []
+
+        def slow_tabs():
+            entered.set()
+            self.assertTrue(release.wait(4))
+            return [tab('actions-tab'), tab('summary-tab')]
+
+        with patch('web_api.realtime_chat.chatgpt.list_chrome_chatgpt_tabs', side_effect=slow_tabs):
+            thread = threading.Thread(target=lambda: result.append(self.post(self.base + '/start', self.config)))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                self.assertEqual(self.post('/api/capture/pause').status_code, 200)
+            finally:
+                release.set()
+                thread.join(timeout=4)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result[0].status_code, 200)
+        state = self.rt.state(self.cid)
+        self.assertFalse(state['running'])
+        self.assertFalse(state['settings_locked'])
+        self.assertEqual(self.calls, [])
+
     def test_bad_json_pauses_lane_without_resending_received_delta(self):
         normal = self.ask
         with patch('web_api.realtime_chat.chatgpt.ask', side_effect=lambda *a, **kw: 'bad JSON' if kw['selected_tab']=='actions-tab' else normal(*a, **kw)):

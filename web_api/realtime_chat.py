@@ -120,6 +120,8 @@ class RealtimeChat:
         self.closed = threading.Event()
         self.active = None
         self.preparing = False
+        self.preparing_cid = None
+        self.prepare_cancel = threading.Event()
         self.manual = deque()
         self.busy = {lane: None for lane in ('actions', 'summary')}
         self.runtime = {}
@@ -188,12 +190,16 @@ class RealtimeChat:
             if self.active or self.preparing or any(self.busy.values()) or self.manual:
                 raise BusyError('Một lượt Chat realtime đang chạy hoặc đang dừng. Nếu đang theo dõi cuộc hội thoại khác, hãy quay lại đó bấm Stop trước khi Start tại đây.')
             self.preparing = True
+            self.preparing_cid = cid
+            self.prepare_cancel.clear()
         try:
             self.service.conversation(cid)
             old, _ = self.store.settings(cid, self.defaults())
             config = self.config(cid, config)
             tabs = {tab.key: tab for tab in chatgpt.list_chrome_chatgpt_tabs()}
             for key, title in [('selected_tab', 'selected_tab_title'), ('summary_tab', 'summary_tab_title')]:
+                if self.prepare_cancel.is_set():
+                    return self.state(cid)
                 duplicate = key == 'summary_tab' and config[key] == config['selected_tab']
                 if config[key] in tabs and not duplicate:
                     config[title] = tabs[config[key]].title
@@ -207,6 +213,8 @@ class RealtimeChat:
                      if old[key] != config[key]]
             with self.lock:
                 self.store.save(cid, config, reset)
+                if self.prepare_cancel.is_set():
+                    return self.state(cid)
                 self.active = cid
                 for lane in self.busy:
                     self.runtime[cid, lane] = dict(status='waiting', detail='Đang chờ transcript mới', due=time.monotonic(),
@@ -215,16 +223,20 @@ class RealtimeChat:
         finally:
             with self.lock:
                 self.preparing = False
+                self.preparing_cid = None
 
-    def stop(self, cid):
+    def stop(self, cid=None):
+        """Stop one conversation, or all realtime work when capture is paused."""
         with self.lock:
-            if self.active == cid:
+            if cid is None or self.preparing_cid == cid:
+                self.prepare_cancel.set()
+            if cid is None or self.active == cid:
                 self.active = None
             for task in self.busy.values():
-                if task and task['cid'] == cid:
+                if task and (cid is None or task['cid'] == cid):
                     task['cancel'].set()
             for task in list(self.manual):
-                if task['cid'] == cid:
+                if cid is None or task['cid'] == cid:
                     self.manual.remove(task)
                     self.store.update(task['id'], 'cancelled', detail='Đã dừng trước khi gửi.')
 
