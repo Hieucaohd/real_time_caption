@@ -3,9 +3,6 @@
 .rt-toolbar > strong { display:flex; align-items:center; gap:7px; margin-right:auto; }
 .rt-toolbar button { gap:6px; }
 .realtime-chat > .chat-settings { flex-shrink:0; max-height:45%; overflow:auto; }
-.rt-settings-extra { display:flex; gap:20px; padding:8px 18px; }
-.rt-settings-extra .field { min-width:180px; }
-.rt-settings-extra .field:last-child { flex:1; }
 .rt-help { padding:0 18px 12px; margin:0; font-size:12px; }
 .rt-columns { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr); flex:1; min-height:0; }
 .rt-chat-column,.rt-summary-column { min-height:0; display:flex; flex-direction:column; overflow:hidden; }
@@ -25,5 +22,5 @@
 .rt-empty,.rt-loading { padding:20px; }
 .rt-error { margin:8px 16px; padding:10px; border:1px solid #ab6650; border-radius:8px; color:#e4a58f; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .rt-notice { padding:6px 18px; margin:0; color:var(--muted); font-size:13px; }
-@media(max-width:850px) { .rt-columns { grid-template-columns:minmax(0,1fr) minmax(230px,.8fr); } .rt-settings-extra { flex-wrap:wrap; } }
+@media(max-width:850px) { .rt-columns { grid-template-columns:minmax(0,1fr) minmax(230px,.8fr); } }
 @media(max-width:620px) { .rt-columns { display:flex; flex-direction:column; overflow:auto; } .rt-chat-column { min-height:65vh; flex-shrink:0; } .rt-summary-column { min-height:35vh; border-left:0; border-top:1px solid var(--line); flex-shrink:0; } }

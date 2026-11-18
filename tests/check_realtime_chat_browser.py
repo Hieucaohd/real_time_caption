@@ -16,6 +16,7 @@ from web_api.server import create_app
 
 def main():
     fixture = RealtimeChatTests(); fixture.setUp()
+    fixture.rt.store.save(fixture.cid, {**fixture.config, 'selected_tab':'', 'summary_tab':''})
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
     thread = threading.Thread(target=server.run, daemon=True); thread.start()
     deadline = time.monotonic() + 10
@@ -35,7 +36,11 @@ def main():
             panel.locator('summary').click()
             expect(page.get_by_label('realtime Prompt', exact=True)).to_be_visible()
             page.get_by_label('Chu kỳ Chat realtime', exact=True).fill('5')
-            page.get_by_label('realtime transcript lines', exact=True).fill('0')
+            expect(page.get_by_label('realtime ChatGPT tab', exact=True)).to_have_count(0)
+            expect(page.get_by_label('Tab tóm tắt realtime', exact=True)).to_have_count(0)
+            expect(page.get_by_label('realtime transcript lines', exact=True)).to_have_count(0)
+            for label in ('Đính kèm transcript', 'Đính kèm lịch sử chat', 'New ChatGPT chat'):
+                expect(panel.get_by_label(label, exact=True)).to_have_count(0)
             panel.get_by_role('button', name='Lưu cài đặt', exact=True).click()
             expect(panel.get_by_role('status')).to_contain_text('Đã lưu')
             panel.locator('summary').click()
@@ -43,6 +48,11 @@ def main():
             expect(panel.get_by_role('button', name='Explain', exact=True)).to_be_visible(timeout=10000)
             expect(panel.locator('.rt-summaries')).to_contain_text('Summary of new content')
             assert opened.call_count == 2
+            panel.locator('summary').click()
+            page.get_by_label('realtime Power', exact=True).select_option('2')
+            panel.get_by_role('button', name='Lưu cài đặt', exact=True).click()
+            expect(panel.get_by_role('status')).to_contain_text('Áp dụng từ lượt gửi kế tiếp')
+            panel.locator('summary').click()
             panel.get_by_role('button', name='Explain', exact=True).click()
             expect(panel.locator('.chat-scroll')).to_contain_text('Answer to the question')
             image_data = BytesIO(); Image.new('RGB', (200,120), '#247b59').save(image_data, format='PNG')
@@ -67,8 +77,9 @@ def main():
             expect(panel.locator('.chat-scroll .message.bot')).to_have_count(2)
             panel.locator('summary').click()
             expect(page.get_by_label('Chu kỳ Chat realtime', exact=True)).to_have_value('5')
-            expect(page.get_by_label('realtime ChatGPT tab', exact=True)).to_have_value('actions-tab')
-            expect(page.get_by_label('Tab tóm tắt realtime', exact=True)).to_have_value('summary-tab')
+            expect(page.get_by_label('realtime Power', exact=True)).to_have_value('2')
+            assert fixture.powers[-1][1] == 2
+            page.screenshot(path='cache/realtime-chat-settings.png')
             panel.locator('summary').click()
             for theme in ('light', 'dark'):
                 page.evaluate('(theme) => document.documentElement.dataset.theme=theme', theme)

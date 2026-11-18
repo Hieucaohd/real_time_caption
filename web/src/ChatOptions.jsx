@@ -16,11 +16,13 @@ export default function ChatOptions({
   showNewChat = true,
   onSave,
   saving = false,
+  managedContext = false,
+  children,
 }) {
   const set = (key, next) => onChange({ [key]: next });
   return (
     <fieldset className="options chat-options" disabled={disabled}>
-      <label className="field">
+      {!managedContext && <label className="field">
         <span>ChatGPT tab</span>
         <div className="inline">
           <select
@@ -52,7 +54,7 @@ export default function ChatOptions({
             <RefreshCw size={16} className={loadingTabs ? "spin" : ""} />
           </button>
         </div>
-      </label>
+      </label>}
       <label className="field">
         <span>Prompt</span>
         <div className="inline">
@@ -89,7 +91,7 @@ export default function ChatOptions({
           ))}
         </select>
       </label>
-      <label className="field">
+      {!managedContext && <label className="field">
         <span>Số dòng transcript (0 = tất cả)</span>
         <input
           aria-label={scope + " transcript lines"}
@@ -99,13 +101,13 @@ export default function ChatOptions({
           value={value.max_lines ?? 300}
           onChange={(e) => set("max_lines", Math.max(0, +e.target.value))}
         />
-      </label>
+      </label>}
       {[
         ["attach_transcript", "Đính kèm transcript"],
         ["attach_history", "Đính kèm lịch sử chat"],
         ["screenshot", "Auto screenshot"],
         ["new_chat", "New ChatGPT chat"],
-      ].filter(([key]) => key !== "new_chat" || showNewChat).map(([key, label]) => (
+      ].filter(([key]) => managedContext ? key === "screenshot" : key !== "new_chat" || showNewChat).map(([key, label]) => (
         <label className="toggle" key={key}>
           <input
             type="checkbox"
@@ -115,6 +117,7 @@ export default function ChatOptions({
           {label}
         </label>
       ))}
+      {children}
       {onSave && <button type="button" onClick={onSave} disabled={saving || loadingTabs}>
         <Save size={16} /> {saving ? "Đang lưu…" : "Lưu cài đặt Chat"}
       </button>}

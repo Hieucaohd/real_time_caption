@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Camera, Copy, MessageSquare, Paperclip, Play, RefreshCw, Save, Send, Settings2, Square, ArrowUp, ArrowDown } from "lucide-react";
+import { Camera, Copy, MessageSquare, Paperclip, Play, Save, Send, Settings2, Square, ArrowUp, ArrowDown } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import AttachmentList from "./AttachmentList";
@@ -11,7 +11,6 @@ const attachments = files => (files || []).map(path => ({ path, name: path.split
 
 export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }) {
   const [state, setState] = useState(null), [config, setConfig] = useState(null);
-  const [tabs, setTabs] = useState([]), [loadingTabs, setLoadingTabs] = useState(false);
   const [busy, setBusy] = useState(false), [uploading, setUploading] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [message, setMessage] = useState(""), [files, setFiles] = useState([]);
@@ -42,7 +41,6 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
   const lanes = state?.lanes || {};
   const working = Object.values(lanes).some(lane => lane.status === "working");
   const active = !!state?.running || working || chat.some(e => e.status === "queued");
-  const locked = busy || active;
   useLayoutEffect(() => {
     if (follow) for (const ref of [chatScroll, summaryScroll])
       if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -60,13 +58,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
   }
   async function save() {
     await api(base + "/settings", { method: "PUT", body: config });
-    setNotice("Đã lưu cài đặt Chat realtime");
-  }
-  async function scanTabs() {
-    setLoadingTabs(true);
-    try { const result = await api("/chrome-tabs"); if (alive.current) setTabs(result); }
-    catch (e) { setError(e.message); }
-    finally { if (alive.current) setLoadingTabs(false); }
+    setNotice("Đã lưu cài đặt Chat realtime · Áp dụng từ lượt gửi kế tiếp cho cả hai tab ChatGPT.");
   }
   async function upload(selected) {
     setUploading(true); setError("");
@@ -94,7 +86,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
   function send(actionId = "") {
     if (uploading || (!actionId && !message.trim())) return;
     action(async () => {
-      if (!active) await save();
+      await save();
       await post(base + "/messages", { message, action_id: actionId, files: files.map(file => file.path) });
       if (!actionId) setMessage("");
       setFiles([]); setNotice("");
@@ -111,30 +103,21 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
         const result = await api(base + '/history?before=' + events[0].id);
         setOlder([...result, ...events]); setMoreHistory(result.length === 200);
       })}>Tải lịch sử trước</button>}
-      <button disabled={locked} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>
+      <button disabled={busy} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>
       <button className={active ? "danger" : "primary"} disabled={busy} onClick={() => action(async () => {
         if (active) await post(base + "/stop");
         else { const result = await post(base + "/start", config); setConfig(result.config); setState(result); }
       })}>{active ? <Square size={16} /> : <Play size={16} />}{active ? "Stop" : "Start"}</button>
     </div>
     <details className="chat-settings">
-      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>{config.selected_tab_title || "Tự tạo hai tab ChatGPT khi Start"}</span></summary>
+      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>{config.power < 0 ? "Power: giữ nguyên" : `Power: ${["Instant", "Medium", "High"][config.power]}`} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
-        tabs={tabs} scanTabs={scanTabs} loadingTabs={loadingTabs} prompts={prompts}
-        editPrompt={() => setEditingPrompt(true)} scope="realtime" disabled={locked}
-        onSave={() => action(save)} saving={busy} />
-      <div className="rt-settings-extra">
+        prompts={prompts} managedContext
+        editPrompt={() => setEditingPrompt(true)} scope="realtime" disabled={busy}>
         <label className="field"><span>Chu kỳ cập nhật (giây)</span><input aria-label="Chu kỳ Chat realtime" type="number" min="5" max="3600"
-          disabled={locked} value={config.interval} onChange={e => setConfig(old => ({ ...old, interval: Number(e.target.value) }))} /></label>
-        <label className="field"><span>Tab ChatGPT tóm tắt riêng</span><div className="inline"><select aria-label="Tab tóm tắt realtime"
-          disabled={locked} value={config.summary_tab} onChange={e => setConfig(old => ({ ...old, summary_tab: e.target.value, summary_tab_title: tabs.find(t => t.key === e.target.value)?.title || "" }))}>
-          <option value="">Tự tạo tab mới khi Start</option>
-          {tabs.filter(tab => tab.key !== config.selected_tab).map(tab => <option key={tab.key} value={tab.key}>{tab.title}</option>)}
-          {config.summary_tab && !tabs.some(tab => tab.key === config.summary_tab) && <option value={config.summary_tab}>{config.summary_tab_title || "Tab đã lưu"}</option>}
-        </select><button aria-label="Refresh tab tóm tắt" disabled={loadingTabs || locked} onClick={scanTabs}><RefreshCw size={16} /></button></div></label>
-      </div>
-      <p className="muted rt-help">Lần đầu gửi số dòng gần nhất đã chọn (0 = tất cả); các lượt sau chỉ gửi transcript mới đã được ghi. Hai tab giữ ngữ cảnh riêng.
-        “New ChatGPT chat” bắt đầu ngữ cảnh mới khi Start. Mẫu prompt, ảnh và tùy chọn đính kèm áp dụng cho câu hỏi của bạn.</p>
+          value={config.interval} onChange={e => setConfig(old => ({ ...old, interval: Number(e.target.value) }))} /></label>
+      </ChatOptions>
+      <p className="muted rt-help">App tự quản lý hai tab ChatGPT và chỉ gửi thêm transcript chưa nhận. Power áp dụng cho cả gợi ý, hỏi đáp và tóm tắt; chọn “Giữ nguyên” sẽ không đổi mức trên ChatGPT. Lưu cài đặt để áp dụng từ lượt gửi kế tiếp.</p>
     </details>
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}
     {notice && <p className="rt-notice" role="status">{notice}</p>}

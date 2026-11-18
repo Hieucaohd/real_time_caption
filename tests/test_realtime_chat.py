@@ -46,7 +46,9 @@ class RealtimeChatTests(unittest.TestCase):
         self.base = f'/api/conversations/{self.cid}/realtime-chat'
         self.config = {**self.rt.defaults(), 'selected_tab':'actions-tab', 'summary_tab':'summary-tab',
                        'interval':5, 'screenshot':False, 'attach_transcript':True, 'max_lines':0}
+        self.rt.store.save(self.cid, self.config)
         self.calls = []
+        self.powers = []
         self.calls_lock = threading.Lock()
         self.chrome_patches = [
             patch('web_api.realtime_chat.chatgpt.list_chrome_chatgpt_tabs', return_value=[tab('actions-tab'), tab('summary-tab')]),
@@ -70,6 +72,7 @@ class RealtimeChatTests(unittest.TestCase):
     def ask(self, prompt, files, on_status, **kwargs):
         with self.calls_lock:
             self.calls.append((kwargs['selected_tab'], prompt, files, kwargs['new_chat']))
+            self.powers.append((kwargs['selected_tab'], kwargs['power']))
         on_status('Fake response')
         kwargs['on_response_source']({'response_conversation_url':'https://chatgpt.com/c/test', 'response_position':2})
         if kwargs['selected_tab'] == 'summary-tab':
@@ -181,6 +184,7 @@ class RealtimeChatTests(unittest.TestCase):
 
     def test_new_tabs_are_created_once_and_settings_and_cursor_survive_restart(self):
         self.config.update(selected_tab='', summary_tab='')
+        self.rt.store.save(self.cid, self.config)
         with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', side_effect=[tab('actions-tab'), tab('summary-tab')]) as opener:
             self.start()
             self.wait_for(lambda: self.done('actions') and self.done('summary'))
@@ -196,17 +200,57 @@ class RealtimeChatTests(unittest.TestCase):
         time.sleep(.4)
         self.assertEqual(self.calls, [])
 
-    def test_settings_validation_and_missing_or_duplicate_tabs(self):
+    def test_settings_validation_and_replacement_of_missing_tabs(self):
         self.assertEqual(self.client.post(self.base+'/start', json=self.config).status_code, 403)
         self.assertEqual(self.post(self.base+'/start', {**self.config,'interval':0}).status_code, 422)
-        for settings in ({'summary_tab':'actions-tab'}, {'selected_tab':'missing-tab'}):
-            response = self.post(self.base+'/start', {**self.config, **settings})
-            self.assertEqual(response.status_code, 400, response.text)
-            self.assertFalse(self.rt.state(self.cid)['running'])
-        self.start()
+        self.rt.store.save(self.cid, {**self.config, 'selected_tab':'missing', 'summary_tab':'missing'})
+        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', side_effect=[tab('actions-tab'), tab('summary-tab')]) as opener:
+            self.start()
+            self.assertEqual(opener.call_count, 2)
         result = self.client.put(self.base+'/settings', json=self.config, headers=self.headers)
-        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.status_code, 200)
         self.assertEqual(self.post(self.base+'/messages', {'message':'Bad path','files':['../../secrets']}).status_code, 400)
+
+    def test_duplicate_stored_tab_is_replaced_for_summary_only(self):
+        self.rt.store.save(self.cid, {**self.config, 'summary_tab':'actions-tab'})
+        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', return_value=tab('summary-tab')) as opener:
+            self.start()
+            self.assertEqual(opener.call_count, 1)
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+
+    def test_live_power_save_updates_queued_and_future_turns_without_resetting_context(self):
+        self.config['power'] = 0
+        entered, release = threading.Event(), threading.Event()
+        normal = self.ask
+        def blocked(*args, **kwargs):
+            if kwargs['selected_tab']=='actions-tab' and not entered.is_set():
+                entered.set()
+                self.assertTrue(release.wait(4))
+            return normal(*args, **kwargs)
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=blocked):
+            self.start()
+            self.assertTrue(entered.wait(3))
+            self.post(self.base+'/messages', {'message':'Queued question'})
+            response = self.client.put(self.base+'/settings', headers=self.headers, json={**self.config, 'power':2,
+                'new_chat':True, 'attach_transcript':False, 'attach_history':True, 'max_lines':1, 'selected_tab':'untrusted-tab'})
+            self.assertEqual(response.status_code, 200, response.text)
+            saved = response.json()
+            self.assertEqual(saved['selected_tab'], 'actions-tab')
+            self.assertTrue(saved['attach_transcript'])
+            self.assertFalse(saved['new_chat'])
+            self.assertFalse(saved['attach_history'])
+            self.assertEqual(saved['max_lines'], 0)
+            release.set()
+            self.wait_for(lambda: self.done('chat') and self.done('summary'))
+        self.assertEqual([power for key, power in self.powers if key=='actions-tab'], [0,2])
+        self.add_line('Added after changing Power')
+        self.due()
+        self.wait_for(lambda: len(self.done('actions'))==2 and len(self.done('summary'))==2)
+        self.assertTrue(all(power==2 for _, power in self.powers[-2:]))
+        for _, prompt, _, fresh in self.calls[-2:]:
+            self.assertNotIn('First new transcript', prompt)
+            self.assertIn('Added after changing Power', prompt)
+            self.assertFalse(fresh)
 
     def test_history_pagination_keeps_older_chat_and_latest_actions_accessible(self):
         self.rt.store.save(self.cid, self.config)
@@ -225,7 +269,7 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual(len(earlier), 3)
 
     def test_partial_tab_preparation_preserves_new_tab_and_resets_its_cursor(self):
-        self.rt.store.save(self.cid, self.config)
+        self.rt.store.save(self.cid, {**self.config,'selected_tab':'','summary_tab':''})
         with self.service.store._connect() as db:
             db.execute("UPDATE realtime_chat_settings SET actions_cursor=? WHERE conversation_id=?",
                        (json.dumps({'origin':'old-tab-origin','offset':50}), self.cid))

@@ -492,11 +492,13 @@ def _wait_not_answering(page, on_status: Callable[[str], None], cancel_event=Non
 
 
 def _set_power(page, level: int) -> str:
-    """Move the model picker's Power slider to ``level`` (0 = lowest); returns ChatGPT's label for it."""
+    """Set and verify committed effort, using keys scoped to this tab's control."""
+    if level not in range(len(POWER_LEVELS)):
+        raise ChatGPTError('Invalid ChatGPT Power level.')
     picker = _visible(page, MODEL_PICKER)
     if picker.count() == 0:
         raise ChatGPTError("Could not find ChatGPT's model picker to set the power level.")
-    picker.click()
+    picker.click(timeout=5000)
     try:
         power = _visible(page, POWER_ITEM)
         try:
@@ -504,20 +506,44 @@ def _set_power(page, level: int) -> str:
         except Exception as exc:  # noqa: BLE001
             raise ChatGPTError("ChatGPT's model picker has no Power slider (the layout may have changed).") from exc
         slider = _visible(page, POWER_SLIDER)
-        power.focus()
-        target = max(0, min(level, int(slider.get_attribute("aria-valuemax") or len(POWER_LEVELS) - 1)))
+        if level > int(slider.get_attribute("aria-valuemax") or len(POWER_LEVELS) - 1):
+            raise ChatGPTError(f'ChatGPT không hỗ trợ mức Power {POWER_LEVELS[level]} trong tab này.')
+        target = level
+        changed = False
         for _ in range(len(POWER_LEVELS) + 2):
             current = int(slider.get_attribute("aria-valuenow") or 0)
             if current == target:
                 break
-            page.keyboard.press("ArrowRight" if current < target else "ArrowLeft")
-            page.wait_for_timeout(250)
+            # Refocus the exact control for every key. Other ChatGPT workers or
+            # the user may move focus between steps; page.keyboard alone is unsafe.
+            power.press("ArrowRight" if current < target else "ArrowLeft", timeout=5000)
+            changed = True
+            deadline = time.monotonic() + 2
+            while int(slider.get_attribute("aria-valuenow") or 0) == current and time.monotonic() < deadline:
+                page.wait_for_timeout(50)
         if int(slider.get_attribute("aria-valuenow") or -1) != target:
             raise ChatGPTError("Could not move ChatGPT's Power slider to the chosen level.")
+        if changed:
+            # The slider can show a temporary value. Reopen it to verify what
+            # ChatGPT actually kept before any question/transcript is sent.
+            power.press("Escape", timeout=2000)
+            picker.click(timeout=5000)
+            power.wait_for(state='visible', timeout=5000)
+            if int(slider.get_attribute('aria-valuenow') or -1) != target:
+                raise ChatGPTError(f'ChatGPT chưa giữ mức Power {POWER_LEVELS[level]}. Chưa gửi câu hỏi; hãy thử lại.')
         # Status reads e.g. "Medium, 2 of 3."
         return _visible(page, POWER_STATUS).inner_text().split(",")[0].strip()
+    except ChatGPTError:
+        raise
+    except Exception as exc:
+        raise ChatGPTError(f'Không xác nhận được Power {POWER_LEVELS[level]} trên ChatGPT. Chưa gửi câu hỏi.') from exc
     finally:
-        page.keyboard.press("Escape")
+        power = _visible(page, POWER_ITEM)
+        if power.count() and power.is_visible():
+            try:
+                power.press('Escape', timeout=2000)
+            except Exception:
+                pass
 
 
 def _composer_form(composer):
