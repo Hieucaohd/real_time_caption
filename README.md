@@ -291,6 +291,16 @@ Model vẫn được tải riêng khi người dùng xác nhận Download.
 
 ## Cách hoạt động
 
+Mọi tab ChatGPT do app mở dùng chung khoảng chờ tối thiểu **15 giây** giữa hai lần mở
+(Chat, Chat realtime, thu âm, nghiên cứu theo nhánh và launcher). Mốc lần mở gần nhất
+được lưu tại `cache/chatgpt-tab-open.sqlite3` trong thư mục dữ liệu, dùng chung giữa
+native/web và giữ lại khi khởi động lại app. Khi app đang chạy, bộ theo dõi kiểm tra
+Chrome cổng 9222 mỗi giây để ghi nhận cả tab ChatGPT mở thủ công. Tab mới được phát
+hiện sẽ lùi lần mở tiếp theo của app thêm 15 giây; thao tác mở thủ công của người dùng
+không bị chặn. Tab có sẵn được phát hiện lần đầu cũng được tính từ lúc phát hiện.
+Các tab ngoài Chrome cổng 9222 không nằm trong phạm vi theo dõi. Google Translate
+không phải chờ theo cơ chế này.
+
 - `caption/audio.py`: thu âm qua WASAPI (loopback hoặc micro), trộn về mono, resample về 16 kHz.
 - `caption/transcriber.py`: faster-whisper chạy kiểu streaming. Cứ khoảng 0,5 giây giải mã lại bộ đệm để hiện chữ tạm. Khi người nói ngừng khoảng 0,7 giây thì giải mã lần cuối bằng beam search và chốt câu. Nói liên tục quá lâu thì chốt dần từng đoạn để độ trễ không tăng.
 - `caption/livecaptions.py`: đọc `CaptionsTextBlock` của Live Captions. Hai câu cuối được coi là chữ tạm vì Live Captions còn sửa chúng; các câu phía trước được chốt, có chống trùng khi chữ cuộn khỏi màn hình.

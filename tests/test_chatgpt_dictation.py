@@ -90,7 +90,7 @@ class DictationBrowserTests(unittest.TestCase):
         self.context.route('https://chatgpt.com/**', lambda r: r.fulfill(body=HTML, content_type='text/html'))
         self.events, self.actions, self.created = [], [], []
         self.reader = dictation.ChatGPTDictationReader(self.events.append)
-        def new_page(_):
+        def new_page(_, **kwargs):
             self.assertFalse(self.created, 'A capture session must use only one tab')
             page = self.context.new_page(); self.created.append(page)
             page.expose_function('report', lambda action: self.actions.append(action))

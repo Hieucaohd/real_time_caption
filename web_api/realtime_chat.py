@@ -179,7 +179,10 @@ class RealtimeChat:
                 if config[key] in tabs and not duplicate:
                     config[title] = tabs[config[key]].title
                 else:
-                    tab = chatgpt.open_new_chatgpt_tab(return_tab=return_tab)
+                    try:
+                        tab = chatgpt.open_new_chatgpt_tab(return_tab=return_tab, cancel_event=self.prepare_cancel)
+                    except chatgpt.ChatGPTCancelled:
+                        return self.state(cid)
                     config[key], config[title] = tab.key, tab.title
                     # Preserve a newly created tab if preparing the second one fails.
                     lane = 'actions' if key == 'selected_tab' else 'summary'

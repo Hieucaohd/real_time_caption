@@ -28,6 +28,11 @@ def main() -> None:
     logging.getLogger(__name__).info("Data folder: %s (packaged: %s)", paths.DATA_DIR, paths.FROZEN)
     paths.install_default_prompts()
 
+    if '--open-chatgpt-browser' in sys.argv:
+        from caption.chrome_launcher import open_browser
+        open_browser()
+        return
+
     from caption.cuda_setup import register_nvidia_dlls
 
     register_nvidia_dlls()
@@ -52,7 +57,13 @@ def main() -> None:
     if paths.ICON_PATH.exists():
         root.iconbitmap(default=str(paths.ICON_PATH))  # also used by dialogs and the overlay
     App(root)
-    root.mainloop()
+    from caption.chatgpt_tab_gate import TabObserver
+    observer = TabObserver()
+    observer.start()
+    try:
+        root.mainloop()
+    finally:
+        observer.close()
 
 
 if __name__ == "__main__":

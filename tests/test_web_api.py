@@ -61,6 +61,7 @@ class WebApiTests(unittest.TestCase):
             patch('web_api.service.ConversationStore', lambda: ConversationStore(self.root / 'data.sqlite3')),
             patch('web_api.service.livecaptions.LiveCaptionsReader', FakeReader),
             patch('caption.livecaptions_settings.PreferenceRestorer.start'),
+            patch('caption.chatgpt_tab_gate.TabObserver.start'),
             patch('web_api.service.chatgpt.open_new_chatgpt_tab',
                   side_effect=AssertionError('Tests must mock tab creation; never open real Chrome.')),
         ]

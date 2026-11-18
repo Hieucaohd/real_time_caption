@@ -1,7 +1,8 @@
 import unittest
+from contextlib import nullcontext
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from caption import chatgpt, chatgpt_branch, chatgpt_navigation
 from caption.chatgpt_source import response_message_at_position
@@ -118,10 +119,13 @@ class NativeBranchUITests(unittest.TestCase):
         self.context.route('**/*', self.serve)
         self.original = self.context.new_page()
         self.original.goto('https://chatgpt.com/g/project/c/source')
-        self.open_patch = patch.object(chatgpt, '_open_background_tab', side_effect=lambda _: self.context.new_page())
+        self.open_patch = patch.object(chatgpt, '_open_background_tab', side_effect=lambda _, **kwargs: self.context.new_page())
         self.open_patch.start()
+        self.gate_patch = patch('caption.chatgpt_tab_gate.opening', side_effect=lambda *args: nullcontext(Mock()))
+        self.gate_patch.start()
 
     def tearDown(self):
+        self.gate_patch.stop()
         self.open_patch.stop()
         self.context.close()
 
@@ -330,3 +334,14 @@ class NativeBranchUITests(unittest.TestCase):
                     raise RuntimeError('failed request')
             with chatgpt._request_page(self.browser, first, False, '') as (reopened, _):
                 self.assertEqual(reopened, self.original)
+
+    def test_existing_selected_tab_can_chat_during_another_tab_opening(self):
+        from caption import paths
+        from caption.shared_access import ProcessLock
+        key = chatgpt.CHAT_TAB_PREFIX + 'existing'
+        self.original.evaluate('key => window.name = key', key)
+        with tempfile.TemporaryDirectory() as folder, patch.object(paths, 'CACHE_DIR', Path(folder)):
+            with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'), ProcessLock(paths.CACHE_DIR / 'chatgpt-tab-open.lock'):
+                with chatgpt._request_page(self.browser, key, False, '') as (page, created):
+                    self.assertIs(page, self.original)
+                    self.assertFalse(created)
