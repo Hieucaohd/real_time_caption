@@ -97,6 +97,8 @@ class RealtimeChatTests(unittest.TestCase):
             output.write('[00:01] ' + text + '\n')
 
     def ask(self, prompt, files, on_status, **kwargs):
+        from caption import defaults
+        self.assertEqual(kwargs['upload_timeout_s'], defaults.get('realtime_chat', 'upload_timeout_seconds'))
         with self.calls_lock:
             self.calls.append((kwargs['selected_tab'], prompt, files, kwargs['new_chat']))
             self.powers.append((kwargs['selected_tab'], kwargs['power']))

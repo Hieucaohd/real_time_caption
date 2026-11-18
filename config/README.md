@@ -166,6 +166,7 @@ Nhóm này áp dụng khi cuộc hội thoại chưa lưu cấu hình Chat realt
 | Config | Mặc định | Giá trị và ý nghĩa |
 | --- | --- | --- |
 | `realtime_chat.interval` | `30` | Số nguyên 5–3600 giây. Khoảng giữa các lượt kiểm tra/gửi cập nhật tự động cho gợi ý và tóm tắt. |
+| `realtime_chat.upload_timeout_seconds` | `600` | Số nguyên 30–1800 giây. Tổng thời gian chờ file/ảnh xuất hiện và ChatGPT sẵn sàng gửi trong Chat realtime, mặc định 10 phút. App cập nhật trạng thái chờ mỗi 5 giây và cho phép Stop. Áp dụng trực tiếp từ bản build cho cả hội thoại đã lưu; không đổi thời gian chờ câu trả lời hoặc timeout của Chat thường. |
 | `realtime_chat.prompt` | `null` | Tên mẫu trong `prompts/chat/` dành cho câu hỏi/action người dùng gửi. `null` kế thừa `settings.chat_prompt`; `""` chọn mẫu mới nhất. Không phải prompt sinh danh sách gợi ý. |
 | `realtime_chat.power` | `null` | `null` kế thừa `settings.chat_chatgpt_power`; hoặc số nguyên -1–2. Áp dụng cho tab gợi ý và hỏi đáp. |
 | `realtime_chat.summary_power` | `null` | `null` kế thừa Power gợi ý/hỏi đáp của cấu hình Chat realtime đang dùng; hoặc đặt riêng -1–2 cho tab tóm tắt. Không kế thừa `settings.summary_chatgpt_power`. |

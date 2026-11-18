@@ -113,7 +113,10 @@ class ReleaseDefaultsTests(unittest.TestCase):
 
     def test_invalid_release_values_fail_with_field_name(self):
         for section, key, value in [('settings','chat_screenshot','false'), ('realtime_popup','font_size',0),
-                                    ('realtime_chat','interval',2), ('research','tab_mode','both'),
+                                    ('realtime_chat','interval',2),
+                                    ('realtime_chat','upload_timeout_seconds',0),
+                                    ('realtime_chat','upload_timeout_seconds',1801),
+                                    ('research','tab_mode','both'),
                                     ('web','theme','blue')]:
             with self.subTest(section=section, key=key):
                 data = json.loads(json.dumps(self.document))

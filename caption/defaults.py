@@ -14,7 +14,7 @@ def validate(data):
     from .settings import Settings
     schemas = {
         'settings': get_type_hints(Settings),
-        'realtime_chat': dict(interval=int, prompt=(str, type(None)), power=(int, type(None)),
+        'realtime_chat': dict(interval=int, upload_timeout_seconds=int, prompt=(str, type(None)), power=(int, type(None)),
                              summary_power=(int, type(None)), screenshot=(bool, type(None)),
                              actions_prompt=str, summary_prompt=str),
         'research': dict(prompt=(str, type(None)), power=(int, type(None)),
@@ -70,6 +70,7 @@ def validate(data):
     between('settings', 'overlay_lines', 1, 10)
     between('settings', 'overlay_alpha', .1, 1)
     between('realtime_chat', 'interval', 5, 3600)
+    between('realtime_chat', 'upload_timeout_seconds', 30, 1800)
     for key in ('power', 'summary_power'):
         between('realtime_chat', key, -1, 2)
     for key in ('actions_prompt', 'summary_prompt'):

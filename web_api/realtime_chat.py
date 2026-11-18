@@ -109,7 +109,8 @@ class RealtimeChat:
             prompt=s.chat_prompt, power=s.chat_chatgpt_power, summary_power=None, max_lines=0,
             attach_transcript=True, attach_history=False,
             screenshot=s.chat_screenshot, new_chat=False)
-        config.update({k: v for k, v in defaults.get('realtime_chat').items() if v is not None})
+        config.update({k: v for k, v in defaults.get('realtime_chat').items()
+                       if v is not None and k != 'upload_timeout_seconds'})
         return config
 
     def config(self, cid, preferences):
@@ -336,6 +337,7 @@ class RealtimeChat:
             answer = chatgpt.ask(prompt, attachments, lambda value: self.status(cid, lane, detail=value),
                 selected_tab=config['selected_tab'] if lane == 'actions' else config['summary_tab'],
                 new_chat=fresh, power=None if power < 0 else power, cancel_event=cancel,
+                upload_timeout_s=defaults.get('realtime_chat', 'upload_timeout_seconds'),
                 on_sent=lambda: self.store.update(eid, 'working', detail='ChatGPT đã nhận transcript, đang chờ phản hồi.', cursor=cursor, lane=lane),
                 on_partial=lambda value: self.status(cid, lane, partial=value),
                 on_response_source=response_source.update)

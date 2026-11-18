@@ -57,6 +57,7 @@
     "translation_device": "cpu"
   },
   "realtime_chat": {
+    "upload_timeout_seconds": 600,
     "interval": 30,
     "prompt": null,
     "power": null,

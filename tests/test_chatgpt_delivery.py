@@ -73,3 +73,17 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(chatgpt.ChatGPTContextFull, 'Context window full'):
             self.ask()
         self.ack.assert_called_once_with()
+
+    def test_attachment_and_send_wait_share_one_upload_budget(self):
+        from pathlib import Path
+        now = [0]
+        def chips_ready(*args, **kwargs):
+            now[0] = 380
+        with patch.object(chatgpt.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(chatgpt, '_wait_attachments_visible', side_effect=chips_ready) as chips, \
+                patch.object(chatgpt, '_wait_send_enabled', return_value=self.send) as ready:
+            self.ask(file_path=Path('image.png'), upload_timeout_s=600)
+        self.assertEqual(chips.call_args.args[2], 600)
+        self.assertEqual(ready.call_args.args[1], 220)
+        self.send.click.assert_called_once()
+        self.ack.assert_called_once()

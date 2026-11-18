@@ -658,13 +658,16 @@ def _clear_attachments(form) -> int:
     return removed
 
 
-def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, cancel_event=None) -> None:
+def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, cancel_event=None,
+                              on_wait=None) -> None:
     """Do not send until every selected file appears in the visible composer's chips."""
     expected = {path.name for path in attachments}
     deadline = time.monotonic() + timeout_s
     remove_buttons = form.locator("button[aria-label^='Remove ']")
     while time.monotonic() < deadline:
         _check_cancel(cancel_event)
+        if on_wait:
+            on_wait()
         try:
             labels = remove_buttons.evaluate_all(
                 "buttons => buttons.map(button => button.getAttribute('aria-label') || '')"
@@ -681,7 +684,7 @@ def _wait_attachments_visible(form, attachments: list[Path], timeout_s: float, c
     )
 
 
-def _wait_send_enabled(scope, timeout_s: float, cancel_event=None, page=None):
+def _wait_send_enabled(scope, timeout_s: float, cancel_event=None, page=None, on_wait=None):
     """The send button stays disabled until the attachment has finished uploading."""
     deadline = time.monotonic() + timeout_s
     button = _visible(scope, SEND_BUTTON)
@@ -689,6 +692,8 @@ def _wait_send_enabled(scope, timeout_s: float, cancel_event=None, page=None):
         _check_cancel(cancel_event)
         if page is not None:
             _check_context_full(page)
+        if on_wait:
+            on_wait()
         try:
             if button.is_visible() and button.is_enabled():
                 return button
@@ -696,9 +701,22 @@ def _wait_send_enabled(scope, timeout_s: float, cancel_event=None, page=None):
             pass
         time.sleep(0.5)
     raise ChatGPTError(
-        "ChatGPT's send button never became available — the file upload may have failed. "
-        "Check the ChatGPT tab."
+        'Đã hết thời gian chờ ChatGPT sẵn sàng gửi; file/ảnh có thể vẫn đang xử lý. '
+        'Chưa bấm gửi. Kiểm tra tab ChatGPT rồi thử lại.'
     )
+
+
+def _upload_progress(on_status, started, timeout_s):
+    next_update = started
+
+    def report():
+        nonlocal next_update
+        now = time.monotonic()
+        if now >= next_update:
+            next_update = now + 5
+            on_status(f'Đang chờ ChatGPT xử lý file/ảnh và sẵn sàng gửi: '
+                      f'{int(now - started)}/{int(timeout_s)} giây. Có thể bấm Stop để hủy.')
+    return report
 
 
 # ---------------------------------------------------------------- reading answers
@@ -939,6 +957,7 @@ def ask(
     on_response_tab: Callable[[str], None] | None = None,
     on_response_source: Callable[[dict], None] | None = None,
     on_sent: Callable[[], None] | None = None,
+    upload_timeout_s: float = UPLOAD_TIMEOUT_S,
 ) -> str:
     """Send ``prompt`` (optionally with one or more files attached) and return the answer (markdown).
 
@@ -953,6 +972,9 @@ def ask(
     created if none exists. With ``dry_run`` everything is prepared but nothing is sent.
     """
     from playwright.sync_api import sync_playwright
+
+    if not 1 <= upload_timeout_s <= 1800:
+        raise ChatGPTError('Invalid ChatGPT upload timeout.')
 
     with sync_playwright() as p:
         if cancel_event and cancel_event.is_set():
@@ -996,6 +1018,8 @@ def ask(
                 on_status(f"Power set to {_set_power(page, power)}")
 
             attachments = [file_path] if isinstance(file_path, Path) else list(file_path or [])
+            upload_deadline = None
+            upload_progress = None
             if _clear_attachments(composer_form):
                 log.info("Removed leftover attachments from the ChatGPT composer")
             if attachments:
@@ -1004,12 +1028,18 @@ def ask(
                 if file_input.count() == 0:
                     raise ChatGPTError("Could not find ChatGPT's file upload input (the page layout may have changed).")
                 file_input.set_input_files([str(p) for p in attachments])
-                _wait_attachments_visible(composer_form, attachments, UPLOAD_TIMEOUT_S, cancel_event)
+                started = time.monotonic()
+                upload_deadline = started + upload_timeout_s
+                upload_progress = _upload_progress(on_status, started, upload_timeout_s)
+                _wait_attachments_visible(composer_form, attachments, upload_timeout_s, cancel_event,
+                                          on_wait=upload_progress)
 
             _check_cancel(cancel_event)
             _check_context_full(page)
             _fill_composer(page, composer, prompt, cancel_event)
-            send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S, cancel_event, page=page)
+            remaining = max(0, upload_deadline - time.monotonic()) if upload_deadline is not None else UPLOAD_TIMEOUT_S
+            send = _wait_send_enabled(composer_form, remaining, cancel_event, page=page,
+                                      on_wait=upload_progress)
             if dry_run:
                 on_status("Dry run: message prepared, not sent")
                 return ""
