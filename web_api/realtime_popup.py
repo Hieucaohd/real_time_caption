@@ -108,6 +108,8 @@ class RealtimePopups:
         self.windows = {}
         with service.store._connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS realtime_popup_preferences (id INTEGER PRIMARY KEY CHECK(id=1), opacity INTEGER NOT NULL)')
+            if 'font_size' not in {row['name'] for row in db.execute('PRAGMA table_info(realtime_popup_preferences)')}:
+                db.execute('ALTER TABLE realtime_popup_preferences ADD COLUMN font_size INTEGER NOT NULL DEFAULT 16')
         self.closed = threading.Event()
         self.thread = threading.Thread(target=self.maintain, name='realtime-popup-windows', daemon=True)
         self.thread.start()
@@ -130,6 +132,18 @@ class RealtimePopups:
             row = db.execute('SELECT opacity FROM realtime_popup_preferences WHERE id=1').fetchone()
         return row['opacity'] if row else 100
 
+    def font_size(self):
+        with self.service.store._connect() as db:
+            row = db.execute('SELECT font_size FROM realtime_popup_preferences WHERE id=1').fetchone()
+        return row['font_size'] if row else 16
+
+    def set_font_size(self, cid, value):
+        self.service.conversation(cid)
+        with self.lock:
+            with self.service.store._connect() as db:
+                db.execute('INSERT INTO realtime_popup_preferences(id,opacity,font_size) VALUES(1,100,?) ON CONFLICT(id) DO UPDATE SET font_size=excluded.font_size', (value,))
+            return self.state(cid)
+
     def _window(self, cid):
         item = self.windows.get(cid)
         if item and self.native.valid(item['hwnd'], item['owner']):
@@ -140,7 +154,7 @@ class RealtimePopups:
     def state(self, cid):
         conversation = self.service.conversation(cid)
         with self.lock:
-            return dict(visible=bool(self._window(cid)), opacity=self.opacity(), title=conversation.title)
+            return dict(visible=bool(self._window(cid)), opacity=self.opacity(), font_size=self.font_size(), title=conversation.title)
 
     def open(self, cid, base_url, return_tab=''):
         self.service.conversation(cid)
@@ -216,7 +230,7 @@ class RealtimePopups:
                 if item:
                     self.native.configure(item['hwnd'], value)
             with self.service.store._connect() as db:
-                db.execute('INSERT INTO realtime_popup_preferences VALUES(1,?) ON CONFLICT(id) DO UPDATE SET opacity=excluded.opacity', (value,))
+                db.execute('INSERT INTO realtime_popup_preferences(id,opacity) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET opacity=excluded.opacity', (value,))
             return self.state(cid)
 
     def hide(self, cid):

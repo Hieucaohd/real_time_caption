@@ -43,6 +43,8 @@ Cài đặt (Prompt, hai mức Power, Auto screenshot, chu kỳ và nút lưu) b
 
 Cài đặt, mốc transcript, gợi ý, câu hỏi, câu trả lời, thông tin nguồn ChatGPT và tóm tắt được lưu trong SQLite (`realtime_chat_settings`, `realtime_chat_events`). File đính kèm nằm trong thư mục cuộc hội thoại với đường dẫn trong database. Export/import mang theo dữ liệu này; máy nhận xóa lựa chọn tab Chrome cũ và không tự khởi chạy Chat realtime. Đóng riêng tab giao diện không dừng backend; bấm Stop để dừng theo dõi.
 
+Thanh **Cỡ chữ** trên popup cho phép chọn 12–32 px (mặc định 16 px), áp dụng ngay cho nội dung chat, tóm tắt, nút gợi ý và ô nhập. Cỡ chữ tự lưu trong `realtime_popup_preferences`, khôi phục khi mở lại; không thay đổi cỡ chữ cửa sổ chính hay độ trong suốt đã chọn.
+
 Gợi ý được yêu cầu trong khối mã JSON. Với phản hồi JSON hiển thị như văn bản thường, nút Copy của ChatGPT có thể thêm dấu xuống dòng Markdown và khoảng trắng HTML (`&#x20;`). App bỏ lớp định dạng này **bên ngoài chuỗi JSON**, giữ nguyên nội dung label/prompt, rồi kiểm tra cấu trúc và giới hạn từng gợi ý. Khi backend khởi động, các phản hồi lỗi đã lưu nhưng đọc được sẽ được khôi phục tại chỗ; không gửi lại transcript hoặc gọi thêm ChatGPT. JSON thiếu/hỏng thực sự vẫn báo lỗi; lỗi cấu trúc hoặc độ dài được thông báo riêng.
 
 ## Nguồn transcript trên web

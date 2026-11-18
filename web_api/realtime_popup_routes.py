@@ -10,6 +10,16 @@ class OpacityInput(BaseModel):
     opacity: int = Field(ge=40, le=100)
 
 
+class FontSizeInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    font_size: int = Field(ge=12, le=32)
+
+
+@router.put('/font-size')
+def font_size(cid: str, body: FontSizeInput, request: Request):
+    return request.app.state.service.realtime_popups.set_font_size(cid, body.font_size)
+
+
 @router.get('')
 def state(cid: str, request: Request):
     service = request.app.state.service

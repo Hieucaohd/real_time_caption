@@ -18,12 +18,17 @@ class RealtimePopupTests(unittest.TestCase):
         base = f'/api/conversations/{self.cid}/realtime-popup'
         original = self.service.realtime_chat.state(self.cid)['config']
         self.assertEqual(self.client.get(base).json()['opacity'], 100)
+        self.assertEqual(self.client.get(base).json()['font_size'], 16)
+        self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':24}).status_code, 200)
         self.assertEqual(self.client.put(base, json={'opacity':65}).status_code, 403)
         for value in (0, 39, 101, '65'):
             self.assertEqual(self.client.put(base, headers=self.headers, json={'opacity':value}).status_code, 422)
         response = self.client.put(base, headers=self.headers, json={'opacity':65})
         self.assertEqual(response.status_code, 200)
         native.configure.assert_called_once_with(123, 65)
+        self.assertEqual(popup.opacity(), 65)
+        self.assertEqual(popup.font_size(), 24)
+        self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':20}).status_code, 200)
         self.assertEqual(popup.opacity(), 65)
         with self.service.store._connect() as db:
             self.assertEqual(db.execute('SELECT opacity FROM realtime_popup_preferences').fetchone()[0], 65)
@@ -59,6 +64,27 @@ class RealtimePopupTests(unittest.TestCase):
         self.assertEqual(self.client.get('/').headers['x-frame-options'], 'DENY')
         self.assertEqual(self.client.get('/?realtime_popup=' + self.cid).headers['x-frame-options'], 'SAMEORIGIN')
         self.assertEqual(self.client.get('/api/bootstrap').headers['x-frame-options'], 'DENY')
+
+    def test_font_size_validation_and_persistence_without_native_window(self):
+        base = f'/api/conversations/{self.cid}/realtime-popup'
+        self.assertEqual(self.client.put(base + '/font-size', json={'font_size':24}).status_code, 403)
+        for value in (0, 11, 33, '24', 20.5):
+            self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':value}).status_code, 422)
+        self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':32}).status_code, 200)
+        self.assertEqual(self.client.get(base).json()['font_size'], 32)
+        with self.service.store._connect() as db:
+            self.assertEqual(db.execute('SELECT font_size,opacity FROM realtime_popup_preferences').fetchone()[:], (32,100))
+
+    def test_legacy_popup_preferences_keep_opacity_during_migration(self):
+        from web_api.realtime_popup import RealtimePopups
+        self.service.realtime_popups.close()
+        with self.service.store._connect() as db:
+            db.execute('DROP TABLE realtime_popup_preferences')
+            db.execute('CREATE TABLE realtime_popup_preferences(id INTEGER PRIMARY KEY, opacity INTEGER NOT NULL)')
+            db.execute('INSERT INTO realtime_popup_preferences VALUES(1,65)')
+        self.service.realtime_popups = RealtimePopups(self.service)
+        state = self.service.realtime_popups.state(self.cid)
+        self.assertEqual((state['font_size'], state['opacity']), (16,65))
 
 
 if __name__ == '__main__':

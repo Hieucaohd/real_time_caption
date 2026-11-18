@@ -71,8 +71,16 @@ def main():
             popup.get_by_role('button', name='Start', exact=True).click()
             expect(popup.get_by_role('button', name='Explain', exact=True)).to_be_visible(timeout=10000)
             expect(popup.locator('.rt-summary')).to_have_count(1)
+            font = popup.get_by_label('Cỡ chữ popup', exact=True)
+            font.fill('24'); font.dispatch_event('input')
+            expect(popup.locator('.rt-summary .response-markdown')).to_have_css('font-size', '24px')
+            expect(popup.get_by_role('button', name='Explain', exact=True)).to_have_css('font-size', '24px')
+            expect(popup.get_by_label('Câu hỏi Chat realtime', exact=True)).to_have_css('font-size', '24px')
             popup.get_by_role('button', name='Explain', exact=True).click()
             expect(popup.locator('.chat-scroll .message.bot')).to_contain_text('Answer to the question')
+            expect(popup.locator('.chat-scroll .response-markdown').last).to_have_css('font-size', '24px')
+            assert windows.font_size() == 24
+            assert windows.opacity() == 65
             popup.get_by_label('Câu hỏi Chat realtime', exact=True).fill('Question from popup')
             popup.get_by_role('button', name='Send', exact=True).click()
             expect(popup.locator('.chat-scroll .message.bot')).to_have_count(2)
@@ -89,6 +97,13 @@ def main():
             with popup_window.expect_event('close'):
                 popup.get_by_role('button', name='Đóng popup Chat realtime', exact=True).click()
             assert fixture.rt.state(fixture.cid)['running'], 'Closing popup stopped realtime'
+            with context.expect_page() as reopened:
+                page.get_by_role('button', name='Popup Chat realtime', exact=True).click()
+            restored = reopened.value.frame_locator('iframe')
+            expect(restored.get_by_label('Cỡ chữ popup', exact=True)).to_have_value('24')
+            expect(restored.locator('.rt-summary .response-markdown')).to_have_css('font-size', '24px')
+            with reopened.value.expect_event('close'):
+                restored.get_by_role('button', name='Đóng popup Chat realtime', exact=True).click()
             page.locator('.realtime-chat').get_by_role('button', name='Stop', exact=True).click()
             expect(page.locator('.realtime-chat').get_by_role('button', name='Start', exact=True)).to_be_enabled()
             assert not errors, errors
