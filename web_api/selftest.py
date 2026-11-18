@@ -6,6 +6,23 @@ from pathlib import Path
 from caption import paths
 
 
+def check_server_protocol():
+    """Resolve the same WebSocket backend as web_main, across Uvicorn versions."""
+    import uvicorn
+
+    async def probe(scope, receive, send):
+        pass
+
+    # Uvicorn moved the SansIO implementation module. Let its public Config
+    # resolve the installed version's path, just as the actual server does.
+    config = uvicorn.Config(probe, loop='asyncio', http='h11',
+                            ws='websockets-sansio', log_config=None)
+    config.load()
+    if config.ws_protocol_class is None:
+        raise RuntimeError('Uvicorn WebSocket backend was not loaded')
+    return config.ws_protocol_class
+
+
 def run():
     report = {'ok': False, 'checks': [], 'data_dir': str(paths.DATA_DIR)}
     try:
@@ -21,7 +38,8 @@ def run():
         import uiautomation
         import tkinter
         from . import overlay, screen
-        from uvicorn.protocols.websockets.websockets_sansio import WebSocketsSansIOProtocol
+        check_server_protocol()
+        report['checks'].append('uvicorn-websocket-backend')
 
         driver = Path(compute_driver_executable()[0])
         assert driver.is_file(), f'Missing Playwright driver: {driver}'
