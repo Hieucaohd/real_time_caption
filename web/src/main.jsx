@@ -10,6 +10,7 @@ import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import TranslationReading from "./TranslationReading";
 import RealtimeChat from "./RealtimeChat";
+import RealtimePopup from "./RealtimePopup";
 import useGoogleTranslationStream from "./useGoogleTranslationStream";
 import RecopyAnswer from "./RecopyAnswer";
 import ConversationNameModal from "./ConversationNameModal";
@@ -1864,4 +1865,6 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const realtimePopupCid = new URLSearchParams(window.location.search).get('realtime_popup');
+createRoot(document.getElementById("root")).render(realtimePopupCid
+  ? <RealtimePopup cid={realtimePopupCid} api={api} post={post} /> : <App />);

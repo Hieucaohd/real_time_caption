@@ -34,6 +34,7 @@ from .livecaptions_routes import router as livecaptions_router
 from .translation_stream import router as translation_stream_router
 from .realtime_chat_routes import router as realtime_chat_router
 from .realtime_prompt_routes import router as realtime_prompt_router
+from .realtime_popup_routes import router as realtime_popup_router
 
 ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
@@ -93,6 +94,7 @@ def create_app(service=None):
     app.include_router(translation_stream_router)
     app.include_router(realtime_chat_router)
     app.include_router(realtime_prompt_router)
+    app.include_router(realtime_popup_router)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -105,7 +107,8 @@ def create_app(service=None):
         response = await call_next(request)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Cache-Control'] = 'no-store' if request.url.path.startswith('/api/') else 'no-cache'
-        response.headers['X-Frame-Options'] = 'DENY'
+        # Only the dedicated popup view can be embedded by our same-origin PiP.
+        response.headers['X-Frame-Options'] = ('SAMEORIGIN' if request.url.path == '/' and request.query_params.get('realtime_popup') else 'DENY')
         return response
 
     @app.exception_handler(ValueError)

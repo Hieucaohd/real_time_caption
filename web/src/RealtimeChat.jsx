@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Camera, Copy, MessageSquare, Paperclip, Play, Save, Send, Settings2, Square, ArrowUp, ArrowDown } from "lucide-react";
+import { Camera, Copy, MessageSquare, Paperclip, Play, Save, Send, Settings2, Square, ArrowUp, ArrowDown, PanelTop } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import RealtimePrompts from "./RealtimePrompts";
@@ -11,7 +11,7 @@ const stamp = value => new Date(value).toLocaleTimeString("vi-VN", { hour: "2-di
 const attachments = files => (files || []).map(path => ({ path, name: path.split(/[\\/]/).at(-1) }));
 const powerLabel = power => ["Giữ nguyên", "Instant", "Medium", "High"][(power ?? -1) + 1];
 
-export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }) {
+export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, popup = false }) {
   const [state, setState] = useState(null), [config, setConfig] = useState(null);
   const [busy, setBusy] = useState(false), [uploading, setUploading] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -25,7 +25,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
     const result = await api(base);
     if (!alive.current) return;
     setState(result);
-    if (!initialized.current) { initialized.current = true; setConfig(result.config); }
+    if (popup || !initialized.current) { initialized.current = true; setConfig(result.config); }
   }
   useEffect(() => {
     alive.current = true;
@@ -52,7 +52,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
   useLayoutEffect(() => {
     const area = input.current;
     if (area) { area.style.height = "auto"; area.style.height = Math.min(area.scrollHeight, 180) + "px"; }
-  }, [message]);
+  }, [message, !!config]);
   async function action(fn) {
     if (sending.current) return;
     sending.current = true; setBusy(true); setError(""); setNotice("");
@@ -90,7 +90,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
   function send(actionId = "") {
     if (uploading || (!actionId && !message.trim())) return;
     action(async () => {
-      if (!settingsLocked) await save();
+      if (!popup && !settingsLocked) await save();
       await post(base + "/messages", { message, action_id: actionId, files: files.map(file => file.path) });
       if (!actionId) setMessage("");
       setFiles([]); setNotice("");
@@ -107,13 +107,18 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
         const result = await api(base + '/history?before=' + events[0].id);
         setOlder([...result, ...events]); setMoreHistory(result.length === 200);
       })}>Tải lịch sử trước</button>}
-      <button disabled={settingsLocked} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>
+      {!popup && <button disabled={busy} onClick={() => action(() => post(`/conversations/${cid}/realtime-popup`))}><PanelTop size={16} /> Popup Chat realtime</button>}
+      {!popup && <button disabled={settingsLocked} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>}
       <button className={active ? "danger" : "primary"} disabled={busy} onClick={() => action(async () => {
         if (active) await post(base + "/stop");
-        else { const result = await post(base + "/start", config); setConfig(result.config); setState(result); }
+        else {
+          // The popup always starts with the latest saved settings from the main UI.
+          const current = popup ? (await api(base)).config : config;
+          const result = await post(base + "/start", current); setConfig(result.config); setState(result);
+        }
       })}>{active ? <Square size={16} /> : <Play size={16} />}{active ? "Stop" : "Start"}</button>
     </div>
-    <details className="chat-settings">
+    {!popup && <details className="chat-settings">
       <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
         prompts={prompts} managedContext
@@ -124,7 +129,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
       <RealtimePrompts config={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
         api={api} post={post} disabled={settingsLocked} />
       <p className="muted rt-help">Power gợi ý / hỏi đáp và Power tóm tắt áp dụng riêng cho từng tab. “Giữ nguyên” không đổi mức của tab tương ứng. Stop rồi Start dùng lại hai tab cũ nếu còn mở; chưa có transcript mới thì không gửi lượt tự động. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
-    </details>
+    </details>}
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}
     {notice && <p className="rt-notice" role="status">{notice}</p>}
     <div className="rt-columns">
@@ -170,7 +175,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
         </div>
       </section>
     </div>
-    {editingPrompt && <PromptModal kind="chat" selected={config.prompt} api={api} post={post} close={() => setEditingPrompt(false)}
+    {!popup && editingPrompt && <PromptModal kind="chat" selected={config.prompt} api={api} post={post} close={() => setEditingPrompt(false)}
       done={async name => { setConfig(old => ({ ...old, prompt: name })); setEditingPrompt(false); await refreshPrompts(); }} />}
   </div>;
 }
