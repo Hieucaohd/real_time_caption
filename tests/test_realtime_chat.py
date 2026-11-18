@@ -385,40 +385,6 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(state['settings_locked'])
         self.assertEqual(self.calls, [])
 
-    def test_stop_during_second_tab_cooldown_keeps_first_tab_and_does_not_start(self):
-        self.config.update(selected_tab='', summary_tab='')
-        self.rt.store.save(self.cid, self.config)
-        waiting = threading.Event()
-        result = []
-        count = 0
-
-        def open_tab(*, return_tab='', cancel_event=None):
-            nonlocal count
-            count += 1
-            if count == 1:
-                return tab('actions-tab')
-            waiting.set()
-            self.assertTrue(cancel_event.wait(4))
-            raise ChatGPTCancelled('Stopped during cooldown')
-
-        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', side_effect=open_tab):
-            thread = threading.Thread(target=lambda: result.append(self.post(self.base + '/start', self.config)))
-            thread.start()
-            try:
-                self.assertTrue(waiting.wait(3))
-                self.assertEqual(self.post(self.base + '/stop').status_code, 200)
-            finally:
-                self.rt.prepare_cancel.set()
-                thread.join(timeout=5)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(result[0].status_code, 200)
-        state = self.rt.state(self.cid)
-        self.assertFalse(state['running'])
-        self.assertFalse(state['settings_locked'])
-        self.assertEqual(state['config']['selected_tab'], 'actions-tab')
-        self.assertEqual(state['config']['summary_tab'], '')
-        self.assertEqual(self.calls, [])
-
     def test_bad_json_pauses_lane_without_resending_received_delta(self):
         normal = self.ask
         with patch('web_api.realtime_chat.chatgpt.ask', side_effect=lambda *a, **kw: 'bad JSON' if kw['selected_tab']=='actions-tab' else normal(*a, **kw)):

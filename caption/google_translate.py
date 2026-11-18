@@ -121,7 +121,7 @@ def _choose_tab(browser, source="en", target="vi", cancel=None, *, stream_key=''
         if not browser.contexts:
             raise TranslationError("Chrome has no available window. Reopen the app or launch_chrome.bat and Retry.")
         _check_cancel(cancel)
-        chosen = _open_background_tab(browser, chatgpt_tab=False)
+        chosen = _open_background_tab(browser)
         try:
             chosen.goto('https://translate.google.com/?' + urlencode(_translation_params(source, target)),
                         wait_until='load', timeout=30_000)

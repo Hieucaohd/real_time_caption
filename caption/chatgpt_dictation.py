@@ -8,8 +8,9 @@ import threading
 import time
 import uuid
 
-from . import chatgpt
+from . import chatgpt, paths
 from .dictation_text import DictationText
+from .shared_access import ProcessLock
 from .transcriber import Event
 
 log = logging.getLogger(__name__)
@@ -83,15 +84,12 @@ class ChatGPTDictationReader:
 
     def _open_page(self, browser):
         self._check()
-        try:
-            self.page = page = chatgpt._open_background_tab(browser, cancel_event=self._stop,
-                                                          on_status=lambda text: self._emit(Event('status', text)))
-        except chatgpt.ChatGPTCancelled:
-            raise Interrupted() from None
-        key = chatgpt.DICTATION_TAB_PREFIX + uuid.uuid4().hex
-        self.tab_key = key
-        page.add_init_script('window.name = ' + json.dumps(key) + ';')
-        page.evaluate('(key) => window.name = key', key)
+        with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock', timeout=2):
+            self.page = page = chatgpt._open_background_tab(browser)
+            key = chatgpt.DICTATION_TAB_PREFIX + uuid.uuid4().hex
+            self.tab_key = key
+            page.add_init_script('window.name = ' + json.dumps(key) + ';')
+            page.evaluate('(key) => window.name = key', key)
         page.set_default_timeout(2000)
         from playwright.sync_api import TimeoutError
         try:

@@ -1,8 +1,9 @@
 """Copy an existing answer again; never submit a prompt or regenerate an answer."""
 import logging
-from . import chatgpt
+from . import chatgpt, paths
 from .chatgpt_branch import _find_response_turn, source_conversation_id
 from .chatgpt_source import CONVERSATION_SNAPSHOT, conversation_path, is_answer, response_message_at_position, response_position
+from .shared_access import ProcessLock
 
 
 def latest_answer_for_question(snapshot, position):
@@ -25,7 +26,8 @@ def _recopy_in_browser(browser, url, position, return_tab=''):
     if not browser.contexts:
         raise chatgpt.ChatGPTError('Chrome chưa có cửa sổ để đọc lại hội thoại ChatGPT.')
     with chatgpt._return_to_web_tab(browser, return_tab):
-        page = chatgpt._open_background_tab(browser)
+        with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'):
+            page = chatgpt._open_background_tab(browser)
         try:
             page.goto(url, wait_until='domcontentloaded', timeout=30_000)
             page.bring_to_front()

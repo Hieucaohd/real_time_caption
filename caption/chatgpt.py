@@ -20,7 +20,8 @@ import re
 import threading
 import time
 import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
+from functools import wraps
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -300,7 +301,7 @@ def clean_answer(text: str) -> str:
 # --------------------------------------------------------------------- tab helpers
 
 
-def _dedicated_tab(browser, tab_name: str, cancel_event=None, on_status=None):
+def _dedicated_tab(browser, tab_name: str):
     """Reuse our dedicated tab if it is still open, otherwise open a new one.
 
     Returns ``(page, created)``.
@@ -318,10 +319,10 @@ def _dedicated_tab(browser, tab_name: str, cancel_event=None, on_status=None):
                 continue
     if not browser.contexts:
         raise ChatGPTError("Chrome has no open window to add a tab to.")
-    return _open_background_tab(browser, cancel_event=cancel_event, on_status=on_status), True
+    return _open_background_tab(browser), True
 
 
-def _current_chatgpt_tab(browser, cancel_event=None, on_status=None):
+def _current_chatgpt_tab(browser):
     """Use the user's current ordinary ChatGPT tab, without taking over Voca's tab.
 
     ``document.hasFocus()`` identifies the active tab in the focused Chrome window;
@@ -346,7 +347,7 @@ def _current_chatgpt_tab(browser, cancel_event=None, on_status=None):
         return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3], False
     if not browser.contexts:
         raise ChatGPTError("Chrome has no open window to add a tab to.")
-    return _open_background_tab(browser, cancel_event=cancel_event, on_status=on_status), True
+    return _open_background_tab(browser), True
 
 
 def _selected_chatgpt_tab(browser, tab_key: str):
@@ -416,38 +417,18 @@ def _list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
         ]
 
 
-def _open_background_tab(browser, *, chatgpt_tab=True, cancel_event=None, on_status=None):
-    if not chatgpt_tab:
-        return _create_background_tab(browser)
-    from .chatgpt_tab_gate import opening
-    with opening(browser, cancel_event, on_status) as ticket:
-        page = _create_background_tab(browser)
-        ticket.opened(page)
-        return page
-
-
-def _create_background_tab(browser):
+def _open_background_tab(browser):
     """Open a tab without switching Chrome to it (Playwright's new_page() activates the tab)."""
     context = browser.contexts[0]
-    creation_requested = False
-    session = None
     try:
         session = browser.new_browser_cdp_session()
         with context.expect_page(timeout=10_000) as new_page:
-            creation_requested = True
             session.send("Target.createTarget", {"url": "about:blank", "background": True})
+        session.detach()
         return new_page.value
     except Exception:  # noqa: BLE001
-        if creation_requested:
-            raise ChatGPTError('Đã gửi yêu cầu mở tab nhưng chưa xác nhận được tab mới. Hãy kiểm tra Chrome.') from None
         log.warning("Could not open a background tab; falling back to a normal one", exc_info=True)
         return context.new_page()
-    finally:
-        if session is not None:
-            try:
-                session.detach()
-            except Exception:
-                log.debug('Browser session already detached', exc_info=True)
 
 
 @contextmanager
@@ -480,16 +461,16 @@ def _return_to_web_tab(browser, tab_id):
                 log.warning('Could not return to the calling app tab', exc_info=True)
 
 
-def _open_new_chatgpt_tab(browser, return_tab='', cancel_event=None, on_status=None):
+def _open_new_chatgpt_tab(browser, return_tab=''):
     with _return_to_web_tab(browser, return_tab) as focus:
-        tab = _open_new_chatgpt_tab_impl(browser, cancel_event, on_status)
+        tab = _open_new_chatgpt_tab_impl(browser)
     return replace(tab, focused=False) if focus['restored'] else tab
 
 
-def _open_new_chatgpt_tab_impl(browser, cancel_event=None, on_status=None):
+def _open_new_chatgpt_tab_impl(browser):
     if not browser.contexts:
         raise ChatGPTError('Chrome chưa có cửa sổ để mở tab ChatGPT.')
-    page = _open_background_tab(browser, cancel_event=cancel_event, on_status=on_status)
+    page = _open_background_tab(browser)
     try:
         page.goto(CHATGPT_URL, wait_until='domcontentloaded', timeout=30_000)
         with _TAB_SCAN_LOCK:
@@ -979,7 +960,18 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
 # --------------------------------------------------------------------------- main
 
 
-def open_new_chatgpt_tab(return_tab='', cancel_event=None, on_status=None):
+def _shared_request(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        from .paths import CACHE_DIR
+        from .shared_access import ProcessLock
+        with ProcessLock(CACHE_DIR / 'chatgpt-request.lock'):
+            return function(*args, **kwargs)
+    return run
+
+
+@_shared_request
+def open_new_chatgpt_tab(return_tab=''):
     """Open a fresh ordinary ChatGPT tab in the same Chrome used by the app."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -987,23 +979,22 @@ def open_new_chatgpt_tab(return_tab='', cancel_event=None, on_status=None):
             browser = p.chromium.connect_over_cdp(CDP_URL, timeout=10_000)
         except Exception as exc:
             raise ChatGPTError('Không kết nối được Chrome 9222. Hãy chạy launch_chrome.bat.') from exc
-        return _open_new_chatgpt_tab(browser, return_tab, cancel_event, on_status)
+        return _open_new_chatgpt_tab(browser, return_tab)
 
 
 @contextmanager
-def _request_page(browser, selected_tab, use_current_tab, tab_name, cancel_event=None, on_status=None):
+def _request_page(browser, selected_tab, use_current_tab, tab_name):
     """Reserve the real Chrome target across native/web workers, not all of Chrome."""
     from .paths import CACHE_DIR
     from .shared_access import ProcessLock
-    # Named selection/creation stays atomic. An explicit target can continue
-    # chatting while another worker waits to open a new tab.
-    with (nullcontext() if selected_tab else ProcessLock(CACHE_DIR / 'chatgpt-request.lock')):
+    # Selection/creation must be atomic; release the global lock before waiting for an answer.
+    with ProcessLock(CACHE_DIR / 'chatgpt-request.lock'):
         if selected_tab:
             page, created = _selected_chatgpt_tab(browser, selected_tab)
         elif use_current_tab:
-            page, created = _current_chatgpt_tab(browser, cancel_event, on_status)
+            page, created = _current_chatgpt_tab(browser)
         else:
-            page, created = _dedicated_tab(browser, tab_name, cancel_event, on_status)
+            page, created = _dedicated_tab(browser, tab_name)
         session = page.context.new_cdp_session(page)
         try:
             target = session.send('Target.getTargetInfo')['targetInfo']['targetId']
@@ -1066,7 +1057,7 @@ def ask(
                 "Start Chrome with launch_chrome.bat (remote debugging on port 9222) and try again."
             ) from exc
 
-        with _request_page(browser, selected_tab, use_current_tab, tab_name, cancel_event, on_status) as (page, created):
+        with _request_page(browser, selected_tab, use_current_tab, tab_name) as (page, created):
             _check_cancel(cancel_event)
             if new_chat or created:
                 on_status("Opening a new ChatGPT chat…")

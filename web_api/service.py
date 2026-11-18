@@ -61,9 +61,6 @@ class Service:
         self.research = Research(self)
         from .realtime_chat import RealtimeChat
         self.realtime_chat = RealtimeChat(self)
-        from caption.chatgpt_tab_gate import TabObserver
-        self.chatgpt_tab_observer = TabObserver()
-        self.chatgpt_tab_observer.start()
         from .realtime_popup import RealtimePopups
         self.realtime_popups = RealtimePopups(self)
         from caption.livecaptions_settings import PreferenceRestorer
@@ -370,8 +367,7 @@ class Service:
                         raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
                     if prepared.get('create_new_tab'):
                         self.update_job(job, detail='Đang mở tab ChatGPT mới…')
-                        tab = chatgpt.open_new_chatgpt_tab(return_tab=payload.get('_return_tab', ''), cancel_event=cancel,
-                                                        on_status=lambda text: self.update_job(job, detail=text))
+                        tab = chatgpt.open_new_chatgpt_tab(return_tab=payload.get('_return_tab', ''))
                         # Keep this target for a manual retry; never navigate the
                         # previously selected tab or create another on every retry.
                         prepared.update(selected_tab=tab.key, new_chat=False, create_new_tab=False)
@@ -542,7 +538,6 @@ class Service:
         return [asdict(w) for w in values]
 
     def close(self):
-        self.chatgpt_tab_observer.close()
         self.realtime_popups.close()
         self.realtime_chat.close()
         self.captions_preferences.close()

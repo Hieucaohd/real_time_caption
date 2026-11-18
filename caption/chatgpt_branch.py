@@ -155,51 +155,48 @@ def _branch_in_browser_impl(browser, url, position):
 
         # The native menu can open a popup; listen on the context, not just the helper tab.
         page.context.on('response', listener)
-        from .chatgpt_tab_gate import opening as tab_opening
-        with tab_opening(browser) as opening:
-            branch_requested = True
-            button.click(timeout=8000)
-            deadline = time.monotonic() + BRANCH_TIMEOUT
-            while not responses and time.monotonic() < deadline:
-                page.wait_for_timeout(100)
-            if not responses:
-                raise chatgpt.ChatGPTError('Chưa nhận được xác nhận tạo nhánh từ ChatGPT.')
-            response, response_page = responses[0]
-            if not response.ok:
-                raise chatgpt.ChatGPTError('ChatGPT không tạo được nhánh. Hãy kiểm tra tab mới.')
-            try:
-                conversation = response.json().get('conversation') or {}
-                new_id = conversation.get('conversation_id') or conversation.get('id')
-            except Exception:
-                # A full navigation can discard the CDP response body. In that case,
-                # only the page that received this exact successful branch response may identify the result.
-                new_id = None
-            if new_id == source_id:
-                # A branch draft may still carry the source server ID. Its confirmed local route
-                # identifies the draft; the unchanged source tab must never be selected.
-                new_id = None
-            target = None
-            while time.monotonic() < deadline:
-                after = _tab_snapshot(browser)
-                if not new_id:
-                    match = re.search(r'/c/([A-Za-z0-9_-]+)/?$', urlsplit(response_page.url).path)
-                    if match and match[1] != source_id and any(tab['page'] == response_page for tab in after.values()):
-                        new_id = match[1]
-                target = _new_branch_tab(before, before_click, after, page, new_id, response_page)
-                if target:
-                    break
-                page.wait_for_timeout(100)
-            if target is None:
-                raise chatgpt.ChatGPTError('Đã bấm tạo nhánh nhưng chưa xác định được tab chứa hội thoại mới.')
-            chatgpt._visible(target, chatgpt.COMPOSER).wait_for(state='visible', timeout=30_000)
-            with chatgpt._TAB_SCAN_LOCK:
-                key = target.evaluate('([prefix, proposed]) => { if (!window.name.startsWith(prefix)) window.name = proposed; return window.name; }',
-                                      [chatgpt.CHAT_TAB_PREFIX, chatgpt.CHAT_TAB_PREFIX + uuid.uuid4().hex])
-            opening.opened(target)
-            target.bring_to_front()
-            title = target.title().strip() or 'ChatGPT branch'
-            return asdict(chatgpt.ChromeChatGPTTab(key=key, label=f'{title} — {key.removeprefix(chatgpt.CHAT_TAB_PREFIX)[:8]}',
-                                                 title=title, url=target.url, focused=True))
+        branch_requested = True
+        button.click(timeout=8000)
+        deadline = time.monotonic() + BRANCH_TIMEOUT
+        while not responses and time.monotonic() < deadline:
+            page.wait_for_timeout(100)
+        if not responses:
+            raise chatgpt.ChatGPTError('Chưa nhận được xác nhận tạo nhánh từ ChatGPT.')
+        response, response_page = responses[0]
+        if not response.ok:
+            raise chatgpt.ChatGPTError('ChatGPT không tạo được nhánh. Hãy kiểm tra tab mới.')
+        try:
+            conversation = response.json().get('conversation') or {}
+            new_id = conversation.get('conversation_id') or conversation.get('id')
+        except Exception:
+            # A full navigation can discard the CDP response body. In that case,
+            # only the page that received this exact successful branch response may identify the result.
+            new_id = None
+        if new_id == source_id:
+            # A branch draft may still carry the source server ID. Its confirmed local route
+            # identifies the draft; the unchanged source tab must never be selected.
+            new_id = None
+        target = None
+        while time.monotonic() < deadline:
+            after = _tab_snapshot(browser)
+            if not new_id:
+                match = re.search(r'/c/([A-Za-z0-9_-]+)/?$', urlsplit(response_page.url).path)
+                if match and match[1] != source_id and any(tab['page'] == response_page for tab in after.values()):
+                    new_id = match[1]
+            target = _new_branch_tab(before, before_click, after, page, new_id, response_page)
+            if target:
+                break
+            page.wait_for_timeout(100)
+        if target is None:
+            raise chatgpt.ChatGPTError('Đã bấm tạo nhánh nhưng chưa xác định được tab chứa hội thoại mới.')
+        chatgpt._visible(target, chatgpt.COMPOSER).wait_for(state='visible', timeout=30_000)
+        with chatgpt._TAB_SCAN_LOCK:
+            key = target.evaluate('([prefix, proposed]) => { if (!window.name.startsWith(prefix)) window.name = proposed; return window.name; }',
+                                  [chatgpt.CHAT_TAB_PREFIX, chatgpt.CHAT_TAB_PREFIX + uuid.uuid4().hex])
+        target.bring_to_front()
+        title = target.title().strip() or 'ChatGPT branch'
+        return asdict(chatgpt.ChromeChatGPTTab(key=key, label=f'{title} — {key.removeprefix(chatgpt.CHAT_TAB_PREFIX)[:8]}',
+                                             title=title, url=target.url, focused=True))
     except Exception as exc:
         if not branch_requested:
             try:
@@ -217,6 +214,7 @@ def _branch_in_browser_impl(browser, url, position):
             page.context.remove_listener('response', listener)
 
 
+@chatgpt._shared_request
 def create_branch(url, position, return_tab=''):
     source_conversation_id(url, position)
     from playwright.sync_api import sync_playwright

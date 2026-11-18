@@ -102,7 +102,7 @@ class GoogleTranslateTests(unittest.TestCase):
         with patch.object(web, '_open_background_tab', return_value=created) as create:
             self.assertIs(web._choose_tab(browser, 'ja', 'zh'), created)
             self.assertIs(web._choose_tab(browser, 'ja', 'zh'), created)
-        create.assert_called_once_with(browser, chatgpt_tab=False)
+        create.assert_called_once_with(browser)
         created.goto.assert_called_once_with(
             'https://translate.google.com/?sl=ja&tl=zh-CN&op=translate&hl=en',
             wait_until='load', timeout=30_000)

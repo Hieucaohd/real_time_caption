@@ -2,17 +2,19 @@
 import uuid
 from dataclasses import asdict
 
-from . import chatgpt
+from . import chatgpt, paths
 from .chatgpt_branch import _find_response_turn, source_conversation_id
 from .chatgpt_source import CONVERSATION_SNAPSHOT, response_message_at_position
+from .shared_access import ProcessLock
 
 
 def _open_response_in_browser(browser, url, position):
     source_id = source_conversation_id(url, position)
     if not browser.contexts:
         raise chatgpt.ChatGPTError('Chrome chưa có cửa sổ để mở hội thoại ChatGPT.')
-    # The shared opening gate handles pacing without blocking existing chat requests.
-    page = chatgpt._open_background_tab(browser)
+    # Only tab creation is serialized. Reading a response must not block other tabs' work.
+    with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock'):
+        page = chatgpt._open_background_tab(browser)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30_000)
         page.bring_to_front()

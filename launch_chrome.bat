@@ -19,8 +19,6 @@ if errorlevel 1 call setup_web.bat
 if errorlevel 1 goto :web_error
 .venv\Scripts\python.exe web_main.py --ensure
 if errorlevel 1 goto :web_error
-.venv\Scripts\python.exe web_main.py --open
-if errorlevel 1 goto :web_error
 
 set CHROME="C:\Program Files\Google\Chrome\Application\chrome.exe"
 if not exist %CHROME% set CHROME="C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
@@ -34,7 +32,7 @@ echo Dang mo Chrome (port %PORT%, profile: %PROFILE_DIR%)...
   --user-data-dir="%PROFILE_DIR%" ^
   --no-first-run ^
   --no-default-browser-check ^
-  https://gemini.google.com https://notebooklm.google.com https://claude.ai https://translate.google.com.vn
+  http://127.0.0.1:8765 https://chatgpt.com https://gemini.google.com https://notebooklm.google.com https://claude.ai https://translate.google.com.vn
 exit /b 0
 
 :web_error
