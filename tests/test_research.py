@@ -45,20 +45,21 @@ class ResearchTests(unittest.TestCase):
         original = self.store.get(self.cid, queued['id'])['config']
         chat_settings = Settings.load()
         url = '/api/research/defaults'
-        self.assertEqual(self.client.get(url).json(), {})
+        defaults = self.client.get(url).json()
+        self.assertEqual(defaults['ancestor_depth'], 0)
         config = dict(selected_tab='saved-tab', prompt='v1 - default', power=0,
                       attach_transcript=True, attach_history=True, max_lines=17,
                       screenshot=False, new_chat=False)
         response = self.client.put(url, json=config, headers=self.headers)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), config)
-        self.assertEqual(self.client.get(url).json(), config)
-        self.assertEqual(ResearchStore(self.service.store).defaults(), config)
+        self.assertEqual(self.client.get(url).json(), {**defaults, **config})
+        self.assertEqual(ResearchStore(self.service.store).defaults(), {**defaults, **config})
         self.assertEqual(Settings.load(), chat_settings)
         self.assertEqual(self.store.get(self.cid, queued['id'])['config'], original)
         self.assertEqual(self.client.put(url, json={**config, 'question': 'private draft'}, headers=self.headers).status_code, 422)
         self.assertEqual(self.client.put(url, json={**config, 'power': 9}, headers=self.headers).status_code, 422)
-        self.assertEqual(self.client.get(url).json(), config)
+        self.assertEqual(self.client.get(url).json(), {**defaults, **config})
 
     def test_child_names_persist_and_blank_names_fall_back_to_question(self):
         self.service.busy = True
@@ -77,11 +78,12 @@ class ResearchTests(unittest.TestCase):
     def test_tab_modes_persist_and_reject_unknown_modes(self):
         self.service.busy = True
         url = '/api/research/defaults'
+        defaults = self.client.get(url).json()
         for mode in ('new', 'branch', 'existing'):
             config = {'selected_tab': 'prepared-tab', 'tab_mode': mode, 'new_chat': False}
             response = self.client.put(url, json=config, headers=self.headers)
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(ResearchStore(self.service.store).defaults(), config)
+            self.assertEqual(ResearchStore(self.service.store).defaults(), {**defaults, **config})
             node = self.child(config=config)[0]
             saved = self.store.get(self.cid, node['id'])['config']
             self.assertEqual(saved['tab_mode'], mode)

@@ -16,6 +16,7 @@ import argparse
 import shutil
 import site
 import sys
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,6 +63,7 @@ def pyinstaller_args(gpu: bool, offline_translation: bool = False) -> list[str]:
         "--workpath", str(BUILD),
         "--specpath", str(BUILD),
         "--add-data", f"{ROOT / 'prompts'}{sep}prompts",
+        "--add-data", f"{ROOT / 'config' / 'defaults.json'}{sep}config",
         "--add-data", f"{ICON}{sep}assets",
         "--add-data", f"{ROOT / 'assets' / 'mathjax-runtime'}{sep}assets/mathjax-runtime",
     ]
@@ -91,6 +93,7 @@ def main() -> None:
     parser.add_argument("--zip", action="store_true", help="also create a .zip of the build")
     parser.add_argument("--with-translation", action="store_true", help="bundle optional VinAI offline dependencies (install requirements-translation.txt first)")
     opts = parser.parse_args()
+    subprocess.run([sys.executable, '-m', 'caption.defaults'], cwd=ROOT, check=True)
 
     import PyInstaller.__main__
 

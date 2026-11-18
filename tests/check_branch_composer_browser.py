@@ -163,7 +163,7 @@ def main():
             page.route('**/api/research/defaults', lambda route: route.fulfill(status=500, json={'detail':'Save failed'}))
             dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
             expect(dialog.get_by_role('alert')).to_contain_text('Save failed')
-            assert store.defaults() == {}
+            assert 'selected_tab' not in store.defaults()
             page.unroute('**/api/research/defaults')
             dialog.get_by_role('button', name='Lưu cài đặt', exact=True).click()
             expect(dialog.get_by_role('status').filter(has_text='Đã lưu vào database')).to_be_visible()

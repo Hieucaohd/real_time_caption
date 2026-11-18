@@ -47,12 +47,12 @@ def history(cid: str, request: Request, before: int = Query(gt=0)):
 
 @router.put('/settings')
 def save(cid: str, config: RealtimeConfig, request: Request):
-    return request.app.state.service.realtime_chat.save(cid, config.model_dump())
+    return request.app.state.service.realtime_chat.save(cid, config.model_dump(exclude_unset=True))
 
 
 @router.post('/start')
 def start(cid: str, config: RealtimeConfig, request: Request):
-    return request.app.state.service.realtime_chat.start(cid, config.model_dump(), request.headers.get('X-RTC-Tab', ''))
+    return request.app.state.service.realtime_chat.start(cid, config.model_dump(exclude_unset=True), request.headers.get('X-RTC-Tab', ''))
 
 
 @router.post('/stop')

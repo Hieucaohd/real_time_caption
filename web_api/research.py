@@ -36,6 +36,7 @@ class Research:
                           max_lines=settings.chat_max_lines, screenshot=settings.chat_screenshot,
                           attach_history=settings.chat_attach_history, prompt=settings.chat_prompt,
                           new_chat=False, ancestor_depth=0)
+            config.update(self.store.defaults())
             config.update(payload.get('config', {}))
             if not config['selected_tab']:
                 raise ValueError('Chọn tab ChatGPT cho nghiên cứu trước khi xếp hàng.')

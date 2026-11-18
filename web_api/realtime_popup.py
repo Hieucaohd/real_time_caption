@@ -7,12 +7,12 @@ import threading
 import time
 from urllib.parse import urlencode
 
-from caption import chatgpt
+from caption import chatgpt, defaults
 
 log = logging.getLogger(__name__)
 
-OPEN_POPUP = '''async (url) => {
-    const popup = await documentPictureInPicture.requestWindow({width: 1100, height: 760});
+OPEN_POPUP = '''async ({url, width, height}) => {
+    const popup = await documentPictureInPicture.requestWindow({width, height});
     window.__rtcRealtimePopup = popup;
     popup.document.documentElement.style.cssText = 'height:100%;margin:0';
     popup.document.body.style.cssText = 'height:100%;margin:0;overflow:hidden';
@@ -109,7 +109,8 @@ class RealtimePopups:
         with service.store._connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS realtime_popup_preferences (id INTEGER PRIMARY KEY CHECK(id=1), opacity INTEGER NOT NULL)')
             if 'font_size' not in {row['name'] for row in db.execute('PRAGMA table_info(realtime_popup_preferences)')}:
-                db.execute('ALTER TABLE realtime_popup_preferences ADD COLUMN font_size INTEGER NOT NULL DEFAULT 16')
+                size = defaults.get('realtime_popup', 'font_size')
+                db.execute(f'ALTER TABLE realtime_popup_preferences ADD COLUMN font_size INTEGER NOT NULL DEFAULT {size}')
         self.closed = threading.Event()
         self.thread = threading.Thread(target=self.maintain, name='realtime-popup-windows', daemon=True)
         self.thread.start()
@@ -130,18 +131,18 @@ class RealtimePopups:
     def opacity(self):
         with self.service.store._connect() as db:
             row = db.execute('SELECT opacity FROM realtime_popup_preferences WHERE id=1').fetchone()
-        return row['opacity'] if row else 100
+        return row['opacity'] if row else defaults.get('realtime_popup', 'opacity')
 
     def font_size(self):
         with self.service.store._connect() as db:
             row = db.execute('SELECT font_size FROM realtime_popup_preferences WHERE id=1').fetchone()
-        return row['font_size'] if row else 16
+        return row['font_size'] if row else defaults.get('realtime_popup', 'font_size')
 
     def set_font_size(self, cid, value):
         self.service.conversation(cid)
         with self.lock:
             with self.service.store._connect() as db:
-                db.execute('INSERT INTO realtime_popup_preferences(id,opacity,font_size) VALUES(1,100,?) ON CONFLICT(id) DO UPDATE SET font_size=excluded.font_size', (value,))
+                db.execute('INSERT INTO realtime_popup_preferences(id,opacity,font_size) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET font_size=excluded.font_size', (self.opacity(), value))
             return self.state(cid)
 
     def _window(self, cid):
@@ -193,7 +194,8 @@ class RealtimePopups:
                 try:
                     # The title is a temporary marker shared by the PiP native window.
                     caller.evaluate('(title) => document.title = title', marker)
-                    caller.evaluate(OPEN_POPUP, url)
+                    caller.evaluate(OPEN_POPUP, dict(url=url, width=defaults.get('realtime_popup', 'width'),
+                                                    height=defaults.get('realtime_popup', 'height')))
                     opened = True
                     deadline = time.monotonic() + 10
                     hwnd = None
@@ -230,7 +232,7 @@ class RealtimePopups:
                 if item:
                     self.native.configure(item['hwnd'], value)
             with self.service.store._connect() as db:
-                db.execute('INSERT INTO realtime_popup_preferences(id,opacity) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET opacity=excluded.opacity', (value,))
+                db.execute('INSERT INTO realtime_popup_preferences(id,opacity,font_size) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET opacity=excluded.opacity', (value, self.font_size()))
             return self.state(cid)
 
     def hide(self, cid):

@@ -6,8 +6,9 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 
+from . import defaults
 from .paths import SETTINGS_PATH
 from .shared_access import ProcessLock
 
@@ -16,68 +17,67 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Settings:
-    web_capture_source: str = 'windows'
-    device_label: str = ""
-    model: str = "small.en"
-    compute: str = "auto"
-    always_on_top: bool = False  # keep the main window above other apps
-    show_overlay: bool = True
-    overlay_font_size: int = 22
-    overlay_lines: int = 2
-    overlay_alpha: float = 0.82
-    overlay_transparent: bool = False  # text only, no background bar
-    overlay_click_through: bool = False  # mouse passes through the overlay
-    summary_new_chat: bool = True
-    summary_attach_transcript: bool = True
-    summary_max_lines: int = 300  # newest caption lines; 0 = the whole transcript
-    chat_max_lines: int = 300
-    summary_prompt: str = ""  # version name in prompts/summarize/ ("" = newest)
-    chat_prompt: str = ""  # version name in prompts/chat/ ("" = newest)
-    summary_chatgpt_power: int = -1
-    chat_chatgpt_power: int = -1
-    vocab_chatgpt_power: int = -1
-    chat_attach_history: bool = False  # local history is large and normally unnecessary
-    chat_attach_transcript: bool = True
-    chat_new_chat: bool = False
-    chatgpt_selected_tab: str = ""  # invisible window.name key assigned to the chosen Chrome tab
-    chatgpt_selected_tab_title: str = ""  # display saved selection without scanning Chrome
-    summary_chatgpt_selected_tab: str = ""  # independently selected Chrome tab for summaries
-    chat_screenshot: bool = True  # attach a screenshot of the apps behind this one to each chat message
-    research_selected_tab: str = ""
-    research_power: int = -1
-    research_attach_transcript: bool = False
-    research_max_lines: int = 300
-    research_screenshot: bool = False
-    research_instructions: str = ""
-    voca_api_key: str = ""  # personal key from Voca → Cài đặt → Ứng dụng kết nối (kept only in settings.json)
-    voca_collection_id: str = ""  # "" = the app's default collection in Voca
-    overlay_width: int = 0  # 0 = pick from screen size
-    overlay_x: int = -1  # -1 = centre near the bottom of the screen
-    overlay_y: int = -1
-    translation_engine: str = "azure"
-    translation_enabled: bool = False
-    translation_partial: bool = False
-    translation_auto_scroll: bool = True
-    translation_view: str = "history"
-    translation_batch_size: int = 1
-    translation_batch_timeout: float = 5.0
-    translation_source: str = "en"
-    translation_target: str = "vi"
-    translation_azure_key: str = ""
-    translation_azure_region: str = ""
-    translation_google_key: str = ""
-    translation_gemini_key: str = ""
-    translation_gemini_model: str = "gemini-3.5-flash-lite"
-    translation_gemini_prompt: str = (
-        "Translate the following transcript from {source} to {target}. "
-        "Keep names, numbers and technical terms accurate. Return only the translation.\n\n{text}"
-    )
-    translation_device: str = "cpu"
+    web_capture_source: str = field(default_factory=lambda: defaults.get("settings", "web_capture_source"))
+    device_label: str = field(default_factory=lambda: defaults.get("settings", "device_label"))
+    model: str = field(default_factory=lambda: defaults.get("settings", "model"))
+    compute: str = field(default_factory=lambda: defaults.get("settings", "compute"))
+    always_on_top: bool = field(default_factory=lambda: defaults.get("settings", "always_on_top"))
+    show_overlay: bool = field(default_factory=lambda: defaults.get("settings", "show_overlay"))
+    overlay_font_size: int = field(default_factory=lambda: defaults.get("settings", "overlay_font_size"))
+    overlay_lines: int = field(default_factory=lambda: defaults.get("settings", "overlay_lines"))
+    overlay_alpha: float = field(default_factory=lambda: defaults.get("settings", "overlay_alpha"))
+    overlay_transparent: bool = field(default_factory=lambda: defaults.get("settings", "overlay_transparent"))
+    overlay_click_through: bool = field(default_factory=lambda: defaults.get("settings", "overlay_click_through"))
+    summary_new_chat: bool = field(default_factory=lambda: defaults.get("settings", "summary_new_chat"))
+    summary_attach_transcript: bool = field(default_factory=lambda: defaults.get("settings", "summary_attach_transcript"))
+    summary_max_lines: int = field(default_factory=lambda: defaults.get("settings", "summary_max_lines"))
+    chat_max_lines: int = field(default_factory=lambda: defaults.get("settings", "chat_max_lines"))
+    summary_prompt: str = field(default_factory=lambda: defaults.get("settings", "summary_prompt"))
+    chat_prompt: str = field(default_factory=lambda: defaults.get("settings", "chat_prompt"))
+    summary_chatgpt_power: int = field(default_factory=lambda: defaults.get("settings", "summary_chatgpt_power"))
+    chat_chatgpt_power: int = field(default_factory=lambda: defaults.get("settings", "chat_chatgpt_power"))
+    vocab_chatgpt_power: int = field(default_factory=lambda: defaults.get("settings", "vocab_chatgpt_power"))
+    chat_attach_history: bool = field(default_factory=lambda: defaults.get("settings", "chat_attach_history"))
+    chat_attach_transcript: bool = field(default_factory=lambda: defaults.get("settings", "chat_attach_transcript"))
+    chat_new_chat: bool = field(default_factory=lambda: defaults.get("settings", "chat_new_chat"))
+    chatgpt_selected_tab: str = field(default_factory=lambda: defaults.get("settings", "chatgpt_selected_tab"))
+    chatgpt_selected_tab_title: str = field(default_factory=lambda: defaults.get("settings", "chatgpt_selected_tab_title"))
+    summary_chatgpt_selected_tab: str = field(default_factory=lambda: defaults.get("settings", "summary_chatgpt_selected_tab"))
+    chat_screenshot: bool = field(default_factory=lambda: defaults.get("settings", "chat_screenshot"))
+    research_selected_tab: str = field(default_factory=lambda: defaults.get("settings", "research_selected_tab"))
+    research_power: int = field(default_factory=lambda: defaults.get("settings", "research_power"))
+    research_attach_transcript: bool = field(default_factory=lambda: defaults.get("settings", "research_attach_transcript"))
+    research_max_lines: int = field(default_factory=lambda: defaults.get("settings", "research_max_lines"))
+    research_screenshot: bool = field(default_factory=lambda: defaults.get("settings", "research_screenshot"))
+    research_instructions: str = field(default_factory=lambda: defaults.get("settings", "research_instructions"))
+    voca_api_key: str = field(default_factory=lambda: defaults.get("settings", "voca_api_key"))
+    voca_collection_id: str = field(default_factory=lambda: defaults.get("settings", "voca_collection_id"))
+    overlay_width: int = field(default_factory=lambda: defaults.get("settings", "overlay_width"))
+    overlay_x: int = field(default_factory=lambda: defaults.get("settings", "overlay_x"))
+    overlay_y: int = field(default_factory=lambda: defaults.get("settings", "overlay_y"))
+    translation_engine: str = field(default_factory=lambda: defaults.get("settings", "translation_engine"))
+    translation_enabled: bool = field(default_factory=lambda: defaults.get("settings", "translation_enabled"))
+    translation_partial: bool = field(default_factory=lambda: defaults.get("settings", "translation_partial"))
+    translation_auto_scroll: bool = field(default_factory=lambda: defaults.get("settings", "translation_auto_scroll"))
+    translation_view: str = field(default_factory=lambda: defaults.get("settings", "translation_view"))
+    translation_batch_size: int = field(default_factory=lambda: defaults.get("settings", "translation_batch_size"))
+    translation_batch_timeout: float = field(default_factory=lambda: defaults.get("settings", "translation_batch_timeout"))
+    translation_source: str = field(default_factory=lambda: defaults.get("settings", "translation_source"))
+    translation_target: str = field(default_factory=lambda: defaults.get("settings", "translation_target"))
+    translation_azure_key: str = field(default_factory=lambda: defaults.get("settings", "translation_azure_key"))
+    translation_azure_region: str = field(default_factory=lambda: defaults.get("settings", "translation_azure_region"))
+    translation_google_key: str = field(default_factory=lambda: defaults.get("settings", "translation_google_key"))
+    translation_gemini_key: str = field(default_factory=lambda: defaults.get("settings", "translation_gemini_key"))
+    translation_gemini_model: str = field(default_factory=lambda: defaults.get("settings", "translation_gemini_model"))
+    translation_gemini_prompt: str = field(default_factory=lambda: defaults.get("settings", "translation_gemini_prompt"))
+    translation_device: str = field(default_factory=lambda: defaults.get("settings", "translation_device"))
 
     @classmethod
     def load(cls) -> "Settings":
         try:
             data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError('settings.json must be an object')
         except FileNotFoundError:
             return cls()
         except (OSError, ValueError):
@@ -85,15 +85,16 @@ class Settings:
             return cls()
         # One-time migration from the former global ChatGPT settings.  Each tab can
         # diverge after this file is saved again.
-        old_power = data.get("chatgpt_power", -1)
-        old_lines = data.get("chatgpt_max_lines", 300)
-        data.setdefault("summary_chatgpt_power", old_power)
-        data.setdefault("chat_chatgpt_power", old_power)
-        data.setdefault("vocab_chatgpt_power", old_power)
-        data.setdefault("summary_max_lines", old_lines)
-        data.setdefault("chat_max_lines", old_lines)
-        data.setdefault("summary_new_chat", data.get("chatgpt_new_chat", True))
-        data.setdefault("summary_chatgpt_selected_tab", data.get("chatgpt_selected_tab", ""))
+        migrations = {
+            'chatgpt_power': ('summary_chatgpt_power', 'chat_chatgpt_power', 'vocab_chatgpt_power'),
+            'chatgpt_max_lines': ('summary_max_lines', 'chat_max_lines'),
+            'chatgpt_new_chat': ('summary_new_chat',),
+            'chatgpt_selected_tab': ('summary_chatgpt_selected_tab',),
+        }
+        for legacy, targets in migrations.items():
+            if legacy in data:
+                for target in targets:
+                    data.setdefault(target, data[legacy])
         known = {f.name for f in fields(cls)}
         result = cls(**{k: v for k, v in data.items() if k in known})
         result._baseline = asdict(result)

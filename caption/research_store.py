@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .shared_access import process_alive, BusyError
+from . import defaults as release_defaults
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +90,11 @@ class ResearchStore:
     def defaults(self):
         with self.conversations._connect() as db:
             row = db.execute('SELECT config FROM research_preferences WHERE id=1').fetchone()
-        return json.loads(row['config']) if row else {}
+        values = {k: v for k, v in release_defaults.get('research').items() if v is not None}
+        saved = json.loads(row['config']) if row else {}
+        if 'new_chat' in saved and 'tab_mode' not in saved:
+            saved['tab_mode'] = 'new' if saved['new_chat'] else 'existing'
+        return {**values, **saved}
 
     def save_defaults(self, config):
         with self.conversations._connect() as db:
@@ -104,7 +109,7 @@ class ResearchStore:
             raise ValueError('Layout belongs to the root of a research tree.')
         with self.conversations._connect() as db:
             row = db.execute('SELECT * FROM research_graph_layouts WHERE root_id=?', (rid,)).fetchone()
-        defaults = dict(positions={}, camera=None, collapsed=[], snap=True, wheel_zoom=True, mode='select', move_subtree=False)
+        defaults = dict(positions={}, camera=None, collapsed=[], **release_defaults.get('research_graph'))
         return {**defaults, **(json.loads(row['state']) if row else {}), 'revision': row['revision'] if row else 0}
 
     def save_graph_layout(self, cid, rid, changes):

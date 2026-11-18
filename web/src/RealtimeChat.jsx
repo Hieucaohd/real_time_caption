@@ -25,6 +25,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     const result = await api(base);
     if (!alive.current) return;
     setState(result);
+    if (!initialized.current) setFollow(result.auto_scroll ?? true);
     if (popup || !initialized.current) { initialized.current = true; setConfig(result.config); }
   }
   useEffect(() => {

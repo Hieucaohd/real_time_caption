@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .realtime_chat import ACTION_INSTRUCTION, SUMMARY_INSTRUCTION
+from caption import defaults
 
 router = APIRouter(prefix='/api/realtime-prompts')
 
@@ -18,8 +18,8 @@ class TemplateInput(BaseModel):
 
 @router.get('')
 def templates(request: Request):
-    result = {kind: [dict(name='', text=text)] for kind, text in
-              [('actions', ACTION_INSTRUCTION), ('summary', SUMMARY_INSTRUCTION)]}
+    result = {kind: [dict(name='', text=defaults.get('realtime_chat', kind + '_prompt'))]
+              for kind in ('actions', 'summary')}
     with request.app.state.service.store._connect() as db:
         for row in db.execute('SELECT kind,name,text FROM realtime_prompt_templates ORDER BY name COLLATE NOCASE'):
             result[row['kind']].append(dict(name=row['name'], text=row['text']))

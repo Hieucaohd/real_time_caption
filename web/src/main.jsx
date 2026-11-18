@@ -148,6 +148,7 @@ function App() {
     localStorage.getItem("rtc-conversation") || "",
   );
   const cidRef = useRef(cid);
+  const uiInitialized = useRef(false);
   cidRef.current = cid;
   const [tab, setTab] = useState("transcript"),
     [query, setQuery] = useState(""),
@@ -267,6 +268,13 @@ function App() {
   }
   async function refresh() {
     const data = await api("/bootstrap");
+    if (!uiInitialized.current && data.ui_defaults) {
+      uiInitialized.current = true;
+      setTab(data.ui_defaults.initial_tab);
+      setSidebarHidden(data.ui_defaults.sidebar_hidden);
+      setReadingFocus(data.ui_defaults.reading_focus);
+      setFollow(data.ui_defaults.transcript_auto_scroll);
+    }
     setBoot(data);
     let selected = cidRef.current;
     if (!data.conversations.some((c) => c.id === selected)) {

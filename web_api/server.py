@@ -9,9 +9,9 @@ import sys
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_type_hints
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, create_model, ConfigDict
 
-from caption import paths, prompt_versions, chatgpt
+from caption import paths, prompt_versions, chatgpt, defaults
 from caption.settings import Settings
 from caption.shared_access import BusyError, capture_lock
 from caption.translation import ENGINES, LANGUAGES, Config, TranslationError
@@ -40,7 +40,7 @@ ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
 SettingsPatch = create_model('SettingsPatch', __config__=ConfigDict(extra='forbid', strict=True),
     web_theme=(Literal['light', 'dark'] | None, None),
-    **{f.name: (type(f.default) | None, None) for f in fields(Settings)})
+    **{name: (kind | None, None) for name, kind in get_type_hints(Settings).items()})
 
 
 class ConversationInput(BaseModel):
@@ -147,7 +147,7 @@ def create_app(service=None):
         s = svc(request)
         state = s.state()
         state['jobs'] = [{k: v for k, v in job.items() if not k.startswith('_')} for job in state['jobs']]
-        return {**state, 'conversations': [asdict(c) for c in s.store.list()],
+        return {**state, 'ui_defaults': defaults.get('web'), 'conversations': [asdict(c) for c in s.store.list()],
                 'settings': {**asdict(Settings.load()), 'web_theme': s.store.web_theme()}, 'engines': ENGINES, 'languages': LANGUAGES,
                 'prompts': {kind: prompt_versions.list_versions(folder) for kind, folder in
                             [('chat', prompt_versions.CHAT_DIR), ('summary', prompt_versions.SUMMARY_DIR)]}}

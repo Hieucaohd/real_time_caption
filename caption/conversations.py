@@ -175,15 +175,17 @@ class ConversationStore:
         return [self._row(row) for row in rows if row is not None]  # type: ignore[misc]
 
     def web_theme(self) -> str:
+        from . import defaults
         with self._connect() as db:
             row = db.execute('SELECT theme FROM web_preferences WHERE id=1').fetchone()
-        return row['theme'] if row else 'light'
+        return row['theme'] if row else defaults.get('web', 'theme')
 
     def livecaptions_preferences(self):
+        from . import defaults
         with self._connect() as db:
             row = db.execute('SELECT microphone, language FROM livecaptions_preferences WHERE id=1').fetchone()
-        return dict(microphone=bool(row['microphone']) if row and row['microphone'] is not None else None,
-                    language=row['language'] if row else '')
+        return dict(microphone=bool(row['microphone']) if row['microphone'] is not None else None,
+                    language=row['language']) if row else defaults.get('livecaptions')
 
     def save_livecaptions_preferences(self, preferences):
         with self._connect() as db:

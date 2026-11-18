@@ -9,6 +9,9 @@ from caption import paths
 def run():
     report = {'ok': False, 'checks': [], 'data_dir': str(paths.DATA_DIR)}
     try:
+        from caption import defaults
+        defaults.check()
+        report['checks'].append('bundled-release-defaults')
         from fastapi.testclient import TestClient
         from .server import create_app
         from caption import mathjax_render, markdown_html

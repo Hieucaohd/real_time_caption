@@ -36,6 +36,34 @@ Kết quả là thư mục `dist\RealTimeCaption\`. Copy nguyên thư mục (ho�
 
 Mã build nằm trong `packaging/`: `build_exe.py` (tham số PyInstaller), `make_icon.py` (vẽ `assets/icon.ico`), và các file đặt kèm vào gói.
 
+## Mặc định cho bản phát hành
+
+Chỉnh **`config/defaults.json`** trước khi build. File này được đóng gói trong cả EXE web và native; không lấy các cài đặt cá nhân trong `settings.json` hoặc database trên máy build.
+
+| Nhóm trong JSON | Nội dung |
+| --- | --- |
+| `settings` | Cài đặt chung: nguồn transcript, Chat/Summary, dịch, popup transcript, cài đặt native |
+| `realtime_chat` | Chu kỳ, Power riêng hai tab, screenshot, mẫu prompt gợi ý JSON và tóm tắt |
+| `research` | Cài đặt tạo nhánh con, số cấp tổ tiên, cách mở tab ChatGPT |
+| `realtime_popup` | Cỡ chữ, độ đục và kích thước ban đầu của popup Chat realtime |
+| `web` | Giao diện sáng/tối, tab mở đầu, sidebar, chế độ tập trung, tự cuộn |
+| `livecaptions` | Micro và ngôn ngữ mặc định của Windows Live Captions |
+| `research_graph` | Bám lưới, lăn để zoom, công cụ chọn/kéo, kéo cả nhánh |
+
+Ví dụ: đổi `settings.web_capture_source` thành `"chatgpt"`, `settings.translation_engine` thành `"chrome"`, `realtime_chat.interval` thành `15`, `realtime_popup.font_size` thành `12`, hoặc `web.theme` thành `"dark"`.
+
+- Power: `-1` giữ nguyên, `0` Instant, `1` Medium, `2` High. `realtime_chat.summary_power: null` kế thừa Power hỏi đáp; `power`, `prompt`, `screenshot` là `null` thì kế thừa cài đặt Chat. Các giá trị `null` trong `research` cũng kế thừa Chat.
+- `realtime_popup.font_size`: 1–32 px. `opacity`: 40–100, trong đó 100 là hoàn toàn đục. Kích thước `width`/`height` tính bằng px; Chrome có thể điều chỉnh theo màn hình.
+- `livecaptions.microphone: null` và `language: ""` giữ lựa chọn hiện tại của Windows. Nếu đặt ngôn ngữ, dùng đúng tên hiển thị trong Windows và cài gói ngôn ngữ trên máy người dùng.
+- `research.tab_mode`: `existing`, `new`, `branch`. `ancestor_depth`: 0 không đính kèm, -1 toàn bộ, số dương là số cấp tổ tiên.
+- `settings.translation_view`: `history` hoặc `parallel`. `web.initial_tab`: `transcript`, `chat`, `research`, `summary`, `translation`, `vocab`, `realtime`.
+- Tên mẫu Chat/Summary trỏ tới các file trong `prompts/chat/` và `prompts/summarize/`; chuỗi rỗng chọn mẫu mới nhất. Nội dung các mẫu này vẫn được sửa trong thư mục `prompts/`. Hai prompt tự động của Chat realtime nằm trực tiếp trong JSON.
+- Đây là cấu hình được phát hành cho mọi người dùng: để trống API key và mã tab riêng của máy bạn.
+
+Kiểm tra trước khi build: `.venv\Scripts\python.exe -m caption.defaults`. Build cũng tự chạy kiểm tra và dừng nếu JSON sai, thiếu/thừa khóa hoặc có giá trị không hợp lệ. Sau khi chỉnh, **commit thay đổi rồi chạy `build_web_exe.bat`** để tag và EXE chứa đúng bộ mặc định đó.
+
+Thứ tự ưu tiên: lựa chọn hiện tại/người dùng đã lưu → mặc định trong bản phát hành. Người dùng mới nhận các mặc định; bản nâng cấp giữ cài đặt đã lưu và dùng mặc định cho trường chưa có. File được đọc từ bundle, độc lập với `RTC_DATA_DIR`; chạy từ source cần khởi động lại backend sau khi sửa. Có thể thử EXE với `--data-dir` trỏ tới một thư mục trống để xem trải nghiệm lần đầu mà không xóa dữ liệu hiện tại.
+
 ## Sử dụng
 
 | Mục | Ý nghĩa |

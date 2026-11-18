@@ -49,7 +49,7 @@ def pyinstaller_args(tag, version_file, with_translation=False):
     args = [str(ROOT / 'web_main.py'), '--name', name, '--version-file', str(version_file), '--onefile',
             '--windowed', '--noconfirm', '--clean', '--icon', str(ROOT / 'assets/icon.ico'),
             '--distpath', str(ROOT / 'dist'), '--workpath', str(WORK), '--specpath', str(WORK)]
-    for source, destination in [('web/dist', 'web/dist'), ('prompts', 'prompts'),
+    for source, destination in [('config/defaults.json', 'config'), ('web/dist', 'web/dist'), ('prompts', 'prompts'),
                                 ('assets/icon.ico', 'assets'), ('assets/mathjax-runtime', 'assets/mathjax-runtime')]:
         args += ['--add-data', f'{ROOT / source};{destination}']
     for package in ('playwright', 'uiautomation', 'pyaudiowpatch', 'tkinterweb', 'tkinterweb_tkhtml',
@@ -78,6 +78,7 @@ def main():
     parser.add_argument('--build-tag', required=True, help='Git tag created by build_web_exe.bat')
     parser.add_argument('--with-translation', action='store_true', help='include optional VinAI dependencies (install requirements-translation.txt first)')
     args = parser.parse_args()
+    subprocess.run([sys.executable, '-m', 'caption.defaults'], cwd=ROOT, check=True)
     if sys.platform != 'win32':
         raise SystemExit('Build this Windows EXE on Windows.')
     try:
