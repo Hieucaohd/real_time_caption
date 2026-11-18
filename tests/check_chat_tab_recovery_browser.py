@@ -65,6 +65,22 @@ def main():
             expect(chosen).to_have_value('first')  # Recovered selection was persisted.
             scan.assert_called_once()  # Reload does not rediscover tabs/resend questions.
             assert ask.call_count == 2 and not errors, errors
+            with patch('web_api.service.chatgpt.open_new_chatgpt_tab', return_value=tab('fresh', 'Fresh ChatGPT')) as open_tab, \
+                    patch('web_api.service.chatgpt.ask', return_value='Answer in a fresh tab') as new_ask:
+                page.get_by_label('New ChatGPT chat', exact=True).check()
+                expect(chosen).to_be_disabled()
+                expect(page.get_by_role('button', name='Refresh Chrome tabs', exact=True)).to_be_disabled()
+                page.locator('.chat-composer textarea').fill('Use a fresh tab')
+                page.get_by_role('button', name='Send', exact=True).click()
+                expect(page.locator('.chat-scroll')).to_contain_text('Answer in a fresh tab')
+                open_tab.assert_called_once()
+                assert open_tab.call_args.kwargs['return_tab']
+                assert new_ask.call_args.kwargs['selected_tab'] == 'fresh'
+                assert new_ask.call_args.kwargs['new_chat'] is False
+                page.get_by_label('New ChatGPT chat', exact=True).uncheck()
+                expect(chosen).to_be_enabled()
+                expect(chosen).to_have_value('first')
+                scan.assert_called_once()
             browser.close()
             print('Closed Chat tab: persisted first-tab fallback, visible notice, no automatic resend/rescan, explicit Retry and reload passed.')
     finally:

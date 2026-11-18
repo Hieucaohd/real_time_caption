@@ -365,6 +365,14 @@ class Service:
                     payload['_prepared'] = prepared
                     if cancel.is_set():
                         raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
+                    if prepared.get('create_new_tab'):
+                        self.update_job(job, detail='Đang mở tab ChatGPT mới…')
+                        tab = chatgpt.open_new_chatgpt_tab(return_tab=payload.get('_return_tab', ''))
+                        # Keep this target for a manual retry; never navigate the
+                        # previously selected tab or create another on every retry.
+                        prepared.update(selected_tab=tab.key, new_chat=False, create_new_tab=False)
+                        if cancel.is_set():
+                            raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
                     response_tab = {}
                     response_source = {}
                     result = chatgpt.ask(prepared['prompt'], [Path(x) for x in prepared['attachments']],
@@ -399,7 +407,11 @@ class Service:
                 self.update_job(job, answer_id=mid)
                 message = 'ChatGPT chưa copy được nội dung. Bấm “Lấy lại câu trả lời” ở câu trả lời trống để đọc lại, không gửi lại câu hỏi.'
             if job['kind'] == 'chat' and isinstance(exc, chatgpt.ChatGPTTabClosed) and not cancel.is_set():
-                message = self.recover_chat_tab(job, payload)
+                if payload.get('_prepared', {}).get('new_tab_mode'):
+                    payload['_prepared'].update(create_new_tab=True, selected_tab=None)
+                    message = 'Tab ChatGPT mới đã đóng. Bấm Retry để mở tab mới và gửi lại câu hỏi.'
+                else:
+                    message = self.recover_chat_tab(job, payload)
             self.update_job(job, status='cancelled' if cancel.is_set() else 'error', error=message, detail='Request stopped')
         finally:
             with self.lock:
@@ -448,6 +460,9 @@ class Service:
         attachments = []
         words = []
         selected_tab = payload.get('selected_tab') or (settings.summary_chatgpt_selected_tab if kind == 'summary' else settings.chatgpt_selected_tab)
+        new_tab_mode = kind == 'chat' and payload.get('new_chat', settings.chat_new_chat)
+        if new_tab_mode:
+            selected_tab = None
         if kind == 'vocab':
             words = [vocab.NewWord(w) for w in vocab.parse_input(payload.get('message', ''))]
             if not words or len(words) > 100:
@@ -458,7 +473,7 @@ class Service:
             selected_tab = None
             power = settings.vocab_chatgpt_power
         else:
-            if not selected_tab:
+            if not selected_tab and not new_tab_mode:
                 raise ValueError('Choose a ChatGPT Chrome tab first.')
             prompt_dir = prompt_versions.SUMMARY_DIR if kind == 'summary' else prompt_versions.CHAT_DIR
             version = prompt_versions.resolve(payload.get('prompt') or getattr(settings, f'{kind}_prompt'), prompt_dir)
@@ -498,7 +513,8 @@ class Service:
         return dict(prompt=prompt, attachments=[str(p) for p in attachments], words=[asdict(w) for w in words],
                     selected_tab=selected_tab, power=None if power < 0 else power,
                     tab_name=chatgpt.VOCAB_TAB if kind == 'vocab' else f'{chatgpt.APP_TAB}-{cid}',
-                    new_chat=payload.get('new_chat', settings.summary_new_chat if kind == 'summary' else False))
+                    create_new_tab=bool(new_tab_mode), new_tab_mode=bool(new_tab_mode),
+                    new_chat=False if new_tab_mode else payload.get('new_chat', settings.summary_new_chat if kind == 'summary' else False))
 
     def file_path(self, cid, name):
         folder = self.conversation(cid).folder.resolve()

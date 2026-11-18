@@ -61,10 +61,12 @@ class WebApiTests(unittest.TestCase):
             patch('web_api.service.ConversationStore', lambda: ConversationStore(self.root / 'data.sqlite3')),
             patch('web_api.service.livecaptions.LiveCaptionsReader', FakeReader),
             patch('caption.livecaptions_settings.PreferenceRestorer.start'),
+            patch('web_api.service.chatgpt.open_new_chatgpt_tab',
+                  side_effect=AssertionError('Tests must mock tab creation; never open real Chrome.')),
         ]
         for p in self.patches:
             p.start()
-        settings.Settings(chat_screenshot=False).save()
+        settings.Settings(chat_screenshot=False, chat_new_chat=False).save()
         prompt_versions.save_new_version('Question: {message}', 'default', prompt_versions.CHAT_DIR)
         prompt_versions.save_new_version('Summarize {file_name}', 'default', prompt_versions.SUMMARY_DIR)
         self.service = Service()

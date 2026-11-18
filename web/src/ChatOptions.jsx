@@ -20,6 +20,7 @@ export default function ChatOptions({
   children,
 }) {
   const set = (key, next) => onChange({ [key]: next });
+  const newTab = scope === "chat" && showNewChat && !!value.new_chat;
   return (
     <fieldset className="options chat-options" disabled={disabled}>
       {!managedContext && <label className="field">
@@ -28,7 +29,7 @@ export default function ChatOptions({
           <select
             aria-label={scope + " ChatGPT tab"}
             value={value.selected_tab || ""}
-            disabled={tabDisabled}
+            disabled={tabDisabled || newTab}
             onChange={(e) => set("selected_tab", e.target.value)}
           >
             <option value="">Chọn tab Chrome…</option>
@@ -49,7 +50,7 @@ export default function ChatOptions({
             title="Refresh Chrome tabs"
             aria-label="Refresh Chrome tabs"
             onClick={scanTabs}
-            disabled={loadingTabs}
+            disabled={loadingTabs || tabDisabled || newTab}
           >
             <RefreshCw size={16} className={loadingTabs ? "spin" : ""} />
           </button>

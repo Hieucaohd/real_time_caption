@@ -332,12 +332,12 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
-    if (tab !== "chat" || !boot || !cid || chatTabInitialized.current) return;
+    if (tab !== "chat" || !boot || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
     chatTabInitialized.current = true;
     // A saved selection is usable without opening Chrome's tab list. Only a
     // first-time setup with no saved tab discovers/creates a default once.
     if (!chatConfigRef.current.selected_tab) prepareChatTab();
-  }, [tab, cid, !!boot]);
+  }, [tab, cid, !!boot, chatConfig.new_chat]);
   useEffect(() => {
     if (follow && tab === "transcript")
       transcriptEnd.current?.scrollIntoView({ block: "end" });
@@ -521,11 +521,12 @@ function App() {
     }
   }
   async function submit(kind) {
-    if (kind === "chat" && (preparingChatTab || !chatSelectedTab)) return;
+    if (kind === "chat" && !chatConfig.new_chat && (preparingChatTab || !chatSelectedTab)) return;
     const payload = { kind };
     if (kind === "chat")
       Object.assign(payload, {
         ...chatConfig,
+        selected_tab: chatConfig.new_chat ? "" : chatSelectedTab,
         message,
         files: files.map((f) => f.path),
       });
@@ -588,6 +589,10 @@ function App() {
         <ChatOptions
           value={chatConfig}
           onChange={(patch) => {
+            if ("new_chat" in patch) {
+              chatPreparation.current += 1;
+              setPreparingChatTab(false);
+            }
             if ("selected_tab" in patch) {
               chatPreparation.current += 1;
               setPreparingChatTab(false);
@@ -1049,7 +1054,7 @@ function App() {
                         )?.title
                       }
                     >
-                      {chromeTabs.find(
+                      {chatConfig.new_chat ? "Mở tab ChatGPT mới khi gửi" : chromeTabs.find(
                         (t) => t.key === chatSelectedTab,
                       )?.title || chatConfig.selected_tab_title ||
                         (preparingChatTab
@@ -1176,7 +1181,7 @@ function App() {
                     <Button
                       className="primary"
                       icon={Send}
-                      disabled={!message.trim() || !!busyJob || uploading || preparingChatTab || !chatSelectedTab}
+                      disabled={!message.trim() || !!busyJob || uploading || (!chatConfig.new_chat && (preparingChatTab || !chatSelectedTab))}
                       onClick={() => submit("chat")}
                     >
                       {uploading ? "Uploading…" : "Send"}

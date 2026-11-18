@@ -357,7 +357,9 @@ def create_app(service=None):
     def job(cid: str, body: JobInput, request: Request):
         if body.kind not in ('chat', 'summary', 'vocab', 'voca-save', 'translation-test', 'translation-download'):
             raise ValueError('Unknown task.')
-        return svc(request).create_job(cid, body.kind, body.model_dump(exclude_none=True))
+        payload = body.model_dump(exclude_none=True)
+        payload['_return_tab'] = request.headers.get('x-rtc-tab', '')
+        return svc(request).create_job(cid, body.kind, payload)
 
     @app.post('/api/jobs/{jid}/cancel')
     def cancel(jid: str, request: Request):
