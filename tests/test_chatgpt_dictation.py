@@ -144,15 +144,82 @@ class DictationBrowserTests(unittest.TestCase):
         self.reader._cleanup()
         self.assertEqual([e.text for e in self.events if e.kind == 'final'], ['Last observed words'])
 
-    def test_existing_and_late_restored_text_do_not_block_recording(self):
+    def test_existing_draft_is_cleared_before_recording_without_touching_other_tabs(self):
         page = self.reader._open_page(self.browser)
+        ordinary = self.context.new_page()
+        ordinary.goto('https://chatgpt.com/c/ordinary')
+        ordinary.locator('#prompt-textarea').fill('Keep my question')
         page.locator('#prompt-textarea').fill('Existing draft')
         self.reader._begin(page, self.browser)
         self.assertEqual(self.actions, ['start'])
-        page.locator('#prompt-textarea').fill('Existing draft New microphone text')
+        self.assertEqual(page.locator('#prompt-textarea').inner_text().strip(), '')
+        page.locator('#prompt-textarea').fill('New microphone text')
         self.reader._read_live()
         self.reader.shutdown(); self.reader._cleanup()
         self.assertEqual([e.text for e in self.events if e.kind == 'final'], ['New microphone text'])
+        self.assertEqual(ordinary.locator('#prompt-textarea').inner_text(), 'Keep my question')
+        self.assertFalse(ordinary.is_closed())
+
+    def test_late_hydrated_draft_is_removed_before_microphone_starts(self):
+        page = self.reader._open_page(self.browser)
+        page.evaluate('''() => {
+            const editor = document.querySelector('#prompt-textarea');
+            const originalBegin = begin;
+            window.begin = () => { window.textAtStart = editor.innerText; originalBegin(); };
+            setTimeout(() => {
+                editor.innerText = 'Transcript restored after initial render';
+                window.draftRestored = true;
+            }, 450);
+        }''')
+        self.reader._begin(page, self.browser)
+        self.assertTrue(page.evaluate('window.draftRestored'))
+        self.assertEqual(page.evaluate('window.textAtStart').strip(), '')
+        self.assertEqual(self.actions, ['start'])
+        self.reader.shutdown(); self.reader._cleanup()
+        self.assertEqual([e.text for e in self.events if e.kind == 'final'], [])
+
+    def test_finished_recording_draft_is_cleared_after_transcript_is_saved(self):
+        page = self.open_and_begin()
+        stored_before_clear = []
+        page.expose_function('cleared', lambda: stored_before_clear.append(
+            [e.text for e in self.events if e.kind == 'final']))
+        page.evaluate('''() => {
+            const editor = document.querySelector('#prompt-textarea');
+            editor.addEventListener('input', () => {
+                localStorage.setItem('test-draft', editor.innerText);
+                if (!editor.innerText.trim()) window.cleared();
+            });
+        }''')
+        page.locator('#prompt-textarea').fill('Final microphone words')
+        self.reader.stop(); self.reader._cleanup()
+        self.assertEqual(stored_before_clear, [['Final microphone words']])
+        next_page = self.context.new_page()
+        next_page.goto('https://chatgpt.com/')
+        self.assertEqual(next_page.evaluate("localStorage.getItem('test-draft')").strip(), '')
+        self.assertEqual(self.actions, ['start', 'stop'])
+
+    def test_failed_transcript_save_does_not_clear_recording_draft(self):
+        page = self.open_and_begin()
+        page.evaluate('''() => document.querySelector('#prompt-textarea').addEventListener('input', e => {
+            localStorage.setItem('test-draft', e.target.innerText);
+        })''')
+        page.locator('#prompt-textarea').fill('Unsaved words')
+        self.reader._emit = lambda event: False if event.kind == 'final' else None
+        self.reader.shutdown()
+        with self.assertRaisesRegex(chatgpt.ChatGPTError, 'database'):
+            self.reader._cleanup()
+        next_page = self.context.new_page()
+        next_page.goto('https://chatgpt.com/')
+        self.assertEqual(next_page.evaluate("localStorage.getItem('test-draft')"), 'Unsaved words')
+
+    def test_unowned_composer_is_never_cleared_or_recorded(self):
+        page = self.reader._open_page(self.browser)
+        page.locator('#prompt-textarea').fill('User draft')
+        page.evaluate("window.name = 'ordinary-chat'")
+        with self.assertRaisesRegex(chatgpt.ChatGPTError, 'tab thu âm riêng'):
+            self.reader._begin(page, self.browser)
+        self.assertEqual(page.locator('#prompt-textarea').inner_text(), 'User draft')
+        self.assertEqual(self.actions, [])
 
     def test_reserved_tab_cannot_receive_questions_or_be_detected_as_a_new_branch(self):
         page = self.reader._open_page(self.browser)

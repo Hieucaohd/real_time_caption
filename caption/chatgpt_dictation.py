@@ -20,6 +20,7 @@ STOP = re.compile(r'^(Stop dictation|Stop recording|Finish dictation|Stop|Dừng
 CANCEL = re.compile(r'^(Cancel dictation|Cancel recording|Cancel|Hủy|Hủy ghi âm)$', re.I)
 POLL_SECONDS = .2
 START_READY_TIMEOUT = 30
+EMPTY_COMPOSER_SECONDS = 1.0
 START_NOT_READY = ('Nút Dictate của ChatGPT chưa sẵn sàng sau 30 giây. '
                    'Hãy kiểm tra trang ChatGPT đã tải xong và cho phép dùng micro trong Chrome, rồi bấm Start lại.')
 
@@ -39,6 +40,7 @@ class ChatGPTDictationReader:
         self._stop, self._abort = threading.Event(), threading.Event()
         self._thread = threading.Thread(target=self._run, name='chatgpt-dictation', daemon=True)
         self.page = None
+        self.tab_key = ''
         self.recording = False
         self.text = None
         self.partial = None
@@ -85,6 +87,7 @@ class ChatGPTDictationReader:
         with ProcessLock(paths.CACHE_DIR / 'chatgpt-request.lock', timeout=2):
             self.page = page = chatgpt._open_background_tab(browser)
             key = chatgpt.DICTATION_TAB_PREFIX + uuid.uuid4().hex
+            self.tab_key = key
             page.add_init_script('window.name = ' + json.dumps(key) + ';')
             page.evaluate('(key) => window.name = key', key)
         page.set_default_timeout(2000)
@@ -101,27 +104,41 @@ class ChatGPTDictationReader:
     def _wait_start_ready(self, page):
         from playwright.sync_api import TimeoutError
 
+        empty_since = None
+
         def ready():
+            nonlocal empty_since
             button = self._button(page, START)
             composer = chatgpt._visible(page, chatgpt.COMPOSER)
             if not button.count() or not button.is_enabled() or not composer.count() or not composer.is_editable():
+                empty_since = None
                 return False
             try:
                 button.click(trial=True, timeout=300)
+                # ChatGPT may hydrate an old home-page draft after the composer
+                # first appears. Clear through the editor's input event, then
+                # require a quiet empty period before starting the microphone.
+                if self._text(composer):
+                    composer.fill('', timeout=1000)
+                    empty_since = None
+                    return False
             except TimeoutError:
+                empty_since = None
                 return False
-            return True
+            empty_since = empty_since or time.monotonic()
+            return time.monotonic() - empty_since >= EMPTY_COMPOSER_SECONDS
 
         self._emit(Event('status', 'Đang chờ nút Dictate sẵn sàng trên ChatGPT…'))
         self._wait(page, ready, START_READY_TIMEOUT, START_NOT_READY)
 
     def _begin(self, page, browser):
+        if page is not self.page or not self.tab_key or page.evaluate('window.name') != self.tab_key:
+            raise chatgpt.ChatGPTError('Không xác nhận được tab thu âm riêng. Bấm Start để mở lại tab thu âm.')
         with chatgpt._return_to_web_tab(browser, self.return_tab):
             page.bring_to_front()
             self._wait_start_ready(page)
             self._check()
-            # Existing text never blocks recording and is not new microphone speech.
-            self.text = DictationText(self._text(chatgpt._visible(page, chatgpt.COMPOSER)))
+            self.text = DictationText()
             self._emit(Event('status', 'Đang bật micro ChatGPT… Cho phép micro trong Chrome nếu được hỏi.'))
             from playwright.sync_api import TimeoutError
             try:
@@ -186,6 +203,21 @@ class ChatGPTDictationReader:
         finally:
             try:
                 self._read_live(flush=True)
+                # Only after the final words have been accepted by the app:
+                # remove the recording draft so the next tab cannot restore it.
+                # Never clear a live microphone or another ChatGPT tab.
+                if self.text and not self.page.is_closed():
+                    try:
+                        start = self._button(self.page, START)
+                        if (self.page.evaluate('window.name') == self.tab_key
+                                and start.count() and start.is_enabled()
+                                and not self._button(self.page, CANCEL).count()):
+                            composer = chatgpt._visible(self.page, chatgpt.COMPOSER)
+                            if composer.count() and composer.is_editable():
+                                composer.fill('', timeout=1000)
+                                self.page.wait_for_timeout(250)
+                    except Exception:
+                        log.debug('Could not clear the finished dictation draft', exc_info=True)
             finally:
                 try:
                     self.page.close(run_before_unload=False)
