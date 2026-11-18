@@ -1657,6 +1657,7 @@ function Attachments({ message, cid }) {
 }
 
 function SettingsModal({ settings, boot, close, save, run, canRun }) {
+  const webEngines = ["chrome", "google_web"];
   const baseline = useRef(settings);
   const [draft, setDraft] = useState({ ...settings }),
     [collections, setCollections] = useState([]),
@@ -1707,13 +1708,18 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             <p>Tab thu âm không nhận câu hỏi từ app. Pause lưu phần chữ cuối, dừng micro và đóng tab thu âm.</p>
           </section> : <LiveCaptionsSettings api={api} warning={boot.capture.warning} />}
           <h3>Translation</h3>
+          {!webEngines.includes(draft.translation_engine) && <p className="muted">
+            Phương thức đã lưu đang được ẩn trên bản web. Chọn phương thức dịch bên dưới rồi lưu để chuyển sang dùng.
+          </p>}
           <div className="form-grid">
             <Field label="Engine">
               <select
-                value={draft.translation_engine}
+                aria-label="Phương thức dịch"
+                value={webEngines.includes(draft.translation_engine) ? draft.translation_engine : ""}
                 onChange={(e) => set("translation_engine", e.target.value)}
               >
-                {Object.entries(boot.engines).map(([k, v]) => (
+                {!webEngines.includes(draft.translation_engine) && <option value="" disabled>Chọn phương thức dịch</option>}
+                {Object.entries(boot.engines).filter(([k]) => webEngines.includes(k)).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v}
                   </option>
@@ -1737,22 +1743,12 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
                 </select>
               </Field>
             ))}
-            {draft.translation_engine !== "google_web" && input("translation_batch_size", "Số câu mỗi nhóm", "number")}
-            {draft.translation_engine !== "google_web" && input(
+            {draft.translation_engine === "chrome" && input("translation_batch_size", "Số câu mỗi nhóm", "number")}
+            {draft.translation_engine === "chrome" && input(
               "translation_batch_timeout",
               "Thời gian chờ nhóm (giây)",
               "number",
             )}
-            <Field label="Offline compute">
-              <select
-                value={draft.translation_device}
-                onChange={(e) => set("translation_device", e.target.value)}
-              >
-                {["cpu", "cuda", "auto"].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </Field>
           </div>
           {draft.translation_engine === "chrome" && <Toggle
             label="Dịch ngay khi đang nói"
@@ -1771,31 +1767,11 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             Khi tab đạt 5.000 ký tự, app mở tab tiếp theo. Sau khi đã lấy và lưu bản dịch,
             app đóng các tab dịch cũ do app quản lý; nội dung vẫn còn trong app và database.
           </p>}
-          <div className="form-grid">
-            {input("translation_azure_key", "Azure API key", "password")}
-            {input("translation_azure_region", "Azure region")}
-            {input("translation_google_key", "Google API key", "password")}
-            {input("translation_gemini_key", "Gemini API key", "password")}
-            {input("translation_gemini_model", "Gemini model")}
-          </div>
-          <Field label="Gemini translation prompt">
-            <textarea
-              rows="4"
-              value={draft.translation_gemini_prompt}
-              onChange={(e) => set("translation_gemini_prompt", e.target.value)}
-            />
-          </Field>
-          <div className="inline">
+          {webEngines.includes(settings.translation_engine) && <div className="inline">
             <Button disabled={!canRun} onClick={() => run("translation-test")}>
               Test saved configuration
             </Button>
-            <Button
-              disabled={!canRun}
-              onClick={() => run("translation-download")}
-            >
-              Download VinAI model
-            </Button>
-          </div>
+          </div>}
           <h3>Voca</h3>
           <div className="form-grid">
             {input("voca_api_key", "Voca API key", "password")}
