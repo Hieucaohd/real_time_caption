@@ -4,6 +4,9 @@
 .rt-toolbar button { gap:6px; }
 .realtime-chat > .chat-settings { flex-shrink:0; max-height:45%; overflow:auto; }
 .rt-help { padding:0 18px 12px; margin:0; font-size:12px; }
+.rt-prompt-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.rt-prompt-options .inline select { flex:1; min-width:0; }
+@media(max-width:620px) { .rt-prompt-options { grid-template-columns:1fr; } }
 .rt-columns { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr); flex:1; min-height:0; }
 .rt-chat-column,.rt-summary-column { min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .rt-summary-column { border-left:1px solid var(--line); }

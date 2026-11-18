@@ -35,6 +35,16 @@ def main():
             panel = page.locator('.realtime-chat')
             panel.locator('summary').click()
             expect(page.get_by_label('realtime Prompt', exact=True)).to_be_visible()
+            for kind, label, text in [('actions', 'Gợi ý hành động', 'BROWSER ACTIONS: return "actions" JSON'),
+                                      ('summary', 'Tóm tắt', 'BROWSER SUMMARY: summarize decisions')]:
+                page.get_by_role('button', name='Sửa prompt ' + label, exact=True).click()
+                dialog = page.get_by_role('dialog', name='Sửa prompt ' + label, exact=True)
+                expect(dialog).to_be_visible()
+                dialog.get_by_label('Tên mẫu realtime', exact=True).fill('Meeting ' + kind)
+                dialog.get_by_label('Nội dung prompt realtime', exact=True).fill(text)
+                dialog.get_by_role('button', name='Lưu thành mẫu mới', exact=True).click()
+                expect(dialog).to_have_count(0)
+                expect(page.get_by_label('Prompt ' + label, exact=True)).to_have_value('Meeting ' + kind)
             page.get_by_label('Chu kỳ Chat realtime', exact=True).fill('5')
             page.get_by_label('realtime Power', exact=True).select_option('2')
             page.get_by_label('realtime Summary Power', exact=True).select_option('0')
@@ -54,6 +64,9 @@ def main():
             expect(page.get_by_label('realtime Power', exact=True)).to_be_disabled()
             expect(page.get_by_label('realtime Summary Power', exact=True)).to_be_disabled()
             expect(page.get_by_label('realtime Prompt', exact=True)).to_be_disabled()
+            for label in ('Gợi ý hành động', 'Tóm tắt'):
+                expect(page.get_by_label('Prompt ' + label, exact=True)).to_be_disabled()
+                expect(page.get_by_role('button', name='Sửa prompt ' + label, exact=True)).to_be_disabled()
             expect(page.get_by_label('Chu kỳ Chat realtime', exact=True)).to_be_disabled()
             expect(panel.get_by_label('Auto screenshot', exact=True)).to_be_disabled()
             expect(panel.get_by_role('button', name='Edit prompt', exact=True)).to_be_disabled()
@@ -87,6 +100,10 @@ def main():
             expect(page.get_by_label('realtime Summary Power', exact=True)).to_have_value('0')
             expect(page.get_by_label('realtime Summary Power', exact=True)).to_be_enabled()
             expect(page.get_by_label('realtime Power', exact=True)).to_be_enabled()
+            for kind, label in [('actions', 'Gợi ý hành động'), ('summary', 'Tóm tắt')]:
+                expect(page.get_by_label('Prompt ' + label, exact=True)).to_have_value('Meeting ' + kind)
+            assert fixture.calls[0][1].startswith('BROWSER ')
+            assert fixture.calls[1][1].startswith('BROWSER ')
             expect(panel.get_by_role('button', name='Lưu cài đặt', exact=True)).to_be_enabled()
             assert all(power == (0 if key=='summary-tab' else 2) for key,power in fixture.powers)
             page.screenshot(path='cache/realtime-chat-settings.png')

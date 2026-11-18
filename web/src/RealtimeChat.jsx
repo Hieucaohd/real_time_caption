@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Camera, Copy, MessageSquare, Paperclip, Play, Save, Send, Settings2, Square, ArrowUp, ArrowDown } from "lucide-react";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
+import RealtimePrompts from "./RealtimePrompts";
 import AttachmentList from "./AttachmentList";
 import Md from "./MarkdownResponse";
 import "./realtime-chat.css";
@@ -120,6 +121,8 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
         <label className="field"><span>Chu kỳ cập nhật (giây)</span><input aria-label="Chu kỳ Chat realtime" type="number" min="5" max="3600"
           value={config.interval} onChange={e => setConfig(old => ({ ...old, interval: Number(e.target.value) }))} /></label>
       </ChatOptions>
+      <RealtimePrompts config={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
+        api={api} post={post} disabled={settingsLocked} />
       <p className="muted rt-help">Power gợi ý / hỏi đáp và Power tóm tắt áp dụng riêng cho từng tab. “Giữ nguyên” không đổi mức của tab tương ứng. Stop rồi Start dùng lại hai tab cũ nếu còn mở; chưa có transcript mới thì không gửi lượt tự động. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
     </details>
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}

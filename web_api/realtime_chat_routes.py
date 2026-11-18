@@ -12,6 +12,10 @@ class RealtimeConfig(BaseModel):
     summary_tab_title: str = Field(default='', max_length=500)
     interval: int = Field(default=30, ge=5, le=3600)
     prompt: str = Field(default='', max_length=200)
+    actions_prompt: str | None = Field(default=None, min_length=1, max_length=200_000)
+    summary_prompt: str | None = Field(default=None, min_length=1, max_length=200_000)
+    actions_template: str = Field(default='', max_length=200)
+    summary_template: str = Field(default='', max_length=200)
     power: int = Field(default=-1, ge=-1, le=2)
     # Missing in older settings/archives: inherit their shared Power once.
     summary_power: int | None = Field(default=None, ge=-1, le=2)

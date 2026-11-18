@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import test_web_api as fixtures
 from caption.chatgpt import ChromeChatGPTTab, ChatGPTCancelled
+from caption.shared_access import BusyError
 from web_api.realtime_chat import parse_actions
 from web_api.realtime_chat_store import transcript_delta, RealtimeChatStore
 from web_api.conversation_archive import export_conversation, import_conversation
@@ -150,6 +151,43 @@ class RealtimeChatTests(unittest.TestCase):
         state = self.client.get(self.base).json()
         self.assertEqual(state['actions'][0]['label'], 'Explain')
         self.assertEqual(self.done('summary')[0]['response_source']['response_position'], 2)
+
+    def test_prompt_templates_persist_and_each_lane_uses_saved_snapshot(self):
+        url = '/api/realtime-prompts'
+        defaults = self.client.get(url).json()
+        self.assertIn('"actions"', defaults['actions'][0]['text'])
+        for kind, text in [('actions', 'CUSTOM ACTIONS: return "actions" JSON'), ('summary', 'CUSTOM SUMMARY: decisions only')]:
+            value = dict(name='Meeting', text=text)
+            self.assertEqual(self.post(url + '/' + kind, value).status_code, 200)
+            self.assertEqual(self.post(url + '/' + kind, value).status_code, 400)
+            self.config[kind + '_template'] = value['name']
+            self.config[kind + '_prompt'] = value['text']
+        self.rt.save(self.cid, self.config)
+        # Editing a reusable template must not mutate an existing conversation.
+        self.assertEqual(self.post(url + '/actions', dict(name='Meeting', text='EDITED TEMPLATE', overwrite=True)).status_code, 200)
+        self.assertEqual(self.client.get(url).json()['actions'][1]['text'], 'EDITED TEMPLATE')
+        stored, _ = RealtimeChatStore(self.service.store).settings(self.cid, {})
+        self.assertEqual(stored['actions_prompt'], self.config['actions_prompt'])
+        self.start()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        for key, prompt, _, _ in self.calls:
+            kind = 'summary' if key == 'summary-tab' else 'actions'
+            self.assertTrue(prompt.startswith(self.config[kind + '_prompt']))
+            self.assertIn('<transcript_moi>\nFirst new transcript', prompt)
+        # Start/Stop settings lock also covers prompt text and template selection.
+        with self.assertRaises(BusyError):
+            self.rt.save(self.cid, {**self.config, 'summary_prompt':'changed'})
+
+    def test_prompt_template_validation_and_legacy_defaults(self):
+        for body in (dict(name=' ', text='x'), dict(name='x', text=' '), dict(name='missing', text='x', overwrite=True)):
+            self.assertEqual(self.post('/api/realtime-prompts/actions', body).status_code, 400)
+        self.assertEqual(self.post('/api/realtime-prompts/invalid', dict(name='x', text='x')).status_code, 422)
+        old = {key: value for key, value in self.config.items() if key not in ('actions_prompt','summary_prompt','actions_template','summary_template')}
+        old['summary_prompt'] = None
+        self.rt.store.save(self.cid, old)
+        self.assertTrue(self.rt.state(self.cid)['config']['summary_prompt'])
+        with self.assertRaises(ValueError):
+            self.rt.save(self.cid, {'summary_prompt':'  '})
 
     def test_action_and_manual_questions_use_same_tab_and_prompt_and_keep_context(self):
         self.start()
@@ -430,7 +468,9 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(self.rt.state(self.cid)['running'])
 
     def test_export_import_preserves_history_attachments_and_resets_device_tabs(self):
-        self.config.update(power=2, summary_power=0)
+        self.config.update(power=2, summary_power=0,
+            actions_template='Exported actions', actions_prompt='EXPORTED ACTIONS: return "actions" JSON',
+            summary_template='Exported summary', summary_prompt='EXPORTED SUMMARY: decisions only')
         self.start()
         self.wait_for(lambda: self.done('actions') and self.done('summary'))
         uploaded = self.client.post(f'/api/conversations/{self.cid}/files', headers=self.headers,
@@ -447,6 +487,8 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual(state['config']['selected_tab'], '')
         self.assertEqual(state['config']['summary_tab'], '')
         self.assertEqual((state['config']['power'],state['config']['summary_power']), (2,0))
+        for key in ('actions_template', 'actions_prompt', 'summary_template', 'summary_prompt'):
+            self.assertEqual(state['config'][key], self.config[key])
         chat = next(e for e in state['events'] if e['kind']=='chat')
         self.assertEqual(chat['answer'], 'Answer to the question')
         self.assertEqual(self.service.file_path(imported.id, chat['files'][0]).read_bytes(), b'fake image')

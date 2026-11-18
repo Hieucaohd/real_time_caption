@@ -8,6 +8,10 @@ class RealtimeChatStore:
         self.conversations = conversations
         with conversations._connect() as db:
             db.executescript('''
+                CREATE TABLE IF NOT EXISTS realtime_prompt_templates (
+                    kind TEXT NOT NULL, name TEXT NOT NULL, text TEXT NOT NULL,
+                    PRIMARY KEY(kind, name)
+                );
                 CREATE TABLE IF NOT EXISTS realtime_chat_settings (
                     conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
                     config TEXT NOT NULL,

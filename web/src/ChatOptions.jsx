@@ -56,7 +56,7 @@ export default function ChatOptions({
         </div>
       </label>}
       <label className="field">
-        <span>Prompt</span>
+        <span>{managedContext ? "Prompt · Hỏi đáp" : "Prompt"}</span>
         <div className="inline">
           <select
             aria-label={scope + " Prompt"}

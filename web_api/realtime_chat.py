@@ -14,7 +14,8 @@ from caption.shared_access import BusyError
 from .realtime_chat_store import RealtimeChatStore, transcript_delta
 
 log = logging.getLogger(__name__)
-PREFERENCES = ('prompt', 'power', 'summary_power', 'interval', 'screenshot')
+PREFERENCES = ('prompt', 'power', 'summary_power', 'interval', 'screenshot',
+               'actions_prompt', 'summary_prompt', 'actions_template', 'summary_template')
 _JSON_SPACE_ENTITY = re.compile(r'&(?:#[xX][0-9a-fA-F]+|#\d+|[A-Za-z]+);')
 ACTION_INSTRUCTION = r'''CHẾ ĐỘ ĐỀ XUẤT HÀNH ĐỘNG — ĐẦU RA JSON CHO ỨNG DỤNG.
 Trong lượt này, hãy tạo dữ liệu gợi ý, không trả lời trực tiếp hay thực hiện các hành động. Dù các lượt hỏi đáp trước dùng văn bản thường, lượt này bắt buộc dùng định dạng JSON dưới đây.
@@ -129,6 +130,8 @@ class RealtimeChat:
     def defaults(self):
         s = Settings.load()
         return dict(selected_tab='', selected_tab_title='', summary_tab='', summary_tab_title='', interval=30,
+            actions_prompt=ACTION_INSTRUCTION, summary_prompt=SUMMARY_INSTRUCTION,
+            actions_template='', summary_template='',
             prompt=s.chat_prompt, power=s.chat_chatgpt_power, max_lines=0,
             attach_transcript=True, attach_history=False,
             screenshot=s.chat_screenshot, new_chat=False)
@@ -141,13 +144,23 @@ class RealtimeChat:
                 'max_lines': 0, 'attach_transcript': True, 'attach_history': False, 'new_chat': False}
         if config.get('summary_power') is None:
             config['summary_power'] = config['power']
+        self.normalize_prompts(config)
         return config
+
+    @staticmethod
+    def normalize_prompts(config):
+        for lane, default in [('actions', ACTION_INSTRUCTION), ('summary', SUMMARY_INSTRUCTION)]:
+            if config.get(lane + '_prompt') is None:
+                config[lane + '_prompt'] = default
+            if not config[lane + '_prompt'].strip():
+                raise ValueError('Prompt Chat realtime không được để trống.')
 
     def state(self, cid):
         self.service.conversation(cid)
         config, _ = self.store.settings(cid, self.defaults())
         if config.get('summary_power') is None:
             config['summary_power'] = config['power']
+        self.normalize_prompts(config)
         events = self.store.history(cid)
         suggestions = self.store.latest_actions(cid)
         with self.lock:
@@ -299,7 +312,7 @@ class RealtimeChat:
                     files.append(shot.relative_to(transcript.folder).as_posix())
                 self.store.update(eid, 'working', files=files)
             else:
-                prompt = ACTION_INSTRUCTION if lane == 'actions' else SUMMARY_INSTRUCTION
+                prompt = config.get(lane + '_prompt') or (ACTION_INSTRUCTION if lane == 'actions' else SUMMARY_INSTRUCTION)
                 eid = self.store.create(cid, task['kind'])
                 task['id'] = eid
                 self.store.update(eid, 'working')
