@@ -35,6 +35,24 @@ class RealtimeChatStore:
         return ({**defaults, **json.loads(row['config'])},
                 {lane: json.loads(row[lane+'_cursor']) for lane in ('actions', 'summary')}) if row else (defaults, {'actions': {}, 'summary': {}})
 
+    def repair_actions(self, parse):
+        """Recover saved copy-format failures locally; never consume a cursor or send."""
+        last, repaired = 0, 0
+        while True:
+            with self.conversations._connect() as db:
+                rows = db.execute("SELECT id,answer FROM realtime_chat_events WHERE kind='actions' AND status='error' AND answer<>'' AND id>? ORDER BY id LIMIT 100", (last,)).fetchall()
+            if not rows:
+                return repaired
+            for row in rows:
+                last = row['id']
+                try:
+                    answer = json.dumps(parse(row['answer']), ensure_ascii=False)
+                except ValueError:
+                    continue
+                with self.conversations._connect() as db:
+                    repaired += db.execute("UPDATE realtime_chat_events SET answer=?,status='done',detail='Đã khôi phục gợi ý từ phản hồi đã lưu.' WHERE id=? AND status='error' AND answer=?",
+                                           (answer, row['id'], row['answer'])).rowcount
+
     def save(self, cid, config, reset=()):
         with self.conversations._connect() as db:
             db.execute('INSERT INTO realtime_chat_settings(conversation_id,config) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET config=excluded.config',

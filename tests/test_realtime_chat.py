@@ -15,6 +15,12 @@ def tab(key):
     return ChromeChatGPTTab(key=key, title=key, label=key, url='https://chatgpt.com/', focused=False)
 
 
+def copied_json(value):
+    """ChatGPT Copy response's Markdown representation of plain displayed JSON."""
+    lines = json.dumps(value, ensure_ascii=False, indent=2).splitlines()
+    return '\\\n'.join('&#x20;' + line if line.startswith(' ') else line for line in lines)
+
+
 class DeltaTests(unittest.TestCase):
     def test_delta_caps_backlog_without_repeating_or_dropping_text(self):
         lines = [dict(origin=str(i), source_text=text) for i, text in enumerate(['Old context', 'abcdefghi', 'Later'])]
@@ -35,6 +41,26 @@ class DeltaTests(unittest.TestCase):
         for value in ('not JSON', '[]', '{"actions":[{"label":4,"prompt":"a"}]}', '{"actions":[null]}'):
             with self.assertRaises(ValueError):
                 parse_actions(value)
+
+    def test_markdown_copy_indentation_and_hard_breaks_preserve_prompt_content(self):
+        prompt = 'Explain "A & B": literal &#x20; &nbsp; &quot; &#10;, path C:\\temp\\new, math \\alpha.\nSecond line.'
+        value = {'actions':[{'label':'Giải thích "khái niệm"', 'prompt':prompt}]}
+        for text in (json.dumps(value), copied_json(value), copied_json(value).replace('\n','\r\n'),
+                     '\ufeff```json\n'+copied_json(value)+'\n```',
+                     copied_json(value).replace('&#x20;', '&nbsp;', 1)):
+            self.assertEqual(parse_actions(text)[0]['prompt'], prompt)
+            self.assertEqual(parse_actions(text)[0]['label'], value['actions'][0]['label'])
+
+    def test_copy_cleanup_does_not_guess_invalid_json_or_schema(self):
+        for text in ('{"actions":[{"label":"x","prompt":"unterminated}]}',
+                     '{"actions": [broken]}', '{"actions":[] trailing}',
+                     '{"actions": [{"label":"x", "prompt":"real\nnewline"}]}'):
+            with self.assertRaisesRegex(ValueError, 'Không đọc được JSON'):
+                parse_actions(text)
+        with self.assertRaisesRegex(ValueError, 'trường actions'):
+            parse_actions('{"result": []}')
+        with self.assertRaisesRegex(ValueError, 'label và prompt'):
+            parse_actions('{"actions":[{"label":"x"}]}')
 
 
 class RealtimeChatTests(unittest.TestCase):
@@ -139,6 +165,44 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertIn('My own question', self.calls[-1][1])
         self.assertNotIn('First new transcript', self.calls[-1][1])
         self.assertEqual(self.post(self.base + '/messages', {'action_id':'stale-id'}).status_code, 400)
+
+    def test_copied_markdown_json_creates_buttons_without_pausing_or_resending(self):
+        normal = self.ask
+        def markdown_reply(*args, **kwargs):
+            answer = normal(*args, **kwargs)
+            if kwargs['selected_tab']=='actions-tab':
+                return copied_json(json.loads(answer))
+            return answer
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=markdown_reply):
+            self.start()
+            self.wait_for(lambda: self.done('actions') and self.done('summary'))
+            state = self.rt.state(self.cid)
+            self.assertEqual(state['actions'][0]['label'], 'Explain')
+            self.assertNotEqual(state['lanes']['actions']['status'], 'error')
+            self.due()
+            time.sleep(.4)
+            self.assertEqual(len(self.calls), 2)
+
+    def test_saved_format_errors_are_repaired_locally_without_changing_cursors(self):
+        raw = copied_json({'actions':[{'label':'Recovered', 'prompt':'Explain the saved concept'}]})
+        eid = self.rt.store.create(self.cid, 'actions')
+        source = {'response_conversation_url':'https://chatgpt.com/c/saved','response_position':3}
+        self.rt.store.update(eid, 'error', raw, source=source, cursor={'origin':'sent-origin','offset':42}, lane='actions')
+        invalid = self.rt.store.create(self.cid, 'actions')
+        self.rt.store.update(invalid, 'error', 'Not JSON')
+        chat = self.rt.store.create(self.cid, 'chat')
+        self.rt.store.update(chat, 'error', raw)
+        before = self.rt.store.settings(self.cid, {})
+        self.assertEqual(self.rt.store.repair_actions(parse_actions), 1)
+        self.assertEqual(self.rt.store.repair_actions(parse_actions), 0)
+        self.assertEqual(self.rt.store.settings(self.cid, {}), before)
+        events = {row['id']:row for row in self.rt.store.history(self.cid)}
+        self.assertEqual(events[eid]['status'], 'done')
+        self.assertEqual(events[eid]['response_source'], source)
+        self.assertEqual(events[invalid]['status'], 'error')
+        self.assertEqual(events[chat]['answer'], raw)
+        self.assertEqual(self.rt.state(self.cid)['actions'][0]['label'], 'Recovered')
+        self.assertEqual(self.calls, [])
 
     def test_manual_priority_and_stop_cancels_without_sending_queued_requests(self):
         entered, release = threading.Event(), threading.Event()
