@@ -59,6 +59,8 @@ class Service:
         self._events.start()
         from .research import Research
         self.research = Research(self)
+        from .realtime_chat import RealtimeChat
+        self.realtime_chat = RealtimeChat(self)
         from caption.livecaptions_settings import PreferenceRestorer
         self.captions_preferences = PreferenceRestorer(self.store)
         self.captions_preferences.start()
@@ -510,6 +512,7 @@ class Service:
         return [asdict(w) for w in values]
 
     def close(self):
+        self.realtime_chat.close()
         self.captions_preferences.close()
         self.research.close()
         self.pause()

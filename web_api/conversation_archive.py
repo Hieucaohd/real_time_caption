@@ -16,6 +16,7 @@ import zipfile
 from caption import conversations
 from caption.shared_access import capture_lock, ProcessLock
 from .research_routes import BranchConfig, GraphLayoutPatch, ReadingMark
+from .realtime_chat_routes import RealtimeConfig
 
 FORMAT = 'real-time-caption-conversation'
 MAX_ARCHIVE = 512 * 1024 * 1024
@@ -23,7 +24,8 @@ MAX_EXPANDED = 2 * 1024 * 1024 * 1024
 MAX_MANIFEST = 32 * 1024 * 1024
 MAX_FILES = 10000
 TABLES = ('chat_messages', 'chat_attachments', 'research_nodes', 'research_node_assets',
-          'research_graph_layouts', 'translation_lines', 'line_translations', 'realtime_translations')
+          'research_graph_layouts', 'translation_lines', 'line_translations', 'realtime_translations',
+          'realtime_chat_settings', 'realtime_chat_events')
 
 
 def safe_name(name):
@@ -58,6 +60,7 @@ def export_conversation(service, cid, destination):
             raise KeyError('Conversation not found')
         folder = store.get(cid).folder.resolve()
         rows = lambda sql: [dict(row) for row in db.execute(sql, (cid,))]
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         data = {'format': FORMAT, 'version': 1, 'conversation': conversation,
             'chat_messages': rows('SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY id'),
             'chat_attachments': rows('SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id WHERE m.conversation_id=? ORDER BY a.message_id,a.position'),
@@ -66,6 +69,8 @@ def export_conversation(service, cid, destination):
             'research_graph_layouts': rows('SELECT l.* FROM research_graph_layouts l JOIN research_nodes n ON n.id=l.root_id WHERE n.conversation_id=?'),
             'translation_lines': rows('SELECT * FROM translation_lines WHERE conversation_id=? ORDER BY id'),
             'realtime_translations': rows('SELECT * FROM realtime_translations WHERE conversation_id=? ORDER BY id'),
+            'realtime_chat_settings': rows('SELECT * FROM realtime_chat_settings WHERE conversation_id=?') if 'realtime_chat_settings' in tables else [],
+            'realtime_chat_events': rows('SELECT * FROM realtime_chat_events WHERE conversation_id=? ORDER BY id') if 'realtime_chat_events' in tables else [],
             'line_translations': rows('SELECT t.* FROM line_translations t JOIN translation_lines l ON l.id=t.line_id WHERE l.conversation_id=? ORDER BY t.id'),
             'files': {}}
         total = 0
@@ -118,6 +123,8 @@ def export_conversation(service, cid, destination):
                 message['attachment'] = attachment(message['attachment'])
             for item in data['chat_attachments']:
                 item['path'] = attachment(item['path'])
+            for event in data['realtime_chat_events']:
+                event['files'] = json.dumps([attachment(path) for path in json.loads(event['files'])])
             from io import BytesIO
             for digest in {item['asset_id'] for item in data['research_node_assets']}:
                 row = db.execute('SELECT content FROM research_assets WHERE id=?', (digest,)).fetchone()
@@ -174,6 +181,8 @@ def _unpack(archive, stage):
         raise ValueError('Đây không phải gói hội thoại được hỗ trợ. Hãy dùng bản app mới nhất.')
     # Older v1 exports predate the independent realtime translation history.
     data.setdefault('realtime_translations', [])
+    data.setdefault('realtime_chat_settings', [])
+    data.setdefault('realtime_chat_events', [])
     if set(data) != {'format', 'version', 'conversation', 'files', *TABLES}:
         raise ValueError('Cấu trúc gói hội thoại không hợp lệ.')
     if not isinstance(data['files'], dict) or set(data['files']) != set(infos) - {'manifest.json'}:
@@ -327,6 +336,28 @@ def _restore(store, data, stage, final, publication):
         for item in data['realtime_translations']:
             row = {**item, 'conversation_id': cid}; del row['id']
             _insert(db, 'realtime_translations', row)
+        for item in data['realtime_chat_settings']:
+            config = RealtimeConfig.model_validate(json_object(item['config'])).model_dump()
+            config.update(selected_tab='', selected_tab_title='', summary_tab='', summary_tab_title='', new_chat=False)
+            _insert(db, 'realtime_chat_settings', {**item, 'conversation_id': cid,
+                'config': json.dumps(config, ensure_ascii=False), 'actions_cursor': '{}', 'summary_cursor': '{}'})
+        for item in data['realtime_chat_events']:
+            files = json.loads(item['files'])
+            if not isinstance(files, list) or not all(isinstance(path, str) for path in files):
+                raise ValueError('File Chat realtime không hợp lệ.')
+            row = {**item, 'conversation_id': cid, 'files': json.dumps([file_ref(path) for path in files])}
+            del row['id']
+            json_object(row['response_source'])
+            if row['kind'] not in ('chat', 'actions', 'summary'):
+                raise ValueError('Loại dữ liệu Chat realtime không hợp lệ.')
+            if row['status'] in ('queued', 'working', 'received'):
+                row.update(status='interrupted', detail='Tác vụ chưa hoàn tất trên thiết bị nguồn.')
+            if row['kind'] == 'actions' and row['status'] == 'done':
+                from .realtime_chat import parse_actions
+                actions = json.loads(row['answer'])
+                # Revalidate and assign local action IDs instead of trusting archive data.
+                row['answer'] = json.dumps(parse_actions(json.dumps({'actions': actions})), ensure_ascii=False)
+            _insert(db, 'realtime_chat_events', row)
         manifest = {key: conv[key] for key in ('id', 'title', 'source', 'created_at', 'updated_at', 'last_started_at', 'status')}
         (stage / 'files' / 'conversation.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
         history = [f"# Chat history — {conv['title']}", '']
@@ -357,6 +388,9 @@ def import_conversation(service, source):
             with zipfile.ZipFile(source) as archive:
                 data = _unpack(archive, Path(temporary))
             with service.lock:
+                if not hasattr(service, 'realtime_chat'):
+                    from .realtime_chat_store import RealtimeChatStore
+                    RealtimeChatStore(store)  # Native-only databases need the new tables too.
                 return _restore(store, data, Path(temporary), final, publication)
         except Exception as exc:
             if publication['moved'] and final.exists() and final.resolve().parent == base and final.name.startswith('import-'):

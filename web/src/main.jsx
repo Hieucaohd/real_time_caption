@@ -9,6 +9,7 @@ import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
 import ChromeTranslatorSettings from "./ChromeTranslatorSettings";
 import TranslationReading from "./TranslationReading";
+import RealtimeChat from "./RealtimeChat";
 import useGoogleTranslationStream from "./useGoogleTranslationStream";
 import RecopyAnswer from "./RecopyAnswer";
 import ConversationNameModal from "./ConversationNameModal";
@@ -91,6 +92,7 @@ const tabs = [
   ["summary", BookOpen, "Summary"],
   ["translation", Languages, "Translation"],
   ["vocab", Plus, "New words"],
+  ["realtime", MessageSquare, "Chat realtime"],
 ];
 function Button({ children, icon: Icon, className = "", ...props }) {
   return (
@@ -1024,6 +1026,7 @@ function App() {
                 </div>
               </>
             )}
+            {tab === "realtime" && <RealtimeChat key={cid} cid={cid} api={api} post={post} prompts={boot.prompts.chat || []} refreshPrompts={refresh} />}
             {tab === "chat" && (
               <>
                 <details className="chat-settings">

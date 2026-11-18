@@ -32,6 +32,7 @@ from .research_routes import router as research_router, preferences_router
 from .response_source import ResponseSourceInput
 from .livecaptions_routes import router as livecaptions_router
 from .translation_stream import router as translation_stream_router
+from .realtime_chat_routes import router as realtime_chat_router
 
 ROOT = paths.BUNDLE_DIR
 DIST = ROOT / 'web' / 'dist'
@@ -89,6 +90,7 @@ def create_app(service=None):
     app.include_router(preferences_router)
     app.include_router(livecaptions_router)
     app.include_router(translation_stream_router)
+    app.include_router(realtime_chat_router)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
