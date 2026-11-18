@@ -77,12 +77,12 @@ export default function ChatOptions({
           </button>
         </div>
       </label>
-      <label className="field">
-        <span>Power</span>
+      {(managedContext ? [["power", "Power · Gợi ý / hỏi đáp"], ["summary_power", "Power · Tóm tắt"]] : [["power", "Power"]]).map(([key, label]) => <label className="field" key={key}>
+        <span>{label}</span>
         <select
-          aria-label={scope + " Power"}
-          value={value.power ?? -1}
-          onChange={(e) => set("power", +e.target.value)}
+          aria-label={scope + (key === "power" ? " Power" : " Summary Power")}
+          value={value[key] ?? value.power ?? -1}
+          onChange={(e) => set(key, +e.target.value)}
         >
           {["Giữ nguyên", "Instant", "Medium", "High"].map((p, i) => (
             <option key={p} value={i - 1}>
@@ -90,7 +90,7 @@ export default function ChatOptions({
             </option>
           ))}
         </select>
-      </label>
+      </label>)}
       {!managedContext && <label className="field">
         <span>Số dòng transcript (0 = tất cả)</span>
         <input

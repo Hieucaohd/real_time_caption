@@ -13,6 +13,8 @@ class RealtimeConfig(BaseModel):
     interval: int = Field(default=30, ge=5, le=3600)
     prompt: str = Field(default='', max_length=200)
     power: int = Field(default=-1, ge=-1, le=2)
+    # Missing in older settings/archives: inherit their shared Power once.
+    summary_power: int | None = Field(default=None, ge=-1, le=2)
     max_lines: int = Field(default=300, ge=0, le=1_000_000)
     attach_transcript: bool = True
     attach_history: bool = False

@@ -8,6 +8,7 @@ import "./realtime-chat.css";
 
 const stamp = value => new Date(value).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const attachments = files => (files || []).map(path => ({ path, name: path.split(/[\\/]/).at(-1) }));
+const powerLabel = power => ["Giữ nguyên", "Instant", "Medium", "High"][(power ?? -1) + 1];
 
 export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }) {
   const [state, setState] = useState(null), [config, setConfig] = useState(null);
@@ -112,14 +113,14 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts }
       })}>{active ? <Square size={16} /> : <Play size={16} />}{active ? "Stop" : "Start"}</button>
     </div>
     <details className="chat-settings">
-      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>{config.power < 0 ? "Power: giữ nguyên" : `Power: ${["Instant", "Medium", "High"][config.power]}`} · {config.interval} giây/lượt</span></summary>
+      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
         prompts={prompts} managedContext
         editPrompt={() => setEditingPrompt(true)} scope="realtime" disabled={settingsLocked}>
         <label className="field"><span>Chu kỳ cập nhật (giây)</span><input aria-label="Chu kỳ Chat realtime" type="number" min="5" max="3600"
           value={config.interval} onChange={e => setConfig(old => ({ ...old, interval: Number(e.target.value) }))} /></label>
       </ChatOptions>
-      <p className="muted rt-help">Stop rồi Start tiếp tục dùng hai tab cũ nếu chúng còn mở. Chưa có transcript mới thì không gửi lượt tự động. Cài đặt bị khóa khi đang chạy; bấm Stop và chờ dừng xong để chỉnh. Power “Giữ nguyên” không đổi mức trên ChatGPT.</p>
+      <p className="muted rt-help">Power gợi ý / hỏi đáp và Power tóm tắt áp dụng riêng cho từng tab. “Giữ nguyên” không đổi mức của tab tương ứng. Stop rồi Start dùng lại hai tab cũ nếu còn mở; chưa có transcript mới thì không gửi lượt tự động. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
     </details>
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}
     {notice && <p className="rt-notice" role="status">{notice}</p>}

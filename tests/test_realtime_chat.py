@@ -246,11 +246,46 @@ class RealtimeChatTests(unittest.TestCase):
         self.add_line('Added after changing Power')
         self.due()
         self.wait_for(lambda: len(self.done('actions'))==2 and len(self.done('summary'))==2)
-        self.assertTrue(all(power==0 for _, power in self.powers[-2:]))
+        self.assertEqual(dict(self.powers[-2:]), {'actions-tab':0, 'summary-tab':2})
         for _, prompt, _, fresh in self.calls[-2:]:
             self.assertNotIn('First new transcript', prompt)
             self.assertIn('Added after changing Power', prompt)
             self.assertFalse(fresh)
+
+    def test_independent_power_for_suggestions_manual_chat_and_summary(self):
+        self.config.update(power=2, summary_power=0)
+        self.start()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        self.assertEqual(dict(self.powers), {'actions-tab':2, 'summary-tab':0})
+        aid = self.rt.state(self.cid)['actions'][0]['id']
+        self.post(self.base+'/messages', {'action_id':aid})
+        self.wait_for(lambda: self.done('chat'))
+        self.assertEqual(self.powers[-1], ('actions-tab',2))
+        self.post(self.base+'/stop')
+        self.wait_for(lambda: not self.rt.state(self.cid)['settings_locked'])
+        saved, _ = RealtimeChatStore(self.service.store).settings(self.cid, {})
+        self.assertEqual((saved['power'],saved['summary_power']), (2,0))
+        self.config.update(power=-1, summary_power=1)
+        self.assertEqual(self.client.put(self.base+'/settings', json=self.config, headers=self.headers).status_code,200)
+        self.add_line('New content with independent effort')
+        self.start()
+        self.wait_for(lambda: len(self.done('actions'))==2 and len(self.done('summary'))==2)
+        self.assertEqual(dict(self.powers[-2:]), {'actions-tab':None, 'summary-tab':1})
+
+    def test_legacy_shared_power_is_inherited_and_summary_power_is_validated(self):
+        self.config['power'] = 1
+        self.rt.store.save(self.cid, self.config)  # Old record has no summary_power.
+        state = self.client.get(self.base).json()
+        self.assertEqual(state['config']['summary_power'], 1)
+        for value in (-2,3,True,'High'):
+            self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers,
+                json={**self.config,'summary_power':value}).status_code,422)
+        self.start()
+        self.wait_for(lambda: self.done('actions') and self.done('summary'))
+        self.assertEqual(dict(self.powers), {'actions-tab':1,'summary-tab':1})
+        self.assertEqual(self.rt.store.settings(self.cid,{})[0]['summary_power'], 1)
+        self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers,
+            json={**self.config,'summary_power':0}).status_code,409)
 
     def test_stop_after_delivery_then_restart_does_not_resend_without_new_transcript(self):
         release = threading.Event()
@@ -331,6 +366,7 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(self.rt.state(self.cid)['running'])
 
     def test_export_import_preserves_history_attachments_and_resets_device_tabs(self):
+        self.config.update(power=2, summary_power=0)
         self.start()
         self.wait_for(lambda: self.done('actions') and self.done('summary'))
         uploaded = self.client.post(f'/api/conversations/{self.cid}/files', headers=self.headers,
@@ -346,6 +382,7 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(state['running'])
         self.assertEqual(state['config']['selected_tab'], '')
         self.assertEqual(state['config']['summary_tab'], '')
+        self.assertEqual((state['config']['power'],state['config']['summary_power']), (2,0))
         chat = next(e for e in state['events'] if e['kind']=='chat')
         self.assertEqual(chat['answer'], 'Answer to the question')
         self.assertEqual(self.service.file_path(imported.id, chat['files'][0]).read_bytes(), b'fake image')

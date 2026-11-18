@@ -37,6 +37,7 @@ def main():
             expect(page.get_by_label('realtime Prompt', exact=True)).to_be_visible()
             page.get_by_label('Chu kỳ Chat realtime', exact=True).fill('5')
             page.get_by_label('realtime Power', exact=True).select_option('2')
+            page.get_by_label('realtime Summary Power', exact=True).select_option('0')
             expect(page.get_by_label('realtime ChatGPT tab', exact=True)).to_have_count(0)
             expect(page.get_by_label('Tab tóm tắt realtime', exact=True)).to_have_count(0)
             expect(page.get_by_label('realtime transcript lines', exact=True)).to_have_count(0)
@@ -51,6 +52,7 @@ def main():
             assert opened.call_count == 2
             panel.locator('summary').click()
             expect(page.get_by_label('realtime Power', exact=True)).to_be_disabled()
+            expect(page.get_by_label('realtime Summary Power', exact=True)).to_be_disabled()
             expect(page.get_by_label('realtime Prompt', exact=True)).to_be_disabled()
             expect(page.get_by_label('Chu kỳ Chat realtime', exact=True)).to_be_disabled()
             expect(panel.get_by_label('Auto screenshot', exact=True)).to_be_disabled()
@@ -82,9 +84,11 @@ def main():
             panel.locator('summary').click()
             expect(page.get_by_label('Chu kỳ Chat realtime', exact=True)).to_have_value('5')
             expect(page.get_by_label('realtime Power', exact=True)).to_have_value('2')
+            expect(page.get_by_label('realtime Summary Power', exact=True)).to_have_value('0')
+            expect(page.get_by_label('realtime Summary Power', exact=True)).to_be_enabled()
             expect(page.get_by_label('realtime Power', exact=True)).to_be_enabled()
             expect(panel.get_by_role('button', name='Lưu cài đặt', exact=True)).to_be_enabled()
-            assert fixture.powers[-1][1] == 2
+            assert all(power == (0 if key=='summary-tab' else 2) for key,power in fixture.powers)
             page.screenshot(path='cache/realtime-chat-settings.png')
             panel.locator('summary').click()
             for theme in ('light', 'dark'):
