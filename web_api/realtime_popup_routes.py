@@ -12,7 +12,7 @@ class OpacityInput(BaseModel):
 
 class FontSizeInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    font_size: int = Field(ge=12, le=32)
+    font_size: int = Field(ge=1, le=32)
 
 
 @router.put('/font-size')

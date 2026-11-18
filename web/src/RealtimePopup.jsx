@@ -48,7 +48,7 @@ export default function RealtimePopup({ cid, api, post }) {
     <header className="rt-popup-header">
       <strong title={meta?.title}>{meta?.title || 'Chat realtime'}</strong>
       <label className="rt-font-size">Cỡ chữ
-        <input aria-label="Cỡ chữ popup" type="range" min="12" max="32" step="1"
+        <input aria-label="Cỡ chữ popup" type="range" min="1" max="32" step="1"
           disabled={!meta} value={fontSize ?? 16} onChange={e => setFontSize(Number(e.target.value))} />
         <span>{fontSize ?? 16}px</span>
       </label>

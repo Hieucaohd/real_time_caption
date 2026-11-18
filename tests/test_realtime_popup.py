@@ -68,8 +68,12 @@ class RealtimePopupTests(unittest.TestCase):
     def test_font_size_validation_and_persistence_without_native_window(self):
         base = f'/api/conversations/{self.cid}/realtime-popup'
         self.assertEqual(self.client.put(base + '/font-size', json={'font_size':24}).status_code, 403)
-        for value in (0, 11, 33, '24', 20.5):
+        for value in (0, -1, 33, '24', 20.5):
             self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':value}).status_code, 422)
+        self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':1}).status_code, 200)
+        self.assertEqual(self.client.get(base).json()['font_size'], 1)
+        with self.service.store._connect() as db:
+            self.assertEqual(db.execute('SELECT font_size,opacity FROM realtime_popup_preferences').fetchone()[:], (1,100))
         self.assertEqual(self.client.put(base + '/font-size', headers=self.headers, json={'font_size':32}).status_code, 200)
         self.assertEqual(self.client.get(base).json()['font_size'], 32)
         with self.service.store._connect() as db:
