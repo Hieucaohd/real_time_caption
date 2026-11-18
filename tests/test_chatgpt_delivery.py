@@ -11,6 +11,7 @@ class DeliveryTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.page, self.composer, self.send, self.ack = Mock(), Mock(), Mock(), Mock()
         self.context_check = self.stack.enter_context(patch.object(chatgpt, '_check_context_full'))
+        self.fill = self.stack.enter_context(patch.object(chatgpt, '_fill_composer'))
         self.stack.enter_context(patch('playwright.sync_api.sync_playwright'))
         request = self.stack.enter_context(patch.object(chatgpt, '_request_page'))
         request.return_value.__enter__.return_value = (self.page, False)
@@ -55,12 +56,12 @@ class DeliveryTests(unittest.TestCase):
         self.context_check.side_effect = chatgpt.ChatGPTContextFull('Context window full')
         with self.assertRaises(chatgpt.ChatGPTContextFull):
             self.ask()
-        self.composer.fill.assert_not_called()
+        self.fill.assert_not_called()
         self.send.click.assert_not_called()
         self.ack.assert_not_called()
 
     def test_fill_failure_does_not_expose_private_prompt_or_send(self):
-        self.composer.fill.side_effect = RuntimeError('fill("PRIVATE TRANSCRIPT") timed out')
+        self.fill.side_effect = chatgpt.ChatGPTError('Could not prepare message; not sent')
         with self.assertRaises(chatgpt.ChatGPTError) as raised:
             self.ask()
         self.assertNotIn('PRIVATE TRANSCRIPT', str(raised.exception))

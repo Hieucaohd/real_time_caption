@@ -493,6 +493,72 @@ def _check_cancel(cancel_event):
         raise ChatGPTCancelled(CANCELLED_MESSAGE)
 
 
+_COMPOSER_TEXT = "el => typeof el.value === 'string' ? el.value : el.innerText"
+_INSERT_COMPOSER_TEXT = """(el, text) => {
+    if (!el.isConnected || !el.getClientRects().length ||
+        getComputedStyle(el).visibility === 'hidden' || el.disabled || el.readOnly ||
+        el.getAttribute('aria-disabled') === 'true') return false;
+    const input = el.tagName === 'TEXTAREA' ||
+        (el.tagName === 'INPUT' && ['text', 'search'].includes(el.type));
+    if (!input && !el.isContentEditable) return false;
+    // Focus, selection and insertion run atomically in this document. Never use
+    // global keyboard/clipboard or assign innerHTML (which bypasses editor state).
+    el.focus({preventScroll: true});
+    if (document.activeElement !== el) return false;
+    if (input) {
+        el.select();
+        el.setRangeText(text, 0, el.value.length, 'end');
+        el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: text}));
+        return true;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return document.execCommand('insertText', false, text);
+}"""
+
+
+def _fill_composer(page, composer, prompt, cancel_event=None):
+    """Bounded pre-send retries; background editors may stall Playwright's fill."""
+    def matches():
+        value = composer.evaluate(_COMPOSER_TEXT, timeout=1500)
+        normalize = lambda text: text.replace('\r\n', '\n').replace('\xa0', ' ').strip('\n')
+        return isinstance(value, str) and normalize(value) == normalize(prompt)
+
+    for attempt in range(2):
+        _check_cancel(cancel_event)
+        _check_context_full(page)
+        try:
+            composer.fill(prompt, timeout=3000)
+        except Exception as exc:
+            # Do not log Playwright's call log: it contains the entire prompt.
+            log.info('ChatGPT composer fill attempt %s failed (%s)', attempt + 1, type(exc).__name__)
+        _check_cancel(cancel_event)
+        _check_context_full(page)
+        try:
+            # A fill can time out after the browser has already applied it.
+            if not matches():
+                if composer.evaluate(_INSERT_COMPOSER_TEXT, prompt, timeout=1500) is not True:
+                    continue
+            page.wait_for_timeout(150)  # Let the editor process its input/mutation handlers.
+            _check_cancel(cancel_event)
+            if matches():
+                return
+        except ChatGPTCancelled:
+            raise
+        except Exception as exc:
+            log.info('ChatGPT composer verification failed (%s)', type(exc).__name__)
+    _check_cancel(cancel_event)
+    _check_context_full(page)
+    raise ChatGPTError(
+        'Không nhập được câu hỏi vào ChatGPT sau khi thử lại. Chưa bấm gửi. '
+        'Kiểm tra tab ChatGPT có bị khóa, yêu cầu đăng nhập/xác minh hoặc đang tải '
+        'hay không, rồi thử lại.'
+    ) from None
+
+
 def _wait_not_answering(page, on_status: Callable[[str], None], cancel_event=None) -> None:
     """When continuing a conversation, let ChatGPT finish its previous answer first."""
     stop = _visible(page, STOP_BUTTON)
@@ -942,17 +1008,7 @@ def ask(
 
             _check_cancel(cancel_event)
             _check_context_full(page)
-            try:
-                composer.fill(prompt, timeout=10_000)
-            except Exception:
-                _check_cancel(cancel_event)
-                _check_context_full(page)
-                # Playwright's fill error embeds the complete private prompt.
-                raise ChatGPTError(
-                    'Không nhập được câu hỏi vào ChatGPT. Chưa bấm gửi. '
-                    'Kiểm tra tab ChatGPT có bị khóa, yêu cầu đăng nhập/xác minh '
-                    'hoặc đang tải hay không, rồi thử lại.'
-                ) from None
+            _fill_composer(page, composer, prompt, cancel_event)
             send = _wait_send_enabled(composer_form, UPLOAD_TIMEOUT_S, cancel_event, page=page)
             if dry_run:
                 on_status("Dry run: message prepared, not sent")
