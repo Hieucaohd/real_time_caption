@@ -141,7 +141,8 @@ class RealtimeChat:
         events = self.store.history(cid)
         suggestions = self.store.latest_actions(cid)
         with self.lock:
-            return dict(config=config, auto_scroll=defaults.get('web', 'realtime_auto_scroll'), running=self.active == cid, preparing=self.preparing,
+            return dict(config=config, auto_scroll=defaults.get('web', 'realtime_auto_scroll'), running=self.active == cid,
+                preparing=self.preparing_cid == cid,
                 settings_locked=self.settings_locked(cid),
                 lanes={lane: dict(self.runtime.get((cid, lane), {})) for lane in self.busy},
                 events=events, actions=suggestions)
@@ -171,18 +172,14 @@ class RealtimeChat:
             self.service.conversation(cid)
             old, _ = self.store.settings(cid, self.defaults())
             config = self.config(cid, config)
-            tabs = {tab.key: tab for tab in chatgpt.list_chrome_chatgpt_tabs()}
+            tabs = {tab.key: tab for tab in chatgpt.list_chrome_chatgpt_tabs(cancel_event=self.prepare_cancel)}
             for key, title in [('selected_tab', 'selected_tab_title'), ('summary_tab', 'summary_tab_title')]:
-                if self.prepare_cancel.is_set():
-                    return self.state(cid)
+                chatgpt._check_cancel(self.prepare_cancel)
                 duplicate = key == 'summary_tab' and config[key] == config['selected_tab']
                 if config[key] in tabs and not duplicate:
                     config[title] = tabs[config[key]].title
                 else:
-                    try:
-                        tab = chatgpt.open_new_chatgpt_tab(return_tab=return_tab, cancel_event=self.prepare_cancel)
-                    except chatgpt.ChatGPTCancelled:
-                        return self.state(cid)
+                    tab = chatgpt.open_new_chatgpt_tab(return_tab=return_tab, cancel_event=self.prepare_cancel)
                     config[key], config[title] = tab.key, tab.title
                     # Preserve a newly created tab if preparing the second one fails.
                     lane = 'actions' if key == 'selected_tab' else 'summary'
@@ -191,17 +188,18 @@ class RealtimeChat:
                      if old[key] != config[key]]
             with self.lock:
                 self.store.save(cid, config, reset)
-                if self.prepare_cancel.is_set():
-                    return self.state(cid)
+                chatgpt._check_cancel(self.prepare_cancel)
                 self.active = cid
                 for lane in self.busy:
                     self.runtime[cid, lane] = dict(status='waiting', detail='Đang chờ transcript mới', due=time.monotonic(),
                                                   fresh=False)
-            return self.state(cid)
+        except chatgpt.ChatGPTCancelled:
+            pass
         finally:
             with self.lock:
                 self.preparing = False
                 self.preparing_cid = None
+        return self.state(cid)
 
     def stop(self, cid=None):
         """Stop one conversation, or all realtime work when capture is paused."""

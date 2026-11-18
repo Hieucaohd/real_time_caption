@@ -9,6 +9,7 @@ import time
 import uuid
 
 from . import chatgpt
+from .chatgpt_actions import action
 from .dictation_text import DictationText
 from .transcriber import Event
 
@@ -184,9 +185,18 @@ class ChatGPTDictationReader:
             self.page.wait_for_timeout(POLL_SECONDS * 1000)
 
     def _capture(self, browser):
-        page = self._open_page(browser)
-        self._begin(page, browser)
+        self._check()
+        with action(self._stop, self._queue_status):
+            try:
+                page = self._open_page(browser)
+                self._begin(page, browser)
+            except Exception:
+                self._cleanup()
+                raise
         self._monitor()
+
+    def _queue_status(self, text):
+        self._emit(Event('status', text))
 
     def _cleanup(self):
         if not self.page:
@@ -240,10 +250,12 @@ class ChatGPTDictationReader:
                     if not browser.contexts:
                         raise chatgpt.ChatGPTError('Chrome chưa có cửa sổ. Hãy chạy launch_chrome.bat.')
                     self._capture(browser)
-                except Interrupted:
+                except (Interrupted, chatgpt.ChatGPTCancelled):
                     pass
                 finally:
-                    self._cleanup()
+                    if self.page:
+                        with action(on_status=self._queue_status):
+                            self._cleanup()
         except Exception as exc:
             log.exception('ChatGPT dictation stopped')
             message = str(exc) if isinstance(exc, chatgpt.ChatGPTError) else (

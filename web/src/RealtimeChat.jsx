@@ -44,6 +44,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   const lanes = state?.lanes || {};
   const working = Object.values(lanes).some(lane => lane.status === "working");
   const active = !!state?.running || working || chat.some(e => e.status === "queued");
+  const preparing = !!state?.preparing && !state.running;
   const settingsLocked = busy || !!state?.settings_locked || active;
   useEffect(() => { if (settingsLocked) setEditingPrompt(false); }, [settingsLocked]);
   useLayoutEffect(() => {
@@ -64,6 +65,10 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   async function save() {
     await api(base + "/settings", { method: "PUT", body: config });
     setNotice("Đã lưu cài đặt Chat realtime.");
+  }
+  async function stopPreparing() {
+    try { await post(base + "/stop"); await load(); }
+    catch (e) { if (alive.current) setError(e.message); }
   }
   async function upload(selected) {
     setUploading(true); setError("");
@@ -101,7 +106,8 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   return <div className="realtime-chat">
     <div className="rt-toolbar">
       <strong><MessageSquare size={17} /> Chat realtime</strong>
-      <span className="muted">{state.running ? `Đang theo dõi · ${config.interval} giây/lượt` : "Đã dừng"}</span>
+      <span className="muted">{state.running ? `Đang theo dõi · ${config.interval} giây/lượt`
+        : preparing ? "Đang chờ chuẩn bị tab ChatGPT…" : "Đã dừng"}</span>
       <label className="toggle"><input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} />Tự cuộn</label>
       {state.events.length === 200 && moreHistory && <button disabled={busy} onClick={() => action(async () => {
         setFollow(false);
@@ -110,14 +116,14 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
       })}>Tải lịch sử trước</button>}
       {!popup && <button disabled={busy} onClick={() => action(() => post(`/conversations/${cid}/realtime-popup`))}><PanelTop size={16} /> Popup Chat realtime</button>}
       {!popup && <button disabled={settingsLocked} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>}
-      <button className={active ? "danger" : "primary"} disabled={busy} onClick={() => action(async () => {
+      <button className={active || preparing ? "danger" : "primary"} disabled={busy && !preparing} onClick={() => preparing ? stopPreparing() : action(async () => {
         if (active) await post(base + "/stop");
         else {
           // The popup always starts with the latest saved settings from the main UI.
           const current = popup ? (await api(base)).config : config;
           const result = await post(base + "/start", current); setConfig(result.config); setState(result);
         }
-      })}>{active ? <Square size={16} /> : <Play size={16} />}{active ? "Stop" : "Start"}</button>
+      })}>{active || preparing ? <><Square size={16} /> Stop</> : <><Play size={16} /> Start</>}</button>
     </div>
     {!popup && <details className="chat-settings">
       <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>

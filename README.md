@@ -291,6 +291,12 @@ Model vẫn được tải riêng khi người dùng xác nhận Download.
 
 ## Cách hoạt động
 
+Native và web dùng chung hàng đợi cho các thao tác trên ChatGPT. App xử lý từng
+tác vụ theo thứ tự đến và chờ ít nhất **10 giây sau khi tác vụ trước kết thúc**.
+Một lượt hỏi giữ chỗ đến khi app đọc xong câu trả lời, báo lỗi hoặc xử lý xong yêu cầu hủy.
+Quét tab, mở nhánh, sao chép lại câu trả lời và bật/tắt thu âm cũng đi qua hàng đợi.
+Transcript từ tab đang thu âm vẫn được đọc trong lúc các tác vụ khác chạy.
+
 Mọi tab ChatGPT do app mở dùng chung khoảng chờ tối thiểu **15 giây** giữa hai lần mở
 (Chat, Chat realtime, thu âm, nghiên cứu theo nhánh và launcher). Mốc lần mở gần nhất
 được lưu tại `cache/chatgpt-tab-open.sqlite3` trong thư mục dữ liệu, dùng chung giữa

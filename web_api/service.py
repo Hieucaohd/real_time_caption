@@ -542,6 +542,9 @@ class Service:
         return [asdict(w) for w in values]
 
     def close(self):
+        with self.lock:
+            for cancel in self.job_cancel.values():
+                cancel.set()
         self.chatgpt_tab_observer.close()
         self.realtime_popups.close()
         self.realtime_chat.close()
@@ -552,7 +555,8 @@ class Service:
         if reader:
             if hasattr(reader, 'shutdown'):
                 reader.shutdown()
-            reader._thread.join(timeout=6)
+            # ChatGPT may still be waiting its turn to stop and close the mic tab.
+            reader._thread.join(timeout=None if self.capture['source'] == 'chatgpt' else 6)
         with self.lock:
             self.closed = True
             self.batcher.clear()
@@ -560,8 +564,6 @@ class Service:
                 self.preview_timer.cancel()
             if self.google_timer:
                 self.google_timer.cancel()
-            for cancel in self.job_cancel.values():
-                cancel.set()
             self.worker.close()
             self._stop.set()
             self.hide_overlay()

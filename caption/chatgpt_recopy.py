@@ -1,6 +1,7 @@
 """Copy an existing answer again; never submit a prompt or regenerate an answer."""
 import logging
 from . import chatgpt
+from .chatgpt_actions import queued_action
 from .chatgpt_branch import _find_response_turn, source_conversation_id
 from .chatgpt_source import CONVERSATION_SNAPSHOT, conversation_path, is_answer, response_message_at_position, response_position
 
@@ -51,6 +52,7 @@ def _recopy_in_browser(browser, url, position, return_tab=''):
                 logging.getLogger(__name__).debug('Temporary response tab already closed', exc_info=True)
 
 
+@queued_action
 def recopy_response(url, position, return_tab=''):
     source_conversation_id(url, position)
     from playwright.sync_api import sync_playwright

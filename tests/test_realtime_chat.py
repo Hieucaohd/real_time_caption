@@ -364,7 +364,7 @@ class RealtimeChatTests(unittest.TestCase):
         entered, release = threading.Event(), threading.Event()
         result = []
 
-        def slow_tabs():
+        def slow_tabs(cancel_event=None):
             entered.set()
             self.assertTrue(release.wait(4))
             return [tab('actions-tab'), tab('summary-tab')]

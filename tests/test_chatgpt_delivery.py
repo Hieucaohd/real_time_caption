@@ -1,5 +1,5 @@
 """The delivery callback must precede answer waiting, but follow send confirmation."""
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import unittest
 from unittest.mock import Mock, patch
 from caption import chatgpt
@@ -9,6 +9,7 @@ class DeliveryTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch('caption.chatgpt_actions.action', return_value=nullcontext()))
         self.page, self.composer, self.send, self.ack = Mock(), Mock(), Mock(), Mock()
         self.context_check = self.stack.enter_context(patch.object(chatgpt, '_check_context_full'))
         self.fill = self.stack.enter_context(patch.object(chatgpt, '_fill_composer'))
