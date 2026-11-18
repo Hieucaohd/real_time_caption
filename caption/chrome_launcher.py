@@ -11,7 +11,6 @@ from pathlib import Path
 def open_browser(app_url=None):
     """Reuse debugging Chrome when present; never reset an existing login/profile."""
     from . import paths
-    from .chatgpt_actions import action
     from .chatgpt_tab_gate import opening
     try:
         with urllib.request.urlopen('http://127.0.0.1:9222/json/list', timeout=3) as response:
@@ -45,7 +44,7 @@ def open_browser(app_url=None):
         import ctypes
         ctypes.windll.kernel32.SetDllDirectoryW(None)
     try:
-        with action(), opening():
+        with opening():
             subprocess.Popen(command, cwd=paths.DATA_DIR, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

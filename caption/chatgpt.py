@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from .chatgpt_actions import queued_action
 from .chatgpt_source import CONVERSATION_MAPPING, response_position
 
 log = logging.getLogger(__name__)
@@ -366,8 +365,7 @@ def _selected_chatgpt_tab(browser, tab_key: str):
     raise ChatGPTTabClosed("The selected ChatGPT tab is no longer open. Press Refresh and choose another tab.")
 
 
-@queued_action
-def list_chrome_chatgpt_tabs(cancel_event=None) -> list[ChromeChatGPTTab]:
+def list_chrome_chatgpt_tabs() -> list[ChromeChatGPTTab]:
     """Scan Chrome's ordinary ChatGPT tabs and give each a stable, invisible key."""
     # Chat and Summary scan on separate worker threads during startup. Serializing
     # them prevents both scans assigning different keys to the same unnamed tab.
@@ -981,7 +979,6 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
 # --------------------------------------------------------------------------- main
 
 
-@queued_action
 def open_new_chatgpt_tab(return_tab='', cancel_event=None, on_status=None):
     """Open a fresh ordinary ChatGPT tab in the same Chrome used by the app."""
     from playwright.sync_api import sync_playwright
@@ -1023,7 +1020,6 @@ def _request_page(browser, selected_tab, use_current_tab, tab_name, cancel_event
         lock.release()
 
 
-@queued_action
 def ask(
     prompt: str,
     file_path: Path | list[Path] | None = None,

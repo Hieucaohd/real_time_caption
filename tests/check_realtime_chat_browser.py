@@ -11,7 +11,6 @@ import uvicorn
 from PIL import Image
 from playwright.sync_api import sync_playwright, expect
 from test_realtime_chat import RealtimeChatTests, tab
-from caption.chatgpt import ChatGPTCancelled
 from web_api.server import create_app
 
 
@@ -26,19 +25,8 @@ def main():
             raise RuntimeError('Test server did not start')
         time.sleep(.05)
     port = server.servers[0].sockets[0].getsockname()[1]
-    responses = iter([tab('actions-tab'), tab('summary-tab')])
-    wait_on_open = threading.Event()
-    wait_on_open.set()
-
-    def open_tab(*, return_tab='', cancel_event):
-        if wait_on_open.is_set():
-            if not cancel_event.wait(8):
-                raise AssertionError('Stop did not cancel the queued opening')
-            raise ChatGPTCancelled('Stopped in queue')
-        return next(responses)
-
     try:
-        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', side_effect=open_tab) as opened, sync_playwright() as p:
+        with patch('web_api.realtime_chat.chatgpt.open_new_chatgpt_tab', side_effect=[tab('actions-tab'), tab('summary-tab')]) as opened, sync_playwright() as p:
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width':1440, 'height':1000})
             errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
@@ -68,14 +56,6 @@ def main():
             panel.get_by_role('button', name='Lưu cài đặt', exact=True).click()
             expect(panel.get_by_role('status')).to_contain_text('Đã lưu')
             panel.locator('summary').click()
-
-            panel.get_by_role('button', name='Start', exact=True).click()
-            expect(panel.get_by_text('Đang chờ chuẩn bị tab ChatGPT…')).to_be_visible()
-            panel.get_by_role('button', name='Stop', exact=True).click()
-            expect(panel.get_by_role('button', name='Start', exact=True)).to_be_enabled()
-            wait_on_open.clear()
-            opened.reset_mock()
-
             panel.get_by_role('button', name='Start', exact=True).click()
             expect(panel.get_by_role('button', name='Explain', exact=True)).to_be_visible(timeout=10000)
             expect(panel.locator('.rt-summaries')).to_contain_text('Summary of new content')

@@ -7,7 +7,6 @@ from dataclasses import asdict
 from urllib.parse import unquote, urlsplit
 
 from . import chatgpt
-from .chatgpt_actions import queued_action
 from .chatgpt_source import CONVERSATION_SNAPSHOT, conversation_path, response_message_at_position
 
 CHATGPT_HOSTS = ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com')
@@ -218,7 +217,6 @@ def _branch_in_browser_impl(browser, url, position):
             page.context.remove_listener('response', listener)
 
 
-@queued_action
 def create_branch(url, position, return_tab=''):
     source_conversation_id(url, position)
     from playwright.sync_api import sync_playwright

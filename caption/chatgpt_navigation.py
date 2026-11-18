@@ -3,7 +3,6 @@ import uuid
 from dataclasses import asdict
 
 from . import chatgpt
-from .chatgpt_actions import queued_action
 from .chatgpt_branch import _find_response_turn, source_conversation_id
 from .chatgpt_source import CONVERSATION_SNAPSHOT, response_message_at_position
 
@@ -37,7 +36,6 @@ def _open_response_in_browser(browser, url, position):
         raise chatgpt.ChatGPTError('Tab mới đã mở nhưng chưa cuộn được tới câu trả lời. ' + reason) from exc
 
 
-@queued_action
 def open_response(url, position):
     source_conversation_id(url, position)
     from playwright.sync_api import sync_playwright
