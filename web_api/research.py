@@ -255,6 +255,8 @@ class Research:
                 finish(status=status, detail=detail, partial=job['partial'], **source)
                 self.service.update_job(job, status=status, error=str(exc), detail=detail)
                 self.active.pop(nid, None)
+            if isinstance(exc, chatgpt.ChatGPTLoginRequired):
+                self.service.mark_chatgpt_signed_out()
         finally:
             with self.service.lock:
                 if self.active.get(nid, (None, None))[1] is threading.current_thread():

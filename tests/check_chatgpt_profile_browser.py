@@ -3,12 +3,14 @@ from pathlib import Path
 import sys
 import threading
 import time
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from playwright.sync_api import expect, sync_playwright
 
 from caption.settings import Settings
+from caption.chatgpt import ChatGPTLoginRequired
 from test_web_api import WebApiTests
 from web_api.server import create_app
 
@@ -32,7 +34,7 @@ def main():
             if time.monotonic() >= deadline:
                 raise RuntimeError('Test server did not start')
             time.sleep(.05)
-        with sync_playwright() as p:
+        with sync_playwright() as p, patch('web_api.server.chatgpt.require_browser_login') as login:
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width':1440, 'height':900})
             page.route('**/api/chrome-tabs', lambda r: r.fulfill(json=[{'key':'tab', 'title':'Test tab'}]))
@@ -68,7 +70,17 @@ def main():
             expect(page.get_by_role('button', name='Tạo nhánh con', exact=True)).to_be_disabled()
             page.get_by_role('button', name='Mở cài đặt ChatGPT').click()
             expect(page.get_by_label('Đã đăng nhập ChatGPT trên Chrome của app?')).to_have_value('signed_out')
+            login.side_effect = ChatGPTLoginRequired()
             page.get_by_label('Đã đăng nhập ChatGPT trên Chrome của app?').select_option('signed_in')
+            page.get_by_role('button', name='Save settings', exact=True).click()
+            expect(page.get_by_role('alert')).to_contain_text('Chrome của app chưa đăng nhập ChatGPT.')
+            assert Settings.load().chatgpt_login_status == 'signed_out'
+            page.get_by_role('button', name='Kiểm tra trên Chrome').click()
+            expect(page.locator('.modal-body [role=status]')).to_contain_text('Chrome của app chưa đăng nhập ChatGPT.')
+            expect(page.get_by_label('Đã đăng nhập ChatGPT trên Chrome của app?')).to_have_value('signed_out')
+            login.side_effect = None
+            page.get_by_role('button', name='Kiểm tra trên Chrome').click()
+            expect(page.get_by_label('Đã đăng nhập ChatGPT trên Chrome của app?')).to_have_value('signed_in')
             page.get_by_role('button', name='Save settings', exact=True).click()
             expect(page.get_by_label('Gói ChatGPT')).to_have_count(0)
             page.get_by_role('button', name='Chat', exact=True).click()

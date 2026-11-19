@@ -96,6 +96,7 @@ class ChatGPTDictationReader:
             page.goto('https://chatgpt.com/', wait_until='commit', timeout=2000)
         except TimeoutError:
             pass
+        chatgpt.require_page_login(page, cancel_event=self._stop)
         self._wait(page, lambda: self._button(page, START).count(), 30,
                    'Không tìm thấy nút Dictate. Kiểm tra đăng nhập ChatGPT và kết nối trong Chrome 9222.')
         page.evaluate("document.title = '🎙 Transcript realtime · ChatGPT'")
@@ -138,6 +139,7 @@ class ChatGPTDictationReader:
             page.bring_to_front()
             self._wait_start_ready(page)
             self._check()
+            chatgpt.require_page_login(page, cancel_event=self._stop)
             self.text = DictationText()
             self._emit(Event('status', 'Đang bật micro ChatGPT… Cho phép micro trong Chrome nếu được hỏi.'))
             from playwright.sync_api import TimeoutError
@@ -238,10 +240,12 @@ class ChatGPTDictationReader:
                     if not browser.contexts:
                         raise chatgpt.ChatGPTError('Chrome chưa có cửa sổ. Hãy chạy launch_chrome.bat.')
                     self._capture(browser)
-                except Interrupted:
+                except (Interrupted, chatgpt.ChatGPTCancelled):
                     pass
                 finally:
                     self._cleanup()
+        except chatgpt.ChatGPTLoginRequired as exc:
+            self._emit(Event('login_required', str(exc)))
         except Exception as exc:
             log.exception('ChatGPT dictation stopped')
             message = str(exc) if isinstance(exc, chatgpt.ChatGPTError) else (

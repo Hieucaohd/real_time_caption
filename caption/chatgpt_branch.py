@@ -135,6 +135,7 @@ def _branch_in_browser_impl(browser, url, position):
     listener = None
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+        chatgpt.require_page_login(page)
         page.bring_to_front()
         chatgpt._visible(page, chatgpt.COMPOSER).wait_for(state='visible', timeout=30_000)
         snapshot = page.evaluate(CONVERSATION_SNAPSHOT, source_id)
@@ -155,6 +156,7 @@ def _branch_in_browser_impl(browser, url, position):
 
         # The native menu can open a popup; listen on the context, not just the helper tab.
         page.context.on('response', listener)
+        chatgpt.require_page_login(page)
         branch_requested = True
         button.click(timeout=8000)
         deadline = time.monotonic() + BRANCH_TIMEOUT

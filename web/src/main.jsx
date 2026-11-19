@@ -72,6 +72,9 @@ async function api(path, options = {}, raw = false) {
   }
   const response = await fetch("/api" + path, { ...options, headers });
   if (!response.ok) {
+    if (path === "/chatgpt/login-status" && response.status === 404) {
+      throw new Error("Backend chưa hỗ trợ kiểm tra đăng nhập. Dùng stop_web.bat rồi mở lại ứng dụng.");
+    }
     let detail;
     try {
       detail = (await response.json()).detail;
@@ -91,6 +94,7 @@ async function api(path, options = {}, raw = false) {
   return raw ? response : response.json();
 }
 const post = (path, body = {}) => api(path, { method: "POST", body });
+const checkChatGPTLogin = () => api("/chatgpt/login-status");
 const chatgptTabs = new Set(["chat", "summary", "research", "vocab"]);
 const tabs = [
   ["transcript", FileText, "Transcript"],
@@ -382,6 +386,10 @@ function App() {
     }
   }
   async function changeSettings(values) {
+    if (values.chatgpt_login_status === "signed_in") {
+      const login = await checkChatGPTLogin();
+      if (login.status !== "signed_in") throw new Error(login.detail);
+    }
     const updated = await api("/settings", { method: "PATCH", body: values });
     setBoot((old) => ({ ...old, settings: updated }));
     return updated;
@@ -1635,19 +1643,18 @@ function App() {
           }
           refresh().catch((e) => setError(e.message));
         }} />}
-      {needsChatGPTProfile && <ChatGPTProfileDialog settings={settings} save={changeSettings} />}
+      {needsChatGPTProfile && <ChatGPTProfileDialog settings={settings} save={changeSettings} checkLogin={checkChatGPTLogin} />}
       {settingsOpen && (
         <SettingsModal
           settings={settings}
           boot={boot}
           close={() => setSettingsOpen(false)}
-          save={(values) =>
-            action(async () => {
-              await changeSettings(values);
-              setSettingsOpen(false);
-              setNotice("Đã lưu cài đặt");
-            })
-          }
+          save={async (values) => {
+            await changeSettings(values);
+            setSettingsOpen(false);
+            setNotice("Đã lưu cài đặt");
+            refresh().catch(e => setError(e.message));
+          }}
           run={(kind) =>
             action(() => post("/conversations/" + cid + "/jobs", { kind }))
           }
@@ -1689,7 +1696,19 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
   const [draft, setDraft] = useState({ ...settings }),
     [collections, setCollections] = useState([]),
     [error, setError] = useState("");
+  const [saving, setSaving] = useState(false), [saveError, setSaveError] = useState("");
   const set = (key, value) => setDraft((old) => ({ ...old, [key]: value }));
+  async function submitSettings() {
+    setSaving(true);
+    setSaveError("");
+    try {
+      await save(Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== baseline.current[key])));
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
   const input = (key, label, type = "text") => (
     <Field label={label} key={key}>
       <input
@@ -1709,11 +1728,11 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
             <span className="eyebrow">SHARED PREFERENCES</span>
             <h2>Settings</h2>
           </div>
-          <Button icon={X} onClick={close} aria-label="Close settings" />
+          <Button icon={X} onClick={close} disabled={saving} aria-label="Close settings" />
         </div>
         <div className="modal-body">
           <h3>Tài khoản ChatGPT</h3>
-          <ChatGPTProfileFields value={draft} set={set} />
+          <ChatGPTProfileFields value={draft} set={set} disabled={saving} checkLogin={checkChatGPTLogin} />
           <h3>Giao diện web</h3>
           <Field label="Chế độ hiển thị">
             <select aria-label="Chế độ hiển thị" value={draft.web_theme || "light"} onChange={(e) => set("web_theme", e.target.value)}>
@@ -1857,20 +1876,9 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           {error && <p className="alert">{error}</p>}
         </div>
         <div className="modal-foot">
-          <span>Cài đặt dùng chung với native app</span>
-          <Button
-            className="primary"
-            onClick={() =>
-              save(
-                Object.fromEntries(
-                  Object.entries(draft).filter(
-                    ([k, v]) => v !== baseline.current[k],
-                  ),
-                ),
-              )
-            }
-          >
-            Save settings
+          {saveError ? <span role="alert">{saveError}</span> : <span>Cài đặt dùng chung với native app</span>}
+          <Button className="primary" disabled={saving} onClick={submitSettings}>
+            {saving ? "Đang lưu…" : "Save settings"}
           </Button>
         </div>
       </section>

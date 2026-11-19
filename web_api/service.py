@@ -148,7 +148,9 @@ class Service:
                     self.capture['status'] = event.text
                 elif event.kind == 'warning':
                     self.capture['warning'] = event.text
-                elif event.kind == 'error':
+                elif event.kind in ('error', 'login_required'):
+                    if event.kind == 'login_required':
+                        self.mark_chatgpt_signed_out()
                     self.capture['error'] = event.text
                     self.capture['status'] = event.text
                     if self.reader:
@@ -421,6 +423,8 @@ class Service:
                 else:
                     message = self.recover_chat_tab(job, payload)
             self.update_job(job, status='cancelled' if cancel.is_set() else 'error', error=message, detail='Request stopped')
+            if isinstance(exc, chatgpt.ChatGPTLoginRequired):
+                self.mark_chatgpt_signed_out()
         finally:
             with self.lock:
                 job['_retry'] = payload
@@ -443,6 +447,17 @@ class Service:
             if self.capture['active'] and self.capture.get('source') == 'chatgpt':
                 self.pause()
             self.hide_overlay()
+
+    def mark_chatgpt_signed_out(self):
+        """An explicit login screen on the target tab overrides the saved claim."""
+        with self.lock:
+            settings = Settings.load()
+            if not settings.chatgpt_allowed:
+                return
+            settings.chatgpt_login_status = 'signed_out'
+            settings.web_capture_source = 'windows'
+            settings.save()
+            self.stop_chatgpt()
 
     def recover_chat_tab(self, job, payload):
         """Repair only the selection. The failed question requires manual Retry."""

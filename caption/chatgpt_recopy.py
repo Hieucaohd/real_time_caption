@@ -30,6 +30,7 @@ def _recopy_in_browser(browser, url, position, return_tab=''):
             page = chatgpt._open_background_tab(browser)
         try:
             page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+            chatgpt.require_page_login(page)
             page.bring_to_front()
             chatgpt._visible(page, chatgpt.COMPOSER).wait_for(state='visible', timeout=30_000)
             snapshot = page.evaluate(CONVERSATION_SNAPSHOT, conversation)

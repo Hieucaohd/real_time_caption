@@ -19,7 +19,22 @@ export function FreeAttachmentNotice({ setup = false }) {
   </p>;
 }
 
-export function ChatGPTProfileFields({ value, set, disabled }) {
+export function ChatGPTProfileFields({ value, set, disabled, checkLogin }) {
+  const [checking, setChecking] = useState(false), [result, setResult] = useState("");
+
+  async function verify() {
+    setChecking(true);
+    setResult("");
+    try {
+      const { status, detail } = await checkLogin();
+      setResult(detail);
+      if (status === "signed_in" || status === "signed_out") set("chatgpt_login_status", status);
+    } catch (error) {
+      setResult(error.message);
+    } finally {
+      setChecking(false);
+    }
+  }
   return <>
     <div className="form-grid">
       <label className="field">
@@ -31,19 +46,27 @@ export function ChatGPTProfileFields({ value, set, disabled }) {
       </label>
       <label className="field">
         <span>Đã đăng nhập ChatGPT trên Chrome của app?</span>
-        <select value={value.chatgpt_login_status} onChange={e => set("chatgpt_login_status", e.target.value)} required disabled={disabled}>
+        <select value={value.chatgpt_login_status} onChange={e => {
+          setResult(""); set("chatgpt_login_status", e.target.value);
+        }} required disabled={disabled || checking}>
           <option value="" disabled>Chọn trạng thái…</option>
           <option value="signed_in">Đã đăng nhập</option>
           <option value="signed_out">Chưa đăng nhập</option>
         </select>
       </label>
     </div>
+    <div className="inline">
+      <button type="button" disabled={disabled || checking} onClick={verify}>
+        {checking ? "Đang kiểm tra…" : "Kiểm tra trên Chrome"}
+      </button>
+      {result && <span className="muted" role="status">{result}</span>}
+    </div>
     {value.chatgpt_login_status === "signed_out" ? <SignedOutNotice />
       : value.chatgpt_plan === "free" && <FreeAttachmentNotice setup />}
   </>;
 }
 
-export default function ChatGPTProfileDialog({ settings, save }) {
+export default function ChatGPTProfileDialog({ settings, save, checkLogin }) {
   const dialog = useRef(null);
   const [value, setValue] = useState(() => ({
     chatgpt_plan: settings.chatgpt_plan || "",
@@ -68,7 +91,7 @@ export default function ChatGPTProfileDialog({ settings, save }) {
     <form onSubmit={submit}>
       <div className="modal-head"><h2 id="chatgpt-profile-title">Thiết lập ChatGPT</h2></div>
       <div className="modal-body">
-        <ChatGPTProfileFields value={value} set={(key, choice) => setValue(old => ({ ...old, [key]: choice }))} disabled={saving} />
+        <ChatGPTProfileFields value={value} set={(key, choice) => setValue(old => ({ ...old, [key]: choice }))} disabled={saving} checkLogin={checkLogin} />
         {error && <p role="alert">{error}</p>}
       </div>
       <div className="modal-foot">

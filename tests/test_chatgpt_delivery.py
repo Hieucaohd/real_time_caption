@@ -11,6 +11,7 @@ class DeliveryTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.page, self.composer, self.send, self.ack = Mock(), Mock(), Mock(), Mock()
         self.context_check = self.stack.enter_context(patch.object(chatgpt, '_check_context_full'))
+        self.login_check = self.stack.enter_context(patch.object(chatgpt, 'require_page_login'))
         self.fill = self.stack.enter_context(patch.object(chatgpt, '_fill_composer'))
         self.stack.enter_context(patch('playwright.sync_api.sync_playwright'))
         request = self.stack.enter_context(patch.object(chatgpt, '_request_page'))
@@ -45,6 +46,14 @@ class DeliveryTests(unittest.TestCase):
 
     def test_dry_run_does_not_consume_transcript(self):
         self.assertEqual(self.ask(dry_run=True), '')
+        self.send.click.assert_not_called()
+        self.ack.assert_not_called()
+
+    def test_signed_out_target_never_fills_or_sends(self):
+        self.login_check.side_effect = chatgpt.ChatGPTLoginRequired()
+        with self.assertRaises(chatgpt.ChatGPTLoginRequired):
+            self.ask()
+        self.fill.assert_not_called()
         self.send.click.assert_not_called()
         self.ack.assert_not_called()
 

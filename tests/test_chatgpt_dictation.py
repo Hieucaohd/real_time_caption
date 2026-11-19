@@ -10,7 +10,8 @@ from caption.chatgpt_branch import _tab_snapshot
 from caption.dictation_text import DictationText
 
 
-HTML = r'''<form onsubmit="event.preventDefault(); window.report('SEND')">
+HTML = r'''<button data-testid="profile-button">Profile</button>
+<form onsubmit="event.preventDefault(); window.report('SEND')">
 <div id="prompt-textarea" contenteditable="true"></div>
 <div id="controls"><button type="button" aria-label="Dictate" onclick="begin()">Mic</button></div>
 <button type="submit" data-testid="send-button" aria-label="Send">Send</button>

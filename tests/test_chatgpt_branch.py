@@ -61,7 +61,7 @@ class TabComparisonTests(unittest.TestCase):
         self.assertIsNone(chatgpt_branch._new_branch_tab(before_click, before_click, after, helper, None, helper))
 
 
-SOURCE_HTML = '''<title>Source</title><form><div id="prompt-textarea" contenteditable="true"></div></form>
+SOURCE_HTML = '''<title>Source</title><button data-testid="profile-button">Profile</button><form><div id="prompt-textarea" contenteditable="true"></div></form>
 <div id="scroll" style="height:300px;overflow:auto;position:relative" data-app-action-timeline-scroll>
 <div style="height:2100px;position:relative" id="contents"></div></div>
 <script>
@@ -142,7 +142,7 @@ class NativeBranchUITests(unittest.TestCase):
             route.fulfill(content_type='text/html', body=SOURCE_HTML + f'<script>window.sameTab={str(self.same_tab).lower()};window.directMenu={str(self.direct_menu).lower()};window.localBranch={str(self.local_branch).lower()};window.discardBranchBody={str(self.discard_body).lower()};</script>')
         elif path in ('/', '/g/project/c/created', '/g/project/c/local-chatgpt%3Adraft-id', '/c/unrelated'):
             self.visits.append(path)
-            route.fulfill(content_type='text/html', body='<title>Duplicate title</title><form><div id="prompt-textarea" contenteditable="true"></div></form>')
+            route.fulfill(content_type='text/html', body='<title>Duplicate title</title><button data-testid="profile-button">Profile</button><form><div id="prompt-textarea" contenteditable="true"></div></form>')
         else:
             route.abort()
 

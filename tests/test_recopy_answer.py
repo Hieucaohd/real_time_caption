@@ -142,6 +142,7 @@ class RecopyBrowserTests(unittest.TestCase):
                     request.fulfill(json=snapshot())
                 else:
                     request.fulfill(content_type='text/html', body='''<title>Recovered tab</title>
+                      <button data-testid="profile-button">Profile</button>
                       <form data-chatgpt-composer><div data-composer-markdown contenteditable="true">Do not edit</div></form>
                       <section data-turn-key="turn1">
                         <div data-message-author-role="assistant" data-message-id="a1">Empty earlier response</div>

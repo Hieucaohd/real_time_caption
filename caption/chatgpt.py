@@ -210,6 +210,18 @@ class ChatGPTVerificationRequired(ChatGPTError):
         )
 
 
+class ChatGPTLoginRequired(ChatGPTError):
+    code = 'chatgpt_login_required'
+
+    def __init__(self):
+        super().__init__('Chrome của app chưa đăng nhập ChatGPT. Hãy đăng nhập trên tab ChatGPT rồi kiểm tra lại trong Settings.')
+
+
+class ChatGPTLoginUnverified(ChatGPTError):
+    def __init__(self):
+        super().__init__('Chưa xác nhận được đăng nhập ChatGPT. Hãy mở tab ChatGPT trong Chrome của app, chờ tải xong và kiểm tra lại. Có thể mở thanh bên để hiện nút tài khoản.')
+
+
 _OUTSIDE_CONVERSATION = (
     'xpath=self::*[not(ancestor-or-self::*['
     '@data-message-author-role or @data-turn-key or '
@@ -232,6 +244,88 @@ def _check_verification_required(page):
     ).filter(visible=True).locator(_OUTSIDE_CONVERSATION).first
     if notice.is_visible() is True or widget.is_visible() is True:
         raise ChatGPTVerificationRequired()
+
+
+_CHATGPT_LOGIN_HOSTS = ('chatgpt.com', 'www.chatgpt.com', 'chat.openai.com')
+_PROFILE_MENU = ('button[data-testid="profile-button"], '
+                 'button[aria-haspopup="menu"][aria-label="Open profile menu" i], '
+                 'button[aria-haspopup="menu"][aria-label="Mở menu hồ sơ" i], '
+                 'button[aria-haspopup="menu"][aria-label="Mở menu tài khoản" i]')
+
+
+def login_status(page):
+    """Read UI markers only. Missing controls do not mean signed out."""
+    parsed = urlsplit(page.url)
+    if parsed.scheme != 'https':
+        return 'unknown'
+    if parsed.hostname == 'auth.openai.com':
+        return 'signed_out' if parsed.path.rstrip('/') in ('/log-in', '/login') else 'unknown'
+    if parsed.hostname not in _CHATGPT_LOGIN_HOSTS:
+        return 'unknown'
+    _check_verification_required(page)
+    if parsed.path.rstrip('/') in ('/auth/login', '/auth/signup'):
+        return 'signed_out'
+    # The collapsed sidebar can leave the profile trigger mounted but hidden.
+    profile = page.locator(_PROFILE_MENU).locator(_OUTSIDE_CONVERSATION)
+    login = page.locator('[data-testid="login-button"], [data-testid="signup-button"], a[href^="/auth/login"]')
+    visible_login = login.filter(visible=True).locator(_OUTSIDE_CONVERSATION).first
+    login_name = re.compile(r'^(?:Log in|Sign in|Đăng nhập)$', re.I)
+    labelled_login = page.get_by_role('button', name=login_name).or_(page.get_by_role('link', name=login_name))
+    if visible_login.is_visible() or labelled_login.filter(visible=True).locator(_OUTSIDE_CONVERSATION).first.is_visible():
+        return 'signed_out'
+    return 'signed_in' if profile.count() else 'unknown'
+
+
+def require_page_login(page, cancel_event=None, timeout=6):
+    from playwright.sync_api import Error
+
+    deadline = time.monotonic() + timeout
+    while True:
+        _check_cancel(cancel_event)
+        try:
+            status = login_status(page)
+        except Error:
+            if page.is_closed():
+                raise ChatGPTLoginUnverified() from None
+            status = 'unknown'  # The document may be navigating or hydrating.
+        if status == 'signed_in':
+            return
+        if status == 'signed_out':
+            raise ChatGPTLoginRequired()
+        if time.monotonic() >= deadline:
+            raise ChatGPTLoginUnverified()
+        page.wait_for_timeout(200)
+
+
+def require_browser_login():
+    """Confirm login in an existing Chrome tab without opening or activating a page."""
+    from playwright.sync_api import Error, sync_playwright
+
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_URL, timeout=4000)
+        except Error:
+            raise ChatGPTLoginUnverified() from None
+        candidates = [page for ctx in browser.contexts for page in ctx.pages
+                      if urlsplit(page.url).hostname in _CHATGPT_LOGIN_HOSTS]
+        saw_login = False
+        verification = None
+        for page in candidates:
+            try:
+                status = login_status(page)
+            except ChatGPTVerificationRequired as exc:
+                verification = exc
+                continue
+            except Error:
+                continue
+            if status == 'signed_in':
+                return
+            saw_login |= status == 'signed_out'
+        if verification:
+            raise verification
+        if saw_login:
+            raise ChatGPTLoginRequired()
+        raise ChatGPTLoginUnverified()
 
 
 def _check_context_full(page):
@@ -473,6 +567,7 @@ def _open_new_chatgpt_tab_impl(browser):
     page = _open_background_tab(browser)
     try:
         page.goto(CHATGPT_URL, wait_until='domcontentloaded', timeout=30_000)
+        require_page_login(page)
         with _TAB_SCAN_LOCK:
             key = page.evaluate('([prefix, proposed]) => { if (!window.name.startsWith(prefix)) window.name = proposed; return window.name; }',
                                 [CHAT_TAB_PREFIX, CHAT_TAB_PREFIX + uuid.uuid4().hex])
@@ -480,6 +575,8 @@ def _open_new_chatgpt_tab_impl(browser):
         title = page.title().strip() or 'ChatGPT'
         return ChromeChatGPTTab(key=key, label=f'{title} — {key.removeprefix(CHAT_TAB_PREFIX)[:8]}',
                                title=title, url=page.url, focused=True)
+    except (ChatGPTLoginRequired, ChatGPTLoginUnverified, ChatGPTVerificationRequired):
+        raise
     except Exception as exc:
         raise ChatGPTError('Tab mới đã mở nhưng chưa tải xong ChatGPT. Kiểm tra tab đó rồi Refresh danh sách tab.') from exc
 
@@ -1059,9 +1156,12 @@ def ask(
 
         with _request_page(browser, selected_tab, use_current_tab, tab_name) as (page, created):
             _check_cancel(cancel_event)
+            if not created:
+                require_page_login(page, cancel_event)
             if new_chat or created:
                 on_status("Opening a new ChatGPT chat…")
                 page.goto(CHATGPT_URL, wait_until="domcontentloaded")
+                require_page_login(page, cancel_event)
                 if selected_tab:
                     page.evaluate("key => window.name = key", selected_tab)
                 elif not use_current_tab:
@@ -1105,6 +1205,8 @@ def ask(
 
             _check_cancel(cancel_event)
             _check_context_full(page)
+            if attachments:
+                require_page_login(page, cancel_event)
             _fill_composer(page, composer, prompt, cancel_event)
             remaining = max(0, upload_deadline - time.monotonic()) if upload_deadline is not None else UPLOAD_TIMEOUT_S
             send = _wait_send_enabled(composer_form, remaining, cancel_event, page=page,
@@ -1115,7 +1217,7 @@ def ask(
 
             turns_before = _turn_ids(page)
             answered_before = _answered_turn_ids(page)
-            _check_cancel(cancel_event)
+            require_page_login(page, cancel_event)
             send.click()
             try:
                 page.wait_for_function(

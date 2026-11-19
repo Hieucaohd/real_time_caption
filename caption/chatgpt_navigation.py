@@ -17,6 +17,7 @@ def _open_response_in_browser(browser, url, position):
         page = chatgpt._open_background_tab(browser)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+        chatgpt.require_page_login(page)
         page.bring_to_front()
         with chatgpt._TAB_SCAN_LOCK:
             key = page.evaluate('([prefix, proposed]) => { if (!window.name.startsWith(prefix)) window.name = proposed; return window.name; }',
@@ -33,6 +34,8 @@ def _open_response_in_browser(browser, url, position):
         title = page.title().strip() or 'ChatGPT'
         return {**asdict(chatgpt.ChromeChatGPTTab(key=key, label=title, title=title, url=page.url, focused=True)),
                 'response_position': position}
+    except (chatgpt.ChatGPTLoginRequired, chatgpt.ChatGPTLoginUnverified, chatgpt.ChatGPTVerificationRequired):
+        raise
     except Exception as exc:
         reason = str(exc) if isinstance(exc, (ValueError, chatgpt.ChatGPTError)) else 'Kiểm tra kết nối và đăng nhập ChatGPT trên Chrome 9222.'
         raise chatgpt.ChatGPTError('Tab mới đã mở nhưng chưa cuộn được tới câu trả lời. ' + reason) from exc

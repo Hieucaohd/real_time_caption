@@ -118,6 +118,11 @@ def create_app(service=None):
     async def invalid(_, exc):
         return JSONResponse({'detail': str(exc)}, status_code=400)
 
+    @app.exception_handler(chatgpt.ChatGPTLoginRequired)
+    async def login_required(request, exc):
+        svc(request).mark_chatgpt_signed_out()
+        return JSONResponse({'detail': str(exc)}, status_code=400)
+
     @app.exception_handler(KeyError)
     async def missing(_, exc):
         return JSONResponse({'detail': str(exc)}, status_code=404)
@@ -285,6 +290,11 @@ def create_app(service=None):
 
     @app.patch('/api/settings')
     def settings(body: SettingsPatch, request: Request):
+        if body.chatgpt_login_status == 'signed_in':
+            try:
+                chatgpt.require_browser_login()
+            except chatgpt.ChatGPTLoginRequired as exc:
+                raise ValueError(str(exc)) from None
         with svc(request).lock:
             return save_settings(body, request)
 
@@ -343,6 +353,16 @@ def create_app(service=None):
     @app.get('/api/chrome-tabs')
     def tabs(request: Request):
         return [asdict(tab) for tab in svc(request).list_chatgpt_tabs()]
+
+    @app.get('/api/chatgpt/login-status')
+    def inspect_chatgpt_login():
+        try:
+            chatgpt.require_browser_login()
+        except chatgpt.ChatGPTLoginRequired as exc:
+            return {'status': 'signed_out', 'detail': str(exc)}
+        except (chatgpt.ChatGPTLoginUnverified, chatgpt.ChatGPTVerificationRequired) as exc:
+            return {'status': 'unknown', 'detail': str(exc)}
+        return {'status': 'signed_in', 'detail': 'Đã thấy nút tài khoản trên tab ChatGPT.'}
 
     @app.post('/api/chrome-tabs')
     def open_chatgpt_tab(request: Request):

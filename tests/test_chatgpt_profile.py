@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from caption import chatgpt
 from caption.settings import Settings
 import test_web_api as fixtures
 
@@ -20,7 +21,8 @@ class ChatGPTProfileTests(unittest.TestCase):
     def test_profile_persists_and_switching_plan_restores_upload(self):
         self.assertEqual(self.change(chatgpt_plan='invalid').status_code, 400)
         self.assertEqual(self.change(chatgpt_login_status='invalid').status_code, 400)
-        self.assertEqual(self.change(chatgpt_plan='free', chatgpt_login_status='signed_in').status_code, 200)
+        with patch('web_api.server.chatgpt.require_browser_login'):
+            self.assertEqual(self.change(chatgpt_plan='free', chatgpt_login_status='signed_in').status_code, 200)
         profile = self.client.get('/api/bootstrap').json()['settings']
         self.assertEqual((profile['chatgpt_plan'], profile['chatgpt_login_status']), ('free', 'signed_in'))
         self.assertEqual(self.upload().status_code, 400)
@@ -48,8 +50,32 @@ class ChatGPTProfileTests(unittest.TestCase):
         self.assertEqual(self.upload().status_code, 400)
         self.assertEqual(self.post(base + '/capture').json()['capture']['source'], 'windows')
         self.post('/api/capture/pause')
-        self.assertEqual(self.change(chatgpt_login_status='signed_in').status_code, 200)
+        with patch('web_api.server.chatgpt.require_browser_login'):
+            self.assertEqual(self.change(chatgpt_login_status='signed_in').status_code, 200)
         self.assertEqual(self.upload().status_code, 200)
+
+    def test_login_claim_requires_browser_evidence(self):
+        self.assertEqual(self.change(chatgpt_login_status='signed_out').status_code, 200)
+        for error, status in ((chatgpt.ChatGPTLoginRequired(), 'signed_out'),
+                              (chatgpt.ChatGPTLoginUnverified(), 'unknown'),
+                              (chatgpt.ChatGPTVerificationRequired(), 'unknown')):
+            with self.subTest(status=status), patch('web_api.server.chatgpt.require_browser_login', side_effect=error):
+                self.assertEqual(self.change(chatgpt_login_status='signed_in').status_code, 400)
+                self.assertEqual(Settings.load().chatgpt_login_status, 'signed_out')
+                self.assertEqual(self.client.get('/api/chatgpt/login-status').json()['status'], status)
+        with patch('web_api.server.chatgpt.require_browser_login'):
+            self.assertEqual(self.client.get('/api/chatgpt/login-status').json()['status'], 'signed_in')
+            self.assertEqual(self.change(chatgpt_login_status='signed_in').status_code, 200)
+        self.assertEqual(Settings.load().chatgpt_login_status, 'signed_in')
+
+    def test_signed_out_target_turns_off_chatgpt_and_unknown_keeps_current_setting(self):
+        self.assertEqual(self.change(web_capture_source='chatgpt').status_code, 200)
+        for error, expected in ((chatgpt.ChatGPTLoginUnverified(), 'signed_in'),
+                                (chatgpt.ChatGPTLoginRequired(), 'signed_out')):
+            with patch('web_api.server.chatgpt.open_new_chatgpt_tab', side_effect=error):
+                self.assertEqual(self.post('/api/chrome-tabs').status_code, 400)
+                self.assertEqual(Settings.load().chatgpt_login_status, expected)
+        self.assertEqual(Settings.load().web_capture_source, 'windows')
 
     def test_sign_out_stops_chatgpt_capture_and_realtime(self):
         self.assertEqual(self.change(web_capture_source='chatgpt').status_code, 200)

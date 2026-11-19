@@ -381,6 +381,8 @@ class RealtimeChat:
                 self.store.update(eid, status, answer=answer, detail=detail, source=response_source)
             self.status(cid, lane, status=status, detail=detail, partial='',
                         error_code=getattr(exc, 'code', '') if not cancel.is_set() else '')
+            if isinstance(exc, chatgpt.ChatGPTLoginRequired):
+                self.service.mark_chatgpt_signed_out()
 
     def close(self):
         self.closed.set()
