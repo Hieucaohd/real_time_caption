@@ -750,6 +750,7 @@ export default function ResearchTab({
         <BranchComposer
           key={draft.parent.id}
           draft={draft}
+          attachmentsAllowed={settings.chatgpt_plan !== "free"}
           tabs={chromeTabs}
           scanTabs={scanTabs}
           loadingTabs={loadingTabs}

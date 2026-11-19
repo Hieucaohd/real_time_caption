@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "settings": {
+    "chatgpt_plan": "",
+    "chatgpt_login_status": "",
     "web_capture_source": "chatgpt",
     "device_label": "",
     "model": "small.en",

@@ -11,7 +11,7 @@ from . import paths
 
 def validate(data):
     # Imported lazily: Settings factories call us only after the class exists.
-    from .settings import Settings
+    from .settings import CHATGPT_LOGIN_STATUSES, CHATGPT_PLANS, Settings
     schemas = {
         'settings': get_type_hints(Settings),
         'realtime_chat': dict(interval=int, upload_timeout_seconds=int, prompt=(str, type(None)), power=(int, type(None)),
@@ -52,6 +52,8 @@ def validate(data):
         if value is not None and not low <= value <= high:
             raise ValueError(f'defaults.json: {section}.{key} must be between {low} and {high}')
 
+    choice('settings', 'chatgpt_plan', CHATGPT_PLANS)
+    choice('settings', 'chatgpt_login_status', CHATGPT_LOGIN_STATUSES)
     choice('settings', 'web_capture_source', ('windows', 'chatgpt'))
     choice('settings', 'translation_engine', ('azure', 'google', 'chrome', 'google_web', 'gemini', 'vinai'))
     choice('settings', 'translation_view', ('history', 'parallel'))

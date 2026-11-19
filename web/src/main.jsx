@@ -4,6 +4,7 @@ import Md from "./MarkdownResponse";
 import ResearchTab from "./ResearchTab";
 import ResponseSource from "./ResponseSource";
 import AttachmentList from "./AttachmentList";
+import ChatGPTProfileDialog, { ChatGPTProfileFields, FreeAttachmentNotice } from "./ChatGPTProfile";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
@@ -207,6 +208,8 @@ function App() {
   const visibleError = error || (captureError !== dismissedCaptureError ? captureError : "");
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
+  const needsChatGPTProfile = !settings.chatgpt_plan || !settings.chatgpt_login_status;
+  const attachmentsAllowed = settings.chatgpt_plan !== "free";
   const captureSource = boot?.capture?.source || settings.web_capture_source || "windows";
   const captureLabel = captureSource === "chatgpt" ? "ChatGPT · Micro" : "Windows Live Captions";
   const chatConfig = chatDraft || chatPreferences(settings);
@@ -332,12 +335,12 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
-    if (tab !== "chat" || !boot || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
+    if (tab !== "chat" || !boot || needsChatGPTProfile || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
     chatTabInitialized.current = true;
     // A saved selection is usable without opening Chrome's tab list. Only a
     // first-time setup with no saved tab discovers/creates a default once.
     if (!chatConfigRef.current.selected_tab) prepareChatTab();
-  }, [tab, cid, !!boot, chatConfig.new_chat]);
+  }, [tab, cid, !!boot, chatConfig.new_chat, needsChatGPTProfile]);
   useEffect(() => {
     if (follow && tab === "transcript")
       transcriptEnd.current?.scrollIntoView({ block: "end" });
@@ -480,7 +483,7 @@ function App() {
     }
   }
   async function upload(selected) {
-    if (!cid) return;
+    if (!cid || !attachmentsAllowed) return;
     const target = cid;
     setUploading(true);
     try {
@@ -497,6 +500,7 @@ function App() {
     }
   }
   async function screen() {
+    if (!attachmentsAllowed) return;
     let stream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({
@@ -528,7 +532,7 @@ function App() {
         ...chatConfig,
         selected_tab: chatConfig.new_chat ? "" : chatSelectedTab,
         message,
-        files: files.map((f) => f.path),
+        files: attachmentsAllowed ? files.map((f) => f.path) : [],
       });
     if (kind === "summary")
       Object.assign(payload, { new_chat: settings.summary_new_chat });
@@ -587,6 +591,7 @@ function App() {
     if (kind === "chat")
       return (
         <ChatOptions
+          attachmentsAllowed={attachmentsAllowed}
           value={chatConfig}
           onChange={(patch) => {
             if ("new_chat" in patch) {
@@ -704,7 +709,7 @@ function App() {
         </Field>
         <>
           <Toggle
-            label="Đính kèm transcript"
+            label={attachmentsAllowed ? "Đính kèm transcript" : "Gửi transcript dưới dạng văn bản"}
             checked={settings.summary_attach_transcript}
             onChange={(v) =>
               action(() => changeSettings({ summary_attach_transcript: v }))
@@ -1115,8 +1120,9 @@ function App() {
                   <div ref={chatEnd} />
                 </div>
                 <div className="composer chat-composer">
-                  <AttachmentList files={files} cid={cid}
+                  {attachmentsAllowed ? <AttachmentList files={files} cid={cid}
                     onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />
+                    : <FreeAttachmentNotice />}
                   <textarea
                     ref={messageInput}
                     rows={1}
@@ -1132,6 +1138,7 @@ function App() {
                       }
                     }}
                     onPaste={(e) => {
+                      if (!attachmentsAllowed) return;
                       const images = [...e.clipboardData.files].filter((f) =>
                         f.type.startsWith("image/"),
                       );
@@ -1146,14 +1153,14 @@ function App() {
                       <Button
                         icon={Paperclip}
                         onClick={() => fileInput.current.click()}
-                        disabled={uploading}
+                        disabled={uploading || !attachmentsAllowed}
                       >
                         Attach files
                       </Button>
                       <Button
                         icon={Camera}
                         onClick={screen}
-                        disabled={uploading}
+                        disabled={uploading || !attachmentsAllowed}
                       >
                         Screenshot
                       </Button>
@@ -1172,6 +1179,7 @@ function App() {
                         ref={fileInput}
                         type="file"
                         multiple
+                        disabled={!attachmentsAllowed}
                         onChange={(e) => {
                           upload([...e.target.files]);
                           e.target.value = "";
@@ -1614,6 +1622,7 @@ function App() {
           }
           refresh().catch((e) => setError(e.message));
         }} />}
+      {needsChatGPTProfile && <ChatGPTProfileDialog settings={settings} save={changeSettings} />}
       {settingsOpen && (
         <SettingsModal
           settings={settings}
@@ -1690,6 +1699,8 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           <Button icon={X} onClick={close} aria-label="Close settings" />
         </div>
         <div className="modal-body">
+          <h3>Tài khoản ChatGPT</h3>
+          <ChatGPTProfileFields value={draft} set={set} />
           <h3>Giao diện web</h3>
           <Field label="Chế độ hiển thị">
             <select aria-label="Chế độ hiển thị" value={draft.web_theme || "light"} onChange={(e) => set("web_theme", e.target.value)}>

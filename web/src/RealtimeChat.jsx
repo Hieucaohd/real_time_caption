@@ -4,6 +4,7 @@ import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import RealtimePrompts from "./RealtimePrompts";
 import AttachmentList from "./AttachmentList";
+import { FreeAttachmentNotice } from "./ChatGPTProfile";
 import Md from "./MarkdownResponse";
 import "./realtime-chat.css";
 
@@ -45,6 +46,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   const working = Object.values(lanes).some(lane => lane.status === "working");
   const active = !!state?.running || working || chat.some(e => e.status === "queued");
   const settingsLocked = busy || !!state?.settings_locked || active;
+  const attachmentsAllowed = state?.attachments_allowed !== false;
   useEffect(() => { if (settingsLocked) setEditingPrompt(false); }, [settingsLocked]);
   useLayoutEffect(() => {
     if (follow) for (const ref of [chatScroll, summaryScroll])
@@ -66,6 +68,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     setNotice("Đã lưu cài đặt Chat realtime.");
   }
   async function upload(selected) {
+    if (!attachmentsAllowed) return;
     setUploading(true); setError("");
     try {
       for (const file of selected) {
@@ -77,6 +80,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     finally { if (alive.current) setUploading(false); }
   }
   async function screenshot() {
+    if (!attachmentsAllowed) return;
     let stream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
@@ -92,7 +96,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     if (uploading || (!actionId && !message.trim())) return;
     action(async () => {
       if (!popup && !settingsLocked) await save();
-      await post(base + "/messages", { message, action_id: actionId, files: files.map(file => file.path) });
+      await post(base + "/messages", { message, action_id: actionId, files: attachmentsAllowed ? files.map(file => file.path) : [] });
       if (!actionId) setMessage("");
       setFiles([]); setNotice("");
     });
@@ -122,6 +126,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     {!popup && <details className="chat-settings">
       <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
+        attachmentsAllowed={attachmentsAllowed}
         prompts={prompts} managedContext
         editPrompt={() => setEditingPrompt(true)} scope="realtime" disabled={settingsLocked}>
         <label className="field"><span>Chu kỳ cập nhật (giây)</span><input aria-label="Chu kỳ Chat realtime" type="number" min="5" max="3600"
@@ -162,14 +167,15 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
           {lanes.actions?.kind === "chat" && lanes.actions?.partial && <article className="message bot preview"><Md text={lanes.actions.partial} /></article>}
         </div>
         <div className="composer chat-composer">
-          <AttachmentList cid={cid} files={files} disabled={busy || uploading} onRemove={file => setFiles(old => old.filter(item => item.path !== file.path))} />
+          {attachmentsAllowed ? <AttachmentList cid={cid} files={files} disabled={busy || uploading}
+            onRemove={file => setFiles(old => old.filter(item => item.path !== file.path))} /> : <FreeAttachmentNotice />}
           <textarea ref={input} rows={1} aria-label="Câu hỏi Chat realtime" placeholder="Nhập câu hỏi… Enter để gửi, Shift + Enter xuống dòng"
             value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            onPaste={e => { const images = [...e.clipboardData.files].filter(file => file.type.startsWith("image/")); if (images.length) { e.preventDefault(); upload(images); } }} />
-          <input type="file" multiple hidden ref={fileInput} onChange={e => { upload([...e.target.files]); e.target.value = ""; }} />
+            onPaste={e => { if (!attachmentsAllowed) return; const images = [...e.clipboardData.files].filter(file => file.type.startsWith("image/")); if (images.length) { e.preventDefault(); upload(images); } }} />
+          <input type="file" multiple hidden ref={fileInput} disabled={!attachmentsAllowed} onChange={e => { upload([...e.target.files]); e.target.value = ""; }} />
           <div className="composer-actions"><div className="inline">
-            <button disabled={uploading} onClick={() => fileInput.current?.click()}><Paperclip size={16} /> Attach files</button>
-            <button disabled={uploading} onClick={screenshot}><Camera size={16} /> Screenshot</button>
+            <button disabled={uploading || !attachmentsAllowed} onClick={() => fileInput.current?.click()}><Paperclip size={16} /> Attach files</button>
+            <button disabled={uploading || !attachmentsAllowed} onClick={screenshot}><Camera size={16} /> Screenshot</button>
             <button title="Lên đầu" onClick={() => chatScroll.current?.scrollTo({ top: 0 })}><ArrowUp size={16} /></button>
             <button title="Xuống cuối" onClick={() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight })}><ArrowDown size={16} /></button>
           </div><button className="primary" disabled={busy || uploading || !message.trim()} onClick={() => send()}><Send size={16} /> Send</button></div>

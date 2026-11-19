@@ -56,6 +56,8 @@ Khi chạy từ source, khởi động lại backend sau khi sửa file. Chỉ r
 
 | Config | Mặc định | Giá trị và ý nghĩa |
 | --- | --- | --- |
+| `settings.chatgpt_plan` | `""` | Gói người dùng khai báo trong web Settings. Bỏ trống để hỏi khi mở app. `"free"` tắt file và ảnh trong các lượt gửi từ web. |
+| `settings.chatgpt_login_status` | `""` | Trạng thái người dùng tự khai báo: `"signed_in"` hoặc `"signed_out"`. Bỏ trống để hỏi khi mở app. |
 | `settings.web_capture_source` | `"windows"` | Nguồn thu của web: `"windows"` đọc Windows Live Captions; `"chatgpt"` đọc chữ từ micro Dictate trong tab ChatGPT riêng. Chỉ chọn một nguồn. |
 | `settings.device_label` | `""` | Chuỗi tên thiết bị/nguồn được chọn ở native app. Rỗng để app chọn theo danh sách thiết bị có sẵn. Không chọn micro Chrome hay thay `web_capture_source`. |
 | `settings.model` | `"small.en"` | Model Whisper của native khi thu âm trực tiếp. Các lựa chọn có sẵn gồm `tiny.en`, `base.en`, `small.en`, `medium.en`, `distil-large-v3`, `large-v3-turbo`; còn có thể nhập tên model phù hợp. Không ảnh hưởng Windows Live Captions hoặc ChatGPT Dictate. Bộ kiểm tra chỉ kiểm tra đây là chuỗi. |

@@ -66,7 +66,8 @@ class WebApiTests(unittest.TestCase):
         ]
         for p in self.patches:
             p.start()
-        settings.Settings(chat_screenshot=False, chat_new_chat=False).save()
+        settings.Settings(chat_screenshot=False, chat_new_chat=False,
+                          chatgpt_plan='plus', chatgpt_login_status='signed_in').save()
         prompt_versions.save_new_version('Question: {message}', 'default', prompt_versions.CHAT_DIR)
         prompt_versions.save_new_version('Summarize {file_name}', 'default', prompt_versions.SUMMARY_DIR)
         self.service = Service()

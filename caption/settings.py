@@ -13,10 +13,15 @@ from .paths import SETTINGS_PATH
 from .shared_access import ProcessLock
 
 log = logging.getLogger(__name__)
+CHATGPT_PLANS = ('', 'free', 'go', 'plus', 'pro', 'business', 'enterprise', 'edu', 'other')
+CHATGPT_LOGIN_STATUSES = ('', 'signed_in', 'signed_out')
+CHATGPT_ATTACHMENTS_DISABLED = 'App đã tắt đính kèm file, ảnh và chụp màn hình cho ChatGPT Free. Đổi gói trong Settings để bật lại.'
 
 
 @dataclass
 class Settings:
+    chatgpt_plan: str = field(default_factory=lambda: defaults.get('settings', 'chatgpt_plan'))
+    chatgpt_login_status: str = field(default_factory=lambda: defaults.get('settings', 'chatgpt_login_status'))
     web_capture_source: str = field(default_factory=lambda: defaults.get("settings", "web_capture_source"))
     device_label: str = field(default_factory=lambda: defaults.get("settings", "device_label"))
     model: str = field(default_factory=lambda: defaults.get("settings", "model"))
@@ -71,6 +76,14 @@ class Settings:
     translation_gemini_model: str = field(default_factory=lambda: defaults.get("settings", "translation_gemini_model"))
     translation_gemini_prompt: str = field(default_factory=lambda: defaults.get("settings", "translation_gemini_prompt"))
     translation_device: str = field(default_factory=lambda: defaults.get("settings", "translation_device"))
+
+    @property
+    def chatgpt_attachments_allowed(self) -> bool:
+        return self.chatgpt_plan != 'free'
+
+    def require_chatgpt_attachments(self) -> None:
+        if not self.chatgpt_attachments_allowed:
+            raise ValueError(CHATGPT_ATTACHMENTS_DISABLED)
 
     @classmethod
     def load(cls) -> "Settings":

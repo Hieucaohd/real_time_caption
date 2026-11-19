@@ -17,6 +17,7 @@ export default function ChatOptions({
   onSave,
   saving = false,
   managedContext = false,
+  attachmentsAllowed = true,
   children,
 }) {
   const set = (key, next) => onChange({ [key]: next });
@@ -96,6 +97,7 @@ export default function ChatOptions({
         <span>Số dòng transcript (0 = tất cả)</span>
         <input
           aria-label={scope + " transcript lines"}
+          disabled={!attachmentsAllowed}
           type="number"
           min="0"
           max="1000000"
@@ -112,7 +114,8 @@ export default function ChatOptions({
         <label className="toggle" key={key}>
           <input
             type="checkbox"
-            checked={!!value[key]}
+            checked={(attachmentsAllowed || key === "new_chat") && !!value[key]}
+            disabled={!attachmentsAllowed && key !== "new_chat"}
             onChange={(e) => set(key, e.target.checked)}
           />
           {label}

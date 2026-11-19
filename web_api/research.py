@@ -31,6 +31,8 @@ class Research:
             if parent['status'] != 'done':
                 raise ValueError('Wait for the parent answer before creating its children.')
             settings = Settings.load()
+            if payload.get('files'):
+                settings.require_chatgpt_attachments()
             config = dict(selected_tab=settings.chatgpt_selected_tab,
                           power=settings.chat_chatgpt_power, attach_transcript=False,
                           max_lines=settings.chat_max_lines, screenshot=settings.chat_screenshot,
@@ -38,6 +40,8 @@ class Research:
                           new_chat=False, ancestor_depth=0)
             config.update(self.store.defaults())
             config.update(payload.get('config', {}))
+            if not settings.chatgpt_attachments_allowed:
+                config.update(attach_transcript=False, attach_history=False, screenshot=False)
             if not config['selected_tab']:
                 raise ValueError('Chọn tab ChatGPT cho nghiên cứu trước khi xếp hàng.')
             version = prompt_versions.resolve(config['prompt'], prompt_versions.CHAT_DIR)
@@ -83,20 +87,26 @@ class Research:
                     target = folder / history.name
                     shutil.copy2(history, target)
                     attachments.append(str(target))
+            inline_context = ''
             if ancestors:
-                context_file = folder / 'research-ancestors.md'
                 sections = ['# Ngữ cảnh nghiên cứu theo nhánh',
                             'Các cặp câu hỏi và câu trả lời được chọn, theo thứ tự từ cũ nhất đến node cha.']
                 for index, ancestor in enumerate(ancestors, 1):
                     sections.append(f"## {index}. {ancestor['title']}\n\n### Câu hỏi\n\n{ancestor['question']}\n\n### Câu trả lời\n\n{ancestor['answer']}")
-                context_file.write_text('\n\n---\n\n'.join(sections) + '\n', encoding='utf-8')
-                attachments.append(str(context_file))
+                context = '\n\n---\n\n'.join(sections) + '\n'
+                if settings.chatgpt_attachments_allowed:
+                    context_file = folder / 'research-ancestors.md'
+                    context_file.write_text(context, encoding='utf-8')
+                    attachments.append(str(context_file))
+                else:
+                    inline_context = '\n\n' + context
             prepared = []
             titles = payload.get('titles', [])
             for index, question in enumerate(payload['questions']):
                 title = titles[index].strip() if index < len(titles) else ''
                 prompt = chatgpt.build_prompt(upload, transcript.source, transcript.started,
                     prompt_versions.path_for(version, prompt_versions.CHAT_DIR), question)
+                prompt += inline_context
                 prepared.append(dict(id=uuid.uuid4().hex, title=title or question.splitlines()[0][:100], question=question,
                     excerpt=payload.get('excerpt', ''), config=config,
                     request=dict(prompt=prompt, attachments=attachments,
@@ -204,6 +214,8 @@ class Research:
             if cancel.is_set() or self.stop.is_set():
                 raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
             attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
+            if attachments:
+                Settings.load().require_chatgpt_attachments()
             response_tab = {}
             response_source = {}
             result = chatgpt.ask(request['prompt'], attachments,

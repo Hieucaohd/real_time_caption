@@ -3,9 +3,11 @@ import { Camera, GitBranch, Paperclip, Plus, Save, Send, X } from "lucide-react"
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import AttachmentList from "./AttachmentList";
+import { FreeAttachmentNotice } from "./ChatGPTProfile";
 
 export default function BranchComposer({
   draft,
+  attachmentsAllowed = true,
   tabs,
   scanTabs,
   loadingTabs,
@@ -145,6 +147,7 @@ export default function BranchComposer({
   }
 
   async function upload(items) {
+    if (!attachmentsAllowed) return;
     uploadsRef.current += 1;
     setUploads(uploadsRef.current);
     setError("");
@@ -163,6 +166,7 @@ export default function BranchComposer({
     }
   }
   async function screenshot() {
+    if (!attachmentsAllowed) return;
     let stream;
     uploadsRef.current += 1;
     setUploads(uploadsRef.current);
@@ -207,7 +211,7 @@ export default function BranchComposer({
           excerpt: draft.excerpt,
           parent_reading_mark: draft.parent_reading_mark,
           config,
-          files: files.map((f) => f.path),
+          files: attachmentsAllowed ? files.map((f) => f.path) : [],
         },
       );
       await created(result);
@@ -277,6 +281,7 @@ export default function BranchComposer({
               </span>
             </div>
             <ChatOptions
+              attachmentsAllowed={attachmentsAllowed}
               value={config}
               onChange={(patch) => setConfig((old) => ({ ...old, ...patch }))}
               tabs={availableTabs}
@@ -298,7 +303,7 @@ export default function BranchComposer({
               <label className="toggle">
                 <input type="checkbox" checked={ancestorDepth !== 0} disabled={sending || saving || branching}
                   onChange={(e) => setConfig((old) => ({ ...old, ancestor_depth: e.target.checked ? 1 : 0 }))} />
-                Đính kèm ngữ cảnh tổ tiên
+                {attachmentsAllowed ? "Đính kèm ngữ cảnh tổ tiên" : "Gửi ngữ cảnh tổ tiên dưới dạng văn bản"}
               </label>
               {ancestorDepth !== 0 && <>
                 <label className="field">
@@ -312,9 +317,11 @@ export default function BranchComposer({
                   </select>
                 </label>
                 <details>
-                  <summary>Sẽ đính kèm {selectedAncestors.length} cặp câu hỏi – câu trả lời</summary>
+                  <summary>{attachmentsAllowed ? "Sẽ đính kèm" : "Sẽ gửi"} {selectedAncestors.length} cặp câu hỏi – câu trả lời</summary>
                   <ol>{selectedAncestors.map((node) => <li key={node.id}>{node.title}</li>)}</ol>
-                  <p className="muted">Toàn bộ câu hỏi và câu trả lời của các node trên được đính kèm thành một file, từ cũ đến mới.</p>
+                  <p className="muted">{attachmentsAllowed
+                    ? "Câu hỏi và câu trả lời của các node trên được đính kèm thành một file, từ cũ đến mới."
+                    : "Câu hỏi và câu trả lời của các node trên được thêm trực tiếp vào prompt, từ cũ đến mới."}</p>
                 </details>
               </>}
             </div>
@@ -354,8 +361,9 @@ export default function BranchComposer({
               </label>
             ))}
             <div className="composer">
-              <AttachmentList files={files} cid={cid} disabled={sending}
+              {attachmentsAllowed ? <AttachmentList files={files} cid={cid} disabled={sending}
                 onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />
+                : <FreeAttachmentNotice />}
               <textarea
                 ref={area}
                 aria-label="Câu hỏi nhánh"
@@ -380,6 +388,7 @@ export default function BranchComposer({
                   }
                 }}
                 onPaste={(e) => {
+                  if (!attachmentsAllowed) return;
                   const images = [...e.clipboardData.files].filter((f) =>
                     f.type.startsWith("image/"),
                   );
@@ -394,7 +403,7 @@ export default function BranchComposer({
                   <button
                     type="button"
                     onClick={() => input.current.click()}
-                    disabled={!!uploads || sending}
+                    disabled={!!uploads || sending || !attachmentsAllowed}
                   >
                     <Paperclip size={16} />
                     Attach files
@@ -402,7 +411,7 @@ export default function BranchComposer({
                   <button
                     type="button"
                     onClick={screenshot}
-                    disabled={!!uploads || sending}
+                    disabled={!!uploads || sending || !attachmentsAllowed}
                   >
                     <Camera size={16} />
                     Screenshot
@@ -411,6 +420,7 @@ export default function BranchComposer({
                     type="file"
                     multiple
                     hidden
+                    disabled={!attachmentsAllowed}
                     ref={input}
                     onChange={(e) => {
                       upload([...e.target.files]);

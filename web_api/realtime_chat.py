@@ -142,7 +142,7 @@ class RealtimeChat:
         suggestions = self.store.latest_actions(cid)
         with self.lock:
             return dict(config=config, auto_scroll=defaults.get('web', 'realtime_auto_scroll'), running=self.active == cid, preparing=self.preparing,
-                settings_locked=self.settings_locked(cid),
+                settings_locked=self.settings_locked(cid), attachments_allowed=Settings.load().chatgpt_attachments_allowed,
                 lanes={lane: dict(self.runtime.get((cid, lane), {})) for lane in self.busy},
                 events=events, actions=suggestions)
 
@@ -227,6 +227,8 @@ class RealtimeChat:
             message = action['prompt']
         if not message.strip():
             raise ValueError('Nhập câu hỏi trước khi gửi.')
+        if files:
+            Settings.load().require_chatgpt_attachments()
         for name in files:
             self.service.file_path(cid, name)
         with self.lock:
@@ -312,8 +314,11 @@ class RealtimeChat:
                     prompt_versions.path_for(version, prompt_versions.CHAT_DIR), task['message'])
                 prompt += '\n\nĐây là câu hỏi trực tiếp của người dùng. Trong lượt này hãy trả lời câu hỏi bằng Markdown thông thường, không trả JSON gợi ý hành động.'
                 files = list(task['files'])
+                settings = Settings.load()
+                if files:
+                    settings.require_chatgpt_attachments()
                 attachments = [self.service.file_path(cid, path) for path in files]
-                if config['screenshot'] and not any(p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') for p in attachments):
+                if settings.chatgpt_attachments_allowed and config['screenshot'] and not any(p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') for p in attachments):
                     from .screen import capture
                     shot = capture(self.service.conversation(cid).screenshots_dir)
                     attachments.append(shot)

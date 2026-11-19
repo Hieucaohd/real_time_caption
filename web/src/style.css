@@ -927,6 +927,24 @@ footer {
   padding: 22px 26px;
   border-bottom: 1px solid var(--line);
 }
+.chatgpt-profile-dialog {
+  width: min(560px, calc(100vw - 32px));
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  color: inherit;
+}
+.chatgpt-profile-dialog::backdrop { background: #172e236e; backdrop-filter: blur(3px); }
+.chatgpt-profile-dialog:not([open]) { display: none; }
+.chatgpt-profile-dialog form { display: flex; flex-direction: column; min-height: 0; }
+.chatgpt-free-notice {
+  margin: 0;
+  border-inline-start: 3px solid #b57a2a;
+  background: #b57a2a14;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
 .modal-head h2 {
   font-size: 20px;
   margin: 5px 0 0;

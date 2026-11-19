@@ -363,6 +363,8 @@ class Service:
                 else:
                     prepared = payload.get('_prepared') or self.prepare_request(cid, kind, payload, settings)
                     payload['_prepared'] = prepared
+                    if prepared['attachments']:
+                        settings.require_chatgpt_attachments()
                     if cancel.is_set():
                         raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
                     if prepared.get('create_new_tab'):
@@ -457,6 +459,9 @@ class Service:
 
     def prepare_request(self, cid, kind, payload, settings):
         transcript = self.transcript_for(cid)
+        if payload.get('files'):
+            settings.require_chatgpt_attachments()
+        allow_files = settings.chatgpt_attachments_allowed
         attachments = []
         words = []
         selected_tab = payload.get('selected_tab') or (settings.summary_chatgpt_selected_tab if kind == 'summary' else settings.chatgpt_selected_tab)
@@ -481,24 +486,29 @@ class Service:
                 raise ValueError('No prompt version found.')
             upload = None
             attach = payload.get('attach_transcript', settings.summary_attach_transcript if kind == 'summary' else False)
-            if attach:
+            if attach and (allow_files or kind == 'summary'):
                 if not transcript.has_text:
                     raise ValueError('This conversation has no saved captions yet.')
                 original = transcript.snapshot(int(payload.get('max_lines', getattr(settings, f'{kind}_max_lines'))))
-                snapshot_dir = paths.CACHE_DIR / 'web-uploads' / uuid.uuid4().hex
-                snapshot_dir.mkdir(parents=True, exist_ok=True)
-                upload = snapshot_dir / original.name
-                shutil.copy2(original, upload)
-                attachments.append(upload)
+                if allow_files:
+                    snapshot_dir = paths.CACHE_DIR / 'web-uploads' / uuid.uuid4().hex
+                    snapshot_dir.mkdir(parents=True, exist_ok=True)
+                    upload = snapshot_dir / original.name
+                    shutil.copy2(original, upload)
+                    attachments.append(upload)
+                else:
+                    upload = original
             prompt = chatgpt.build_prompt(upload, transcript.source, transcript.started,
                 prompt_versions.path_for(version, prompt_dir), payload.get('message', '') if kind == 'chat' else '')
-            if kind == 'chat' and payload.get('attach_history', settings.chat_attach_history):
+            if upload and not allow_files:
+                prompt += '\n\nDùng transcript dưới đây thay cho file transcript được nhắc đến trong prompt.\n\n' + upload.read_text(encoding='utf-8')
+            if allow_files and kind == 'chat' and payload.get('attach_history', settings.chat_attach_history):
                 history = self.store.chat_context_snapshot(cid)
                 if history:
                     attachments.append(history)
             for name in payload.get('files', []):
                 attachments.append(self.file_path(cid, name))
-            if kind == 'chat' and payload.get('screenshot', settings.chat_screenshot) and not any(p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp') for p in attachments):
+            if allow_files and kind == 'chat' and payload.get('screenshot', settings.chat_screenshot) and not any(p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp') for p in attachments):
                 from .screen import capture
                 shot = capture(self.conversation(cid).screenshots_dir)
                 relative = shot.relative_to(self.conversation(cid).folder).as_posix()

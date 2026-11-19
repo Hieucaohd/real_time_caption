@@ -21,7 +21,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, create_model, ConfigDict
 
 from caption import paths, prompt_versions, chatgpt, defaults
-from caption.settings import Settings
+from caption.settings import CHATGPT_LOGIN_STATUSES, CHATGPT_PLANS, Settings
 from caption.shared_access import BusyError, capture_lock
 from caption.translation import ENGINES, LANGUAGES, Config, TranslationError
 from caption.translation_batch import batch_options
@@ -250,6 +250,11 @@ def create_app(service=None):
 
     @app.post('/api/conversations/{cid}/files')
     async def upload(cid: str, request: Request, file: UploadFile):
+        try:
+            Settings.load().require_chatgpt_attachments()
+        except ValueError:
+            await file.close()
+            raise
         folder = svc(request).conversation(cid).folder / 'attachments'
         folder.mkdir(exist_ok=True)
         name = re.sub(r'[^\w. -]', '_', (file.filename or 'attachment').replace('\\', '/').split('/')[-1])[:100]
@@ -271,6 +276,7 @@ def create_app(service=None):
 
     @app.post('/api/conversations/{cid}/screenshot')
     def screenshot(cid: str, request: Request):
+        Settings.load().require_chatgpt_attachments()
         from PIL import ImageGrab
         from caption.screenshot import save
         path = save(ImageGrab.grab(), svc(request).conversation(cid).screenshots_dir)
@@ -284,6 +290,10 @@ def create_app(service=None):
     def save_settings(body, request):
         current = Settings.load()
         values = body.model_dump(exclude_none=True)
+        if 'chatgpt_plan' in values and values['chatgpt_plan'] not in CHATGPT_PLANS:
+            raise ValueError('Gói ChatGPT không hợp lệ.')
+        if 'chatgpt_login_status' in values and values['chatgpt_login_status'] not in CHATGPT_LOGIN_STATUSES:
+            raise ValueError('Trạng thái đăng nhập ChatGPT không hợp lệ.')
         capture_keys = {'web_capture_source'}
         if svc(request).capture['active'] and any(key in values and values[key] != getattr(current, key) for key in capture_keys):
             raise ValueError('Bấm Pause và chờ chốt transcript trước khi đổi nguồn.')
