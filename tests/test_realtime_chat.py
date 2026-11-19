@@ -623,7 +623,8 @@ class RealtimeChatTests(unittest.TestCase):
     def test_history_pagination_keeps_older_chat_and_latest_actions_accessible(self):
         self.rt.store.save(self.cid, self.config)
         first = self.rt.store.create(self.cid, 'chat', 'Old question')
-        self.rt.store.update(first, 'done', 'Old answer')
+        raw = r'Old answer: \(x^2\) and `\(literal\)`'
+        self.rt.store.update(first, 'done', raw)
         action = self.rt.store.create(self.cid, 'actions')
         self.rt.store.update(action, 'done', json.dumps(parse_actions('{"actions":[{"label":"Old action","prompt":"Old prompt"}]}')))
         with self.service.store._connect() as db:
@@ -633,7 +634,9 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual(len(state['events']), 200)
         self.assertEqual(state['actions'][0]['label'], 'Old action')
         earlier = self.client.get(self.base+'/history', params={'before':state['events'][0]['id']}).json()
-        self.assertEqual(earlier[0]['answer'], 'Old answer')
+        self.assertEqual(earlier[0]['answer'], raw)
+        self.assertEqual(earlier[0]['markdown'], r'Old answer: $x^2$ and `\(literal\)`')
+        self.assertNotIn('markdown', self.rt.store.history(self.cid, before=first+1)[0])
         self.assertEqual(len(earlier), 3)
 
     def test_partial_tab_preparation_preserves_new_tab_and_resets_its_cursor(self):

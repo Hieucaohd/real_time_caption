@@ -170,13 +170,13 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
             <article className="message user"><div className="message-meta">Bạn · {stamp(event.created_at)}</div><p className="user-text">{event.question}</p>
               <AttachmentList cid={cid} files={attachments(event.files)} /></article>
             <article className="message bot"><div className="message-meta">ChatGPT</div>
-              {event.answer ? <Md text={event.answer} /> : <p className="muted">{event.detail || (event.status === "queued" ? "Đã xếp hàng, chờ tab hỏi đáp sẵn sàng…" : "Đang chờ ChatGPT…")}</p>}
+              {event.answer ? <Md text={event.markdown ?? event.answer} /> : <p className="muted">{event.detail || (event.status === "queued" ? "Đã xếp hàng, chờ tab hỏi đáp sẵn sàng…" : "Đang chờ ChatGPT…")}</p>}
               {answerSource(event)}
               {event.status === "done" && <button onClick={() => navigator.clipboard.writeText(event.answer).catch(e => setError(e.message))}><Copy size={14} /> Copy</button>}
               {["error", "cancelled", "interrupted"].includes(event.status) && <button onClick={() => { setMessage(event.question); setFiles(attachments(event.files)); input.current?.focus(); }}>Dùng lại câu hỏi</button>}
             </article>
           </React.Fragment>)}
-          {lanes.actions?.kind === "chat" && lanes.actions?.partial && <article className="message bot preview"><Md text={lanes.actions.partial} /></article>}
+          {lanes.actions?.kind === "chat" && lanes.actions?.partial && <article className="message bot preview"><pre>{lanes.actions.partial}</pre></article>}
         </div>
         <div className="composer chat-composer">
           {attachmentsAllowed ? <AttachmentList cid={cid} files={files} disabled={busy || uploading}
@@ -198,8 +198,8 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
         <div className="rt-lane-status"><strong>Tóm tắt cuộc trò chuyện</strong><small>{lanes.summary?.detail || "Tab riêng · cùng chu kỳ cập nhật"}</small></div>
         <div className="rt-summaries scroll" ref={summaryScroll}>
           {!summaries.length && <p className="muted rt-empty">Mỗi lượt thêm một bản tóm tắt phần mới. Nội dung được lưu vào cuộc hội thoại.</p>}
-          {summaries.map(event => <article className="rt-summary" key={event.id}><time>{stamp(event.created_at)}</time><Md text={event.answer} />{answerSource(event)}</article>)}
-          {lanes.summary?.status === "working" && lanes.summary?.partial && <article className="rt-summary preview"><Md text={lanes.summary.partial} /></article>}
+          {summaries.map(event => <article className="rt-summary" key={event.id}><time>{stamp(event.created_at)}</time><Md text={event.markdown ?? event.answer} />{answerSource(event)}</article>)}
+          {lanes.summary?.status === "working" && lanes.summary?.partial && <article className="rt-summary preview"><pre className="partial">{lanes.summary.partial}</pre></article>}
         </div>
       </section>
     </div>

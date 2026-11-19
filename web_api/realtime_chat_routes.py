@@ -1,7 +1,32 @@
+from functools import lru_cache
+
 from fastapi import APIRouter, Request, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from .server_math import browser_markdown
+
 router = APIRouter(prefix='/api/conversations/{cid}/realtime-chat')
+
+# Realtime refreshes the same saved answers every second. Bound the cache by
+# both entry count and input size so long conversations do not keep large replies alive.
+_cached_markdown = lru_cache(maxsize=256)(browser_markdown)
+
+
+def _browser_events(events):
+    result = []
+    for event in events:
+        answer = event['answer']
+        if event['kind'] in ('chat', 'summary') and answer:
+            render = _cached_markdown if len(answer) <= 16_384 else browser_markdown
+            markdown = render(answer)
+            if markdown != answer:
+                event = {**event, 'markdown': markdown}
+        result.append(event)
+    return result
+
+
+def _browser_state(state):
+    return {**state, 'events': _browser_events(state['events'])}
 
 
 class RealtimeConfig(BaseModel):
@@ -35,14 +60,14 @@ class RealtimeMessage(BaseModel):
 
 @router.get('')
 def state(cid: str, request: Request):
-    return request.app.state.service.realtime_chat.state(cid)
+    return _browser_state(request.app.state.service.realtime_chat.state(cid))
 
 
 @router.get('/history')
 def history(cid: str, request: Request, before: int = Query(gt=0)):
     service = request.app.state.service
     service.conversation(cid)
-    return service.realtime_chat.store.history(cid, before)
+    return _browser_events(service.realtime_chat.store.history(cid, before))
 
 
 @router.put('/settings')
@@ -52,13 +77,14 @@ def save(cid: str, config: RealtimeConfig, request: Request):
 
 @router.post('/start')
 def start(cid: str, config: RealtimeConfig, request: Request):
-    return request.app.state.service.realtime_chat.start(cid, config.model_dump(exclude_unset=True), request.headers.get('X-RTC-Tab', ''))
+    service = request.app.state.service.realtime_chat
+    return _browser_state(service.start(cid, config.model_dump(exclude_unset=True), request.headers.get('X-RTC-Tab', '')))
 
 
 @router.post('/stop')
 def stop(cid: str, request: Request):
     request.app.state.service.realtime_chat.stop(cid)
-    return request.app.state.service.realtime_chat.state(cid)
+    return _browser_state(request.app.state.service.realtime_chat.state(cid))
 
 
 @router.post('/messages')

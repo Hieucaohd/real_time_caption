@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from PIL import Image
 from playwright.sync_api import sync_playwright, expect
+from caption.settings import Settings
 from test_realtime_chat import RealtimeChatTests, tab
 from web_api.server import create_app
 
@@ -134,8 +135,43 @@ def main():
             for lane in ('actions', 'summary'):
                 fixture.rt.status(fixture.cid, lane, status='waiting', error_code='')
             expect(panel.get_by_role('alert')).to_have_count(0)
+
+            # Existing replies use the same renderer and normalization in both tabs.
+            markdown = r'''## Markdown parity
+
+Inline math \(x^2\).
+
+\[ y = \frac{1}{2} \]
+
+| Key | Value |
+| --- | --- |
+| k | **text** |
+
+```python
+tex = r"\(literal\)"
+```'''
+            fixture.service.store.add_message(fixture.cid, 'bot', 'ChatGPT', markdown, kind='chat')
+            for kind in ('chat', 'summary'):
+                event = fixture.rt.store.create(fixture.cid, kind, 'Markdown example' if kind == 'chat' else '')
+                fixture.rt.store.update(event, 'done', markdown)
+            page.set_viewport_size({'width':1440, 'height':1000})
+            realtime = panel.locator('.response-markdown').filter(has_text='Markdown parity')
+            expect(realtime).to_have_count(2)
+            expect(realtime.locator('.katex')).to_have_count(4)
+            expect(realtime.locator('table')).to_have_count(2)
+            expect(realtime.locator('pre code').first).to_contain_text(r'\(literal\)')
+            realtime_html = [item.inner_html() for item in realtime.all()]
+            settings = Settings.load()
+            settings.chat_new_chat = True  # Viewing a saved reply needs no free Chrome tab.
+            settings.save()
+            page.reload()
+            page.get_by_role('button', name='Chat', exact=True).click()
+            regular = page.locator('.response-markdown').filter(has_text='Markdown parity')
+            expect(regular.locator('.katex')).to_have_count(2)
+            assert realtime_html == [regular.inner_html()] * 2
+            assert opened.call_count == 2
             browser.close()
-            print('Chat realtime browser checks passed: settings, two tabs, suggestions, manual chat, attachment preview, incremental summaries, Stop, reload, light/dark and narrow layout.')
+            print('Chat realtime browser checks passed, including identical Chat and realtime Markdown for math, tables and code.')
     finally:
         server.should_exit = True; thread.join(timeout=10); fixture.tearDown()
 
