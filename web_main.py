@@ -19,14 +19,19 @@ PORT = 8765
 
 def ensure(port=PORT):
     from caption import paths
+    from web_api import API_VERSION
     url = f'http://127.0.0.1:{port}/api/health'
 
     def ready():
         try:
             with urllib.request.urlopen(url, timeout=1) as response:
                 data = json.load(response)
-                return (data.get('app') == 'real-time-caption-web'
-                        and Path(data.get('data_dir', '')).resolve() == paths.DATA_DIR)
+                if (data.get('app') != 'real-time-caption-web'
+                        or Path(data.get('data_dir', '')).resolve() != paths.DATA_DIR):
+                    return False
+                if data.get('version') != API_VERSION:
+                    raise RuntimeError('Backend đang chạy khác phiên bản. Dùng stop_web.bat rồi mở lại ứng dụng.')
+                return True
         except (OSError, ValueError):
             return False
 

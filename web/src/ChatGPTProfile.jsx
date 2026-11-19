@@ -5,6 +5,12 @@ const plans = [
   ["business", "Business"], ["enterprise", "Enterprise"], ["edu", "Edu"], ["other", "Khác"],
 ];
 
+export function SignedOutNotice({ openSettings }) {
+  return <p className="chatgpt-free-notice">Các thao tác ChatGPT đang tắt. Sau khi đăng nhập trên Chrome, chọn “Đã đăng nhập” trong{" "}
+    {openSettings ? <button type="button" onClick={openSettings}>Mở cài đặt ChatGPT</button> : "Settings ở cửa sổ chính"}.
+  </p>;
+}
+
 export function FreeAttachmentNotice({ setup = false }) {
   return <p className="chatgpt-free-notice">
     {setup
@@ -32,8 +38,8 @@ export function ChatGPTProfileFields({ value, set, disabled }) {
         </select>
       </label>
     </div>
-    {value.chatgpt_plan === "free" && <FreeAttachmentNotice setup />}
-    {value.chatgpt_login_status === "signed_out" && <p className="muted">Bạn có thể đăng nhập trên tab ChatGPT rồi cập nhật trạng thái này trong Settings.</p>}
+    {value.chatgpt_login_status === "signed_out" ? <SignedOutNotice />
+      : value.chatgpt_plan === "free" && <FreeAttachmentNotice setup />}
   </>;
 }
 

@@ -9,7 +9,7 @@ function conversationLink(value) {
   return null;
 }
 
-export default function ResponseSource({ response, onSave }) {
+export default function ResponseSource({ response, onSave, chatgptAllowed = true }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
@@ -39,7 +39,7 @@ export default function ResponseSource({ response, onSave }) {
   return (
     <details className="response-source">
       <summary>Nguồn ChatGPT</summary>
-      {url ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a>
+      {url ? (chatgptAllowed ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : <p>{url}</p>)
         : <p>Chưa lưu link cuộc hội thoại cho câu trả lời này.</p>}
       <dl>
         <dt>Vị trí trong cuộc hội thoại</dt>

@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from caption import paths
+from web_api import API_VERSION
 import web_main
 
 
@@ -26,7 +27,7 @@ class WebLauncherTests(unittest.TestCase):
             root = Path(folder)
             (root / 'web/dist').mkdir(parents=True)
             (root / 'web/dist/index.html').write_text('built')
-            health = io.BytesIO(json.dumps({'app':'real-time-caption-web', 'data_dir':str(root)}).encode())
+            health = io.BytesIO(json.dumps({'app':'real-time-caption-web', 'data_dir':str(root), 'version':API_VERSION}).encode())
             with patch.object(paths, 'FROZEN', True), patch.object(paths, 'DATA_DIR', root), \
                  patch.object(paths, 'BUNDLE_DIR', root), patch('web_main.urllib.request.urlopen', side_effect=[OSError(), health]), \
                  patch('web_main.socket.socket') as sock, patch('web_main.subprocess.Popen') as spawn:
@@ -43,6 +44,13 @@ class WebLauncherTests(unittest.TestCase):
              patch('web_main.socket.socket') as sock, patch('web_main.subprocess.Popen') as spawn:
             sock.return_value.__enter__.return_value.connect_ex.return_value = 0
             with self.assertRaisesRegex(RuntimeError, 'another app or data folder'):
+                web_main.ensure()
+            spawn.assert_not_called()
+
+    def test_ensure_explains_how_to_replace_an_old_backend(self):
+        health = io.BytesIO(json.dumps({'app':'real-time-caption-web', 'data_dir':str(paths.DATA_DIR), 'version':1}).encode())
+        with patch('web_main.urllib.request.urlopen', return_value=health), patch('web_main.subprocess.Popen') as spawn:
+            with self.assertRaisesRegex(RuntimeError, 'stop_web.bat'):
                 web_main.ensure()
             spawn.assert_not_called()
 

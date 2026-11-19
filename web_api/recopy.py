@@ -5,6 +5,7 @@ import logging
 from caption import paths
 from caption.chatgpt_recopy import recopy_response
 from caption.research_store import now
+from caption.settings import Settings
 from caption.shared_access import ProcessLock
 
 FIELDS = ('response_tab_title', 'response_conversation_url', 'response_turn_id', 'response_message_id', 'response_position')
@@ -25,6 +26,7 @@ def _target(db, cid, mid, nid):
 
 
 def refresh_answer(service, cid, *, mid=None, nid=None, return_tab=''):
+    Settings.load().require_chatgpt()
     service.conversation(cid)
     with service.store._connect() as db:
         before = _target(db, cid, mid, nid)

@@ -195,6 +195,8 @@ def create_chatgpt_branch(cid: str, nid: str, request: Request):
 @router.post('/{nid}/open-chatgpt')
 def open_chatgpt_response(cid: str, nid: str, request: Request):
     from caption.chatgpt_navigation import open_response
+    from caption.settings import Settings
+    Settings.load().require_chatgpt()
     node = research(request, cid).store.get(cid, nid)
     if node['status'] != 'done':
         raise ValueError('Chờ câu trả lời hoàn tất trước khi mở nguồn ChatGPT.')

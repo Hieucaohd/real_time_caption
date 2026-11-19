@@ -140,9 +140,11 @@ class RealtimeChat:
         self.normalize_prompts(config)
         events = self.store.history(cid)
         suggestions = self.store.latest_actions(cid)
+        settings = Settings.load()
         with self.lock:
             return dict(config=config, auto_scroll=defaults.get('web', 'realtime_auto_scroll'), running=self.active == cid, preparing=self.preparing,
-                settings_locked=self.settings_locked(cid), attachments_allowed=Settings.load().chatgpt_attachments_allowed,
+                settings_locked=self.settings_locked(cid), chatgpt_allowed=settings.chatgpt_allowed,
+                attachments_allowed=settings.chatgpt_attachments_allowed,
                 lanes={lane: dict(self.runtime.get((cid, lane), {})) for lane in self.busy},
                 events=events, actions=suggestions)
 
@@ -162,6 +164,7 @@ class RealtimeChat:
 
     def start(self, cid, config, return_tab=''):
         with self.lock:
+            Settings.load().require_chatgpt()
             if self.active or self.preparing or any(self.busy.values()) or self.manual:
                 raise BusyError('Một lượt Chat realtime đang chạy hoặc đang dừng. Nếu đang theo dõi cuộc hội thoại khác, hãy quay lại đó bấm Stop trước khi Start tại đây.')
             self.preparing = True
@@ -216,6 +219,7 @@ class RealtimeChat:
                     self.store.update(task['id'], 'cancelled', detail='Đã dừng trước khi gửi.')
 
     def send(self, cid, message, files, action_id=''):
+        Settings.load().require_chatgpt()
         self.service.conversation(cid)
         config, _ = self.store.settings(cid, self.defaults())
         if not config['selected_tab']:
@@ -232,6 +236,7 @@ class RealtimeChat:
         for name in files:
             self.service.file_path(cid, name)
         with self.lock:
+            Settings.load().require_chatgpt()
             if self.preparing or sum(task['cid'] != cid for task in self.manual) >= 20:
                 raise BusyError('Đang chuẩn bị tab hoặc hàng đợi đã đầy.')
             eid = self.store.create(cid, 'chat', message.strip(), files)
@@ -339,6 +344,7 @@ class RealtimeChat:
             power = config.get('summary_power') if lane == 'summary' else config['power']
             if power is None:  # Conversations saved before separate effort settings.
                 power = config['power']
+            Settings.load().require_chatgpt()
             answer = chatgpt.ask(prompt, attachments, lambda value: self.status(cid, lane, detail=value),
                 selected_tab=config['selected_tab'] if lane == 'actions' else config['summary_tab'],
                 new_chat=fresh, power=None if power < 0 else power, cancel_event=cancel,

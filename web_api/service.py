@@ -23,6 +23,7 @@ from caption.google_capture import GoogleCapture
 from caption.voca_client import VocaClient
 
 log = logging.getLogger(__name__)
+CHATGPT_JOB_KINDS = {'chat', 'summary', 'vocab', 'research'}
 
 
 class Service:
@@ -88,7 +89,9 @@ class Service:
 
     def state(self):
         with self.lock:
-            source = self.capture.get('source') if self.capture['active'] else Settings.load().web_capture_source
+            settings = Settings.load()
+            source = self.capture.get('source') if self.capture['active'] else (
+                settings.web_capture_source if settings.chatgpt_allowed else 'windows')
             return dict(capture={**self.capture, 'source': source,
                         'warning': self.capture['warning'] or (self.captions_preferences.warning if source == 'windows' else '')}, jobs=[dict(j) for j in self.jobs.values()],
                         translation_preview=self.translation_preview, translation_error=self.translation_issue, last_final=self.last_final,
@@ -100,8 +103,8 @@ class Service:
                 raise ValueError('Pause the active recording before starting another one.')
             self.clear_preview()
             settings = Settings.load()
-            chatgpt_dictation.validate_source(settings.web_capture_source)
-            source = settings.web_capture_source
+            source = settings.web_capture_source if settings.chatgpt_allowed else 'windows'
+            chatgpt_dictation.validate_source(source)
             transcript = self.transcript_for(cid)
             transcript.begin_segment(chatgpt_dictation.LABEL if source == 'chatgpt' else livecaptions.LABEL)
             try:
@@ -329,6 +332,8 @@ class Service:
 
     def create_job(self, cid, kind, payload):
         with self.lock:
+            if kind in CHATGPT_JOB_KINDS:
+                Settings.load().require_chatgpt()
             if self.busy:
                 raise ValueError('Wait for the current ChatGPT request, or cancel it first.')
             self.conversation(cid)
@@ -361,6 +366,7 @@ class Service:
                     result = self.save_vocab(payload['words'], settings)
                     self.store.add_message(cid, 'bot', 'Vocabulary · saved to Voca', json.dumps(result, ensure_ascii=False), kind='vocab')
                 else:
+                    settings.require_chatgpt()
                     prepared = payload.get('_prepared') or self.prepare_request(cid, kind, payload, settings)
                     payload['_prepared'] = prepared
                     if prepared['attachments']:
@@ -422,10 +428,21 @@ class Service:
 
     def list_chatgpt_tabs(self):
         """Only ordinary tabs are selectable by Chat, Summary, and research."""
+        Settings.load().require_chatgpt()
         tabs = chatgpt.list_chrome_chatgpt_tabs()
         reserved = self.realtime_chat.store.tab_keys()
         return [tab for tab in tabs if tab.key not in reserved
                 and tab.key != chatgpt.VOCAB_TAB and not chatgpt.is_dictation_tab(tab.key)]
+
+    def stop_chatgpt(self):
+        with self.lock:
+            self.realtime_chat.stop()
+            for jid, job in self.jobs.items():
+                if job['kind'] in CHATGPT_JOB_KINDS and job['status'] in ('working', 'queued'):
+                    self.job_cancel[jid].set()
+            if self.capture['active'] and self.capture.get('source') == 'chatgpt':
+                self.pause()
+            self.hide_overlay()
 
     def recover_chat_tab(self, job, payload):
         """Repair only the selection. The failed question requires manual Retry."""

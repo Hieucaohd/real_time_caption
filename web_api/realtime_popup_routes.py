@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 import logging
+from caption.settings import Settings
 
 router = APIRouter(prefix='/api/conversations/{cid}/realtime-popup')
 
@@ -28,6 +29,7 @@ def state(cid: str, request: Request):
 
 @router.post('')
 def open_popup(cid: str, request: Request):
+    Settings.load().require_chatgpt()
     from playwright.sync_api import Error
     try:
         return request.app.state.service.realtime_popups.open(cid, str(request.base_url), request.headers.get('X-RTC-Tab', ''))

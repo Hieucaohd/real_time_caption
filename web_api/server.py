@@ -26,6 +26,7 @@ from caption.shared_access import BusyError, capture_lock
 from caption.translation import ENGINES, LANGUAGES, Config, TranslationError
 from caption.translation_batch import batch_options
 from caption.transcript_export import last_lines
+from . import API_VERSION
 from .service import Service
 from .server_math import browser_markdown
 from .research_routes import router as research_router, preferences_router
@@ -135,7 +136,7 @@ def create_app(service=None):
 
     @app.get('/api/health')
     def health():
-        return {'app': 'real-time-caption-web', 'data_dir': str(paths.DATA_DIR), 'version': 1}
+        return {'app': 'real-time-caption-web', 'data_dir': str(paths.DATA_DIR), 'version': API_VERSION}
 
     @app.get('/api/capture/state')
     def capture_state(request: Request):
@@ -307,6 +308,10 @@ def create_app(service=None):
         batch_options(current.translation_batch_size, current.translation_batch_timeout)
         from caption.chatgpt_dictation import validate_source
         validate_source(current.web_capture_source)
+        if not current.chatgpt_allowed:
+            if values.get('web_capture_source') == 'chatgpt':
+                current.require_chatgpt()
+            current.web_capture_source = 'windows'
         if current.translation_engine not in ENGINES:
             raise ValueError('Invalid translation engine.')
         if current.translation_view not in ('history', 'parallel'):
@@ -314,6 +319,8 @@ def create_app(service=None):
         if not 8 <= current.overlay_font_size <= 96 or not 1 <= current.overlay_lines <= 10 or not .1 <= current.overlay_alpha <= 1:
             raise ValueError('Invalid overlay settings.')
         current.save()
+        if values.get('chatgpt_login_status') == 'signed_out':
+            svc(request).stop_chatgpt()
         if 'web_capture_source' in values and not svc(request).capture['active']:
             if svc(request).capture.get('source') != current.web_capture_source:
                 svc(request).last_final = ''
@@ -339,6 +346,7 @@ def create_app(service=None):
 
     @app.post('/api/chrome-tabs')
     def open_chatgpt_tab(request: Request):
+        Settings.load().require_chatgpt()
         return asdict(chatgpt.open_new_chatgpt_tab(return_tab=request.headers.get('x-rtc-tab', '')))
 
     def prompt_dir(kind):
@@ -458,6 +466,7 @@ def create_app(service=None):
             if s.overlay_visible():
                 s.hide_overlay()
                 return {'visible': False}
+            Settings.load().require_chatgpt()
             source = s.capture.get('source') if s.capture['active'] else Settings.load().web_capture_source
             if source != 'chatgpt':
                 raise ValueError('Popup transcript chỉ dùng khi chọn nguồn ChatGPT · Micro.')

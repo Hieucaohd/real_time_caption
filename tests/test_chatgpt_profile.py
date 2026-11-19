@@ -20,16 +20,48 @@ class ChatGPTProfileTests(unittest.TestCase):
     def test_profile_persists_and_switching_plan_restores_upload(self):
         self.assertEqual(self.change(chatgpt_plan='invalid').status_code, 400)
         self.assertEqual(self.change(chatgpt_login_status='invalid').status_code, 400)
-        self.assertEqual(self.change(chatgpt_plan='free', chatgpt_login_status='signed_out').status_code, 200)
+        self.assertEqual(self.change(chatgpt_plan='free', chatgpt_login_status='signed_in').status_code, 200)
         profile = self.client.get('/api/bootstrap').json()['settings']
-        self.assertEqual((profile['chatgpt_plan'], profile['chatgpt_login_status']), ('free', 'signed_out'))
+        self.assertEqual((profile['chatgpt_plan'], profile['chatgpt_login_status']), ('free', 'signed_in'))
         self.assertEqual(self.upload().status_code, 400)
         with patch('PIL.ImageGrab.grab') as grab:
             self.assertEqual(self.post(f'/api/conversations/{self.cid}/screenshot').status_code, 400)
             grab.assert_not_called()
         self.assertEqual(self.change(chatgpt_plan='pro').status_code, 200)
         self.assertEqual(self.upload().status_code, 200)
-        self.assertEqual(Settings.load().chatgpt_login_status, 'signed_out')
+        self.assertEqual(Settings.load().chatgpt_login_status, 'signed_in')
+
+    def test_signed_out_blocks_chatgpt_endpoints_and_keeps_windows_capture(self):
+        self.assertEqual(self.change(web_capture_source='chatgpt').status_code, 200)
+        self.assertEqual(self.change(chatgpt_login_status='signed_out').status_code, 200)
+        self.assertEqual(Settings.load().web_capture_source, 'windows')
+        self.assertEqual(self.change(web_capture_source='chatgpt').status_code, 400)
+        base = f'/api/conversations/{self.cid}'
+        for route, payload in [('/api/chrome-tabs', {}), *[(base + '/jobs', {'kind': kind}) for kind in ('chat', 'summary', 'vocab')],
+                               (base + '/realtime-chat/start', {}), (base + '/realtime-chat/messages', {'message': 'hello'}),
+                               (base + '/realtime-popup', {}), (base + '/answers/123/recopy', {}), ('/api/overlay', {})]:
+            with self.subTest(route=route, payload=payload):
+                response = self.post(route, payload)
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn('Các thao tác ChatGPT đang tắt', response.json()['detail'])
+        self.assertEqual(self.client.get('/api/chrome-tabs').status_code, 400)
+        self.assertEqual(self.upload().status_code, 400)
+        self.assertEqual(self.post(base + '/capture').json()['capture']['source'], 'windows')
+        self.post('/api/capture/pause')
+        self.assertEqual(self.change(chatgpt_login_status='signed_in').status_code, 200)
+        self.assertEqual(self.upload().status_code, 200)
+
+    def test_sign_out_stops_chatgpt_capture_and_realtime(self):
+        self.assertEqual(self.change(web_capture_source='chatgpt').status_code, 200)
+        base = f'/api/conversations/{self.cid}'
+        with patch('web_api.service.chatgpt_dictation.ChatGPTDictationReader', side_effect=lambda emit, *_: fixtures.FakeReader(emit)), \
+             patch.object(self.service.realtime_chat, 'stop', wraps=self.service.realtime_chat.stop) as stop:
+            self.assertEqual(self.post(base + '/capture').json()['capture']['source'], 'chatgpt')
+            self.assertEqual(self.change(chatgpt_login_status='signed_out').status_code, 200)
+            stop.assert_called()
+            capture = self.client.get('/api/bootstrap').json()['capture']
+            self.assertFalse(capture['active'])
+            self.assertEqual(capture['source'], 'windows')
 
     def test_free_chat_suppresses_automatic_attachments_and_summary_uses_text(self):
         settings = Settings(chatgpt_plan='free', summary_attach_transcript=True)

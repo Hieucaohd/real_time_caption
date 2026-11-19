@@ -4,7 +4,7 @@ import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import RealtimePrompts from "./RealtimePrompts";
 import AttachmentList from "./AttachmentList";
-import { FreeAttachmentNotice } from "./ChatGPTProfile";
+import { FreeAttachmentNotice, SignedOutNotice } from "./ChatGPTProfile";
 import Md from "./MarkdownResponse";
 import "./realtime-chat.css";
 
@@ -12,7 +12,7 @@ const stamp = value => new Date(value).toLocaleTimeString("vi-VN", { hour: "2-di
 const attachments = files => (files || []).map(path => ({ path, name: path.split(/[\\/]/).at(-1) }));
 const powerLabel = power => ["Giữ nguyên", "Instant", "Medium", "High"][(power ?? -1) + 1];
 
-export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, popup = false }) {
+export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, popup = false, chatgptEnabled = true, openSettings }) {
   const [state, setState] = useState(null), [config, setConfig] = useState(null);
   const [busy, setBusy] = useState(false), [uploading, setUploading] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -45,8 +45,9 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   const lanes = state?.lanes || {};
   const working = Object.values(lanes).some(lane => lane.status === "working");
   const active = !!state?.running || working || chat.some(e => e.status === "queued");
-  const settingsLocked = busy || !!state?.settings_locked || active;
-  const attachmentsAllowed = state?.attachments_allowed !== false;
+  const chatgptAllowed = chatgptEnabled && state?.chatgpt_allowed !== false;
+  const settingsLocked = !chatgptAllowed || busy || !!state?.settings_locked || active;
+  const attachmentsAllowed = chatgptAllowed && state?.attachments_allowed !== false;
   useEffect(() => { if (settingsLocked) setEditingPrompt(false); }, [settingsLocked]);
   useLayoutEffect(() => {
     if (follow) for (const ref of [chatScroll, summaryScroll])
@@ -93,7 +94,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     finally { stream?.getTracks().forEach(track => track.stop()); }
   }
   function send(actionId = "") {
-    if (uploading || (!actionId && !message.trim())) return;
+    if (!chatgptAllowed || uploading || (!actionId && !message.trim())) return;
     action(async () => {
       if (!popup && !settingsLocked) await save();
       await post(base + "/messages", { message, action_id: actionId, files: attachmentsAllowed ? files.map(file => file.path) : [] });
@@ -112,9 +113,9 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
         const result = await api(base + '/history?before=' + events[0].id);
         setOlder([...result, ...events]); setMoreHistory(result.length === 200);
       })}>Tải lịch sử trước</button>}
-      {!popup && <button disabled={busy} onClick={() => action(() => post(`/conversations/${cid}/realtime-popup`))}><PanelTop size={16} /> Popup Chat realtime</button>}
+      {!popup && <button disabled={busy || !chatgptAllowed} onClick={() => action(() => post(`/conversations/${cid}/realtime-popup`))}><PanelTop size={16} /> Popup Chat realtime</button>}
       {!popup && <button disabled={settingsLocked} onClick={() => action(save)}><Save size={16} /> Lưu cài đặt</button>}
-      <button className={active ? "danger" : "primary"} disabled={busy} onClick={() => action(async () => {
+      <button className={active ? "danger" : "primary"} disabled={busy || (!chatgptAllowed && !active)} onClick={() => action(async () => {
         if (active) await post(base + "/stop");
         else {
           // The popup always starts with the latest saved settings from the main UI.
@@ -123,6 +124,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
         }
       })}>{active ? <Square size={16} /> : <Play size={16} />}{active ? "Stop" : "Start"}</button>
     </div>
+    {!chatgptAllowed && <SignedOutNotice openSettings={openSettings} />}
     {!popup && <details className="chat-settings">
       <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
@@ -150,7 +152,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
       <section className="rt-chat-column" aria-label="Hỏi đáp realtime">
         <div className="rt-suggestions">
           <div className="rt-lane-status"><strong>Gợi ý hành động</strong><small>{lanes.actions?.detail || "Bấm Start để theo dõi cuộc trò chuyện"}</small></div>
-          <div className="rt-action-buttons">{state.actions.map(item => <button key={item.id} title={item.prompt} disabled={busy || uploading} onClick={() => send(item.id)}>{item.label}</button>)}</div>
+          <div className="rt-action-buttons">{state.actions.map(item => <button key={item.id} title={item.prompt} disabled={!chatgptAllowed || busy || uploading} onClick={() => send(item.id)}>{item.label}</button>)}</div>
           {!state.actions.length && <small className="muted">Gợi ý sẽ xuất hiện khi ChatGPT nhận transcript mới.</small>}
         </div>
         <div className="chat-scroll scroll" ref={chatScroll}>
@@ -168,8 +170,9 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
         </div>
         <div className="composer chat-composer">
           {attachmentsAllowed ? <AttachmentList cid={cid} files={files} disabled={busy || uploading}
-            onRemove={file => setFiles(old => old.filter(item => item.path !== file.path))} /> : <FreeAttachmentNotice />}
+            onRemove={file => setFiles(old => old.filter(item => item.path !== file.path))} /> : chatgptAllowed && <FreeAttachmentNotice />}
           <textarea ref={input} rows={1} aria-label="Câu hỏi Chat realtime" placeholder="Nhập câu hỏi… Enter để gửi, Shift + Enter xuống dòng"
+            disabled={!chatgptAllowed}
             value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             onPaste={e => { if (!attachmentsAllowed) return; const images = [...e.clipboardData.files].filter(file => file.type.startsWith("image/")); if (images.length) { e.preventDefault(); upload(images); } }} />
           <input type="file" multiple hidden ref={fileInput} disabled={!attachmentsAllowed} onChange={e => { upload([...e.target.files]); e.target.value = ""; }} />
@@ -178,7 +181,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
             <button disabled={uploading || !attachmentsAllowed} onClick={screenshot}><Camera size={16} /> Screenshot</button>
             <button title="Lên đầu" onClick={() => chatScroll.current?.scrollTo({ top: 0 })}><ArrowUp size={16} /></button>
             <button title="Xuống cuối" onClick={() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight })}><ArrowDown size={16} /></button>
-          </div><button className="primary" disabled={busy || uploading || !message.trim()} onClick={() => send()}><Send size={16} /> Send</button></div>
+          </div><button className="primary" disabled={!chatgptAllowed || busy || uploading || !message.trim()} onClick={() => send()}><Send size={16} /> Send</button></div>
         </div>
       </section>
       <section className="rt-summary-column" aria-label="Tóm tắt realtime">

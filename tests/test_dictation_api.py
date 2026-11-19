@@ -41,6 +41,7 @@ class DictationApiTests(unittest.TestCase):
         self.post('/api/capture/pause')
 
     def test_invalid_settings_are_not_saved_and_new_conversation_uses_source_label(self):
+        self.assertEqual(self.save(web_capture_source='windows').status_code, 200)
         for value in ('both', 'microphone', ''):
             self.assertEqual(self.save(web_capture_source=value).status_code, 400)
         self.assertEqual(self.save(chatgpt_dictation_interval=15).status_code, 422)

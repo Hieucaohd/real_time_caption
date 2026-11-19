@@ -890,7 +890,7 @@ export default function ResearchGraph({
                       title={n.response_conversation_url && n.response_position
                         ? `Mở ChatGPT · câu trả lời thứ ${n.response_position}`
                         : "Bổ sung link và số thứ tự trong Nguồn ChatGPT của node"}
-                      disabled={!!openingNode || n.status !== "done" || !n.response_conversation_url || !n.response_position}
+                      disabled={!onOpenChatGPT || !!openingNode || n.status !== "done" || !n.response_conversation_url || !n.response_position}
                       onClick={() => onOpenChatGPT(n)}>
                       {openingNode === n.id ? <LoaderCircle className="spin" size={13} /> : <ExternalLink size={13} />}
                     </button>

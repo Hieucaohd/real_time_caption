@@ -62,6 +62,7 @@ export default function ResearchTab({
   post,
   Md,
   settings,
+  chatgptAllowed = true,
   prompts,
   refreshPrompts,
   chatAttach,
@@ -210,6 +211,7 @@ export default function ResearchTab({
     }
   }
   async function openChatGPT(node) {
+    if (!chatgptAllowed) return;
     if (openingRef.current) return;
     openingRef.current = true;
     setOpeningNode(node.id);
@@ -253,6 +255,7 @@ export default function ResearchTab({
     setChangingBranch(false);
   }
   async function createDraft(excerpt = "", mark = selectedReadingMark(answer.current)) {
+    if (!chatgptAllowed) return;
     if (detail?.status !== "done" || detail.id !== selectedRef.current) return;
     if (mark && !excerpt) excerpt = window.getSelection()?.toString().trim() || mark.text.trim();
     if (excerpt.length > 20000 || (mark && mark.text.length > 20000)) {
@@ -472,7 +475,7 @@ export default function ResearchTab({
                 setGraphExpanded(false);
               }}
               statusOf={statusOf}
-              onOpenChatGPT={openChatGPT}
+              onOpenChatGPT={chatgptAllowed ? openChatGPT : undefined}
               openingNode={openingNode}
               api={api}
               base={base}
@@ -499,7 +502,7 @@ export default function ResearchTab({
                   </span>
                   <div className="inline">
                     <button onClick={() => openChatGPT(reading)}
-                      disabled={!!openingNode || reading.status !== "done" || !reading.response_conversation_url || !reading.response_position}
+                      disabled={!chatgptAllowed || !!openingNode || reading.status !== "done" || !reading.response_conversation_url || !reading.response_position}
                       title={reading.response_conversation_url && reading.response_position
                         ? `Mở tab mới và cuộn tới câu trả lời thứ ${reading.response_position}`
                         : "Bổ sung link và số thứ tự câu trả lời trong Nguồn ChatGPT"}>
@@ -557,7 +560,7 @@ export default function ResearchTab({
                   <p className="research-response-tab" title={reading.response_tab_title || ""}>
                     Tab ChatGPT trả lời: <strong>{reading.response_tab_title || "Chưa có tên tab được lưu"}</strong>
                   </p>
-                  <ResponseSource key={reading.id} response={reading} onSave={!["queued", "working"].includes(reading.status) ? async (values) => {
+                  <ResponseSource key={reading.id} response={reading} chatgptAllowed={chatgptAllowed} onSave={!["queued", "working"].includes(reading.status) ? async (values) => {
                     await api(base + "/" + reading.id + "/source", { method: "PUT", body: values });
                     await refresh();
                   } : undefined} />
@@ -648,13 +651,13 @@ export default function ResearchTab({
                   )}
                 </div>
                 <div className="research-reader-actions">
-                  <RecopyAnswer key={reading.id} disabled={["queued", "working"].includes(reading.status)} onCopy={async () => {
+                  <RecopyAnswer key={reading.id} disabled={!chatgptAllowed || ["queued", "working"].includes(reading.status)} onCopy={async () => {
                     await post(base + "/" + reading.id + "/recopy");
                     await refresh();
                   }} />
                   {reading.status === "done" ? (
                     <>
-                      <button className="primary" onMouseDown={(e) => e.preventDefault()} onClick={() => createDraft()}>
+                      <button className="primary" disabled={!chatgptAllowed} onMouseDown={(e) => e.preventDefault()} onClick={() => createDraft()}>
                         <Plus size={15} />
                         Tạo nhánh con
                       </button>
@@ -669,7 +672,7 @@ export default function ResearchTab({
                         <Copy size={14} />
                         Copy
                       </button>
-                      <small>Bôi đen + chuột phải để hỏi về một đoạn</small>
+                      {chatgptAllowed && <small>Bôi đen + chuột phải để hỏi về một đoạn</small>}
                       <button disabled={savingMark} onMouseDown={(e) => e.preventDefault()}
                         onClick={() => saveReadingMark()} title="Bôi đen đoạn đã đọc tới rồi bấm để tô vàng. Mỗi node lưu một dấu đọc.">
                         <Highlighter size={14} />Đánh dấu
@@ -691,6 +694,7 @@ export default function ResearchTab({
                   ) : (
                     <button
                       className="primary"
+                      disabled={!chatgptAllowed}
                       onClick={() =>
                         action(() => post(base + "/" + reading.id + "/retry"))
                       }
@@ -716,6 +720,7 @@ export default function ResearchTab({
           <button
             ref={contextButton}
             role="menuitem"
+            disabled={!chatgptAllowed}
             onClick={() => createDraft(menu.excerpt, menu.mark)}
           >
             <GitBranch size={16} />
@@ -746,7 +751,7 @@ export default function ResearchTab({
           setNotice("Đã lưu liên kết tới node con.");
           await refresh();
         }} />}
-      {draft && (
+      {draft && chatgptAllowed && (
         <BranchComposer
           key={draft.parent.id}
           draft={draft}

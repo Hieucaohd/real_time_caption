@@ -31,6 +31,7 @@ class Research:
             if parent['status'] != 'done':
                 raise ValueError('Wait for the parent answer before creating its children.')
             settings = Settings.load()
+            settings.require_chatgpt()
             if payload.get('files'):
                 settings.require_chatgpt_attachments()
             config = dict(selected_tab=settings.chatgpt_selected_tab,
@@ -116,6 +117,7 @@ class Research:
     def create_chatgpt_branch(self, cid, nid, return_tab=''):
         from caption.chatgpt_branch import create_branch, source_conversation_id
         with self.service.lock:
+            Settings.load().require_chatgpt()
             node = self.store.get(cid, nid)
             if node['status'] != 'done':
                 raise ValueError('Chờ câu trả lời của node cha hoàn tất trước khi tạo nhánh ChatGPT.')
@@ -149,6 +151,7 @@ class Research:
 
     def retry(self, cid, nid, selected_tab=None):
         with self.service.lock:
+            Settings.load().require_chatgpt()
             if nid in self.active:
                 raise BusyError('Đang dừng yêu cầu cũ của node. Thử lại sau giây lát.')
             node = self.store.get(cid, nid, private=True)
@@ -181,7 +184,7 @@ class Research:
                     self.retry_after = {tab: until for tab, until in self.retry_after.items() if until > time.monotonic()}
                     excluded = {tab for tab, _ in self.active.values()} | self.retry_after.keys()
                     node = self.store.next_queued(excluded)
-                    if not node or not self.store.claim(node['conversation_id'], node['id']):
+                    if not node or not Settings.load().chatgpt_allowed or not self.store.claim(node['conversation_id'], node['id']):
                         continue
                     job = dict(id='research-' + node['id'], node_id=node['id'], conversation_id=node['conversation_id'],
                                kind='research', status='working', detail='Preparing…', partial='', error='', result=None)
@@ -213,6 +216,7 @@ class Research:
         try:
             if cancel.is_set() or self.stop.is_set():
                 raise chatgpt.ChatGPTCancelled(chatgpt.CANCELLED_MESSAGE)
+            Settings.load().require_chatgpt()
             attachments = self.store.restore_attachments(cid, nid, paths.CACHE_DIR / 'research-uploads' / nid)
             if attachments:
                 Settings.load().require_chatgpt_attachments()

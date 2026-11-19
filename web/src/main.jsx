@@ -4,7 +4,7 @@ import Md from "./MarkdownResponse";
 import ResearchTab from "./ResearchTab";
 import ResponseSource from "./ResponseSource";
 import AttachmentList from "./AttachmentList";
-import ChatGPTProfileDialog, { ChatGPTProfileFields, FreeAttachmentNotice } from "./ChatGPTProfile";
+import ChatGPTProfileDialog, { ChatGPTProfileFields, FreeAttachmentNotice, SignedOutNotice } from "./ChatGPTProfile";
 import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import LiveCaptionsSettings from "./LiveCaptionsSettings";
@@ -78,6 +78,10 @@ async function api(path, options = {}, raw = false) {
     } catch {
       detail = response.statusText;
     }
+    if (path === "/settings" && Array.isArray(detail) && detail.some(item =>
+      item.type === "extra_forbidden" && ["chatgpt_plan", "chatgpt_login_status"].includes(item.loc?.at(-1)))) {
+      throw new Error("Backend đang chạy bản cũ. Dùng stop_web.bat, mở lại ứng dụng rồi lưu cài đặt.");
+    }
     const messages = Array.isArray(detail)
       ? detail.map((item) => typeof item.msg === "string" ? item.msg.replace(/^Value error, /, "") : "").filter(Boolean)
       : [];
@@ -87,6 +91,7 @@ async function api(path, options = {}, raw = false) {
   return raw ? response : response.json();
 }
 const post = (path, body = {}) => api(path, { method: "POST", body });
+const chatgptTabs = new Set(["chat", "summary", "research", "vocab"]);
 const tabs = [
   ["transcript", FileText, "Transcript"],
   ["chat", MessageSquare, "Chat"],
@@ -209,8 +214,9 @@ function App() {
   const settings = boot?.settings || {},
     active = boot?.capture?.active;
   const needsChatGPTProfile = !settings.chatgpt_plan || !settings.chatgpt_login_status;
-  const attachmentsAllowed = settings.chatgpt_plan !== "free";
-  const captureSource = boot?.capture?.source || settings.web_capture_source || "windows";
+  const chatgptAllowed = settings.chatgpt_login_status !== "signed_out";
+  const attachmentsAllowed = chatgptAllowed && settings.chatgpt_plan !== "free";
+  const captureSource = !active && !chatgptAllowed ? "windows" : boot?.capture?.source || settings.web_capture_source || "windows";
   const captureLabel = captureSource === "chatgpt" ? "ChatGPT · Micro" : "Windows Live Captions";
   const chatConfig = chatDraft || chatPreferences(settings);
   const chatSelectedTab = chatConfig.selected_tab;
@@ -335,12 +341,12 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
-    if (tab !== "chat" || !boot || needsChatGPTProfile || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
+    if (tab !== "chat" || !boot || needsChatGPTProfile || !chatgptAllowed || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
     chatTabInitialized.current = true;
     // A saved selection is usable without opening Chrome's tab list. Only a
     // first-time setup with no saved tab discovers/creates a default once.
     if (!chatConfigRef.current.selected_tab) prepareChatTab();
-  }, [tab, cid, !!boot, chatConfig.new_chat, needsChatGPTProfile]);
+  }, [tab, cid, !!boot, chatConfig.new_chat, needsChatGPTProfile, chatgptAllowed]);
   useEffect(() => {
     if (follow && tab === "transcript")
       transcriptEnd.current?.scrollIntoView({ block: "end" });
@@ -434,6 +440,7 @@ function App() {
     finally { transferRef.current = false; setTransferring(""); }
   }
   async function scanTabs({ ensure = false } = {}) {
+    if (!chatgptAllowed) return "Đăng nhập ChatGPT rồi cập nhật Settings.";
     tabLoads.current += 1;
     setLoadingTabs(true);
     try {
@@ -525,6 +532,7 @@ function App() {
     }
   }
   async function submit(kind) {
+    if (!chatgptAllowed) return;
     if (kind === "chat" && !chatConfig.new_chat && (preparingChatTab || !chatSelectedTab)) return;
     const payload = { kind };
     if (kind === "chat")
@@ -555,7 +563,7 @@ function App() {
   function answerActions(m) {
     return (
       <div className="answer-actions">
-        {m.kind === "chat" && <RecopyAnswer key={m.id} onCopy={async () => {
+        {m.kind === "chat" && <RecopyAnswer key={m.id} disabled={!chatgptAllowed} onCopy={async () => {
           await post(`/conversations/${cid}/answers/${m.id}/recopy`);
           await refresh();
         }} />}
@@ -588,6 +596,7 @@ function App() {
     );
   }
   function options(kind) {
+    if (!chatgptAllowed) return null;
     if (kind === "chat")
       return (
         <ChatOptions
@@ -882,7 +891,7 @@ function App() {
               <select className="capture-source" aria-label="Nguồn transcript" value={captureSource} disabled={active}
                 onChange={(e) => action(() => api("/settings", { method: "PATCH", body: { web_capture_source: e.target.value } }))}>
                 <option value="windows">Windows Live Captions</option>
-                <option value="chatgpt">ChatGPT · Micro</option>
+                <option value="chatgpt" disabled={!chatgptAllowed}>ChatGPT · Micro</option>
               </select>
               <small title={captureSource === "chatgpt" && boot.capture.warning || boot.capture.status}>
                 {captureSource === "chatgpt" && boot.capture.warning || boot.capture.status}
@@ -890,7 +899,7 @@ function App() {
             </div>
             <span className="source-tag">{captureSource === "chatgpt" ? "Realtime" : "Win + Ctrl + L"}</span>
             {captureSource === "chatgpt" && <Button icon={PanelTop}
-              aria-pressed={!!boot.overlay_visible} disabled={togglingPopup}
+              aria-pressed={!!boot.overlay_visible} disabled={togglingPopup || !chatgptAllowed}
               title="Hiển thị transcript luôn nổi trên các ứng dụng khác"
               onClick={toggleTranscriptPopup}>
               {boot.overlay_visible ? "Ẩn popup" : "Popup transcript"}
@@ -925,6 +934,7 @@ function App() {
             </button>
           ))}
         </nav>
+        {!chatgptAllowed && chatgptTabs.has(tab) && <SignedOutNotice openSettings={() => setSettingsOpen(true)} />}
         {busyJob?.kind === "research" && tab !== "research" && (
           <div className="research-notice">
             Đang trả lời một nhánh nghiên cứu.{" "}
@@ -969,6 +979,7 @@ function App() {
                 post={post}
                 Md={Md}
                 settings={settings}
+                chatgptAllowed={chatgptAllowed}
                 prompts={boot.prompts.chat || []}
                 refreshPrompts={refresh}
                 chatAttach={chatConfig.attach_transcript}
@@ -1045,7 +1056,7 @@ function App() {
                 </div>
               </>
             )}
-            {tab === "realtime" && <RealtimeChat key={cid} cid={cid} api={api} post={post} prompts={boot.prompts.chat || []} refreshPrompts={refresh} />}
+            {tab === "realtime" && <RealtimeChat key={cid} cid={cid} api={api} post={post} prompts={boot.prompts.chat || []} refreshPrompts={refresh} chatgptEnabled={chatgptAllowed} openSettings={() => setSettingsOpen(true)} />}
             {tab === "chat" && (
               <>
                 <details className="chat-settings">
@@ -1098,7 +1109,7 @@ function App() {
                           <p className="user-text">{m.content}</p>
                         )}
                         <Attachments message={m} cid={cid} />
-                        {m.role === "bot" && <ResponseSource response={m} onSave={async (values) => {
+                        {m.role === "bot" && <ResponseSource response={m} chatgptAllowed={chatgptAllowed} onSave={async (values) => {
                           await api(`/conversations/${cid}/answers/${m.id}/source`, { method: "PUT", body: values });
                           await refresh();
                         }} />}
@@ -1122,11 +1133,12 @@ function App() {
                 <div className="composer chat-composer">
                   {attachmentsAllowed ? <AttachmentList files={files} cid={cid}
                     onRemove={(file) => setFiles((old) => old.filter((item) => item.path !== file.path))} />
-                    : <FreeAttachmentNotice />}
+                    : chatgptAllowed && <FreeAttachmentNotice />}
                   <textarea
                     ref={messageInput}
                     rows={1}
                     aria-label="Câu hỏi Chat"
+                    disabled={!chatgptAllowed}
                     placeholder="Nhập câu hỏi… Enter để gửi, Shift + Enter xuống dòng"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -1189,7 +1201,7 @@ function App() {
                     <Button
                       className="primary"
                       icon={Send}
-                      disabled={!message.trim() || !!busyJob || uploading || (!chatConfig.new_chat && (preparingChatTab || !chatSelectedTab))}
+                      disabled={!chatgptAllowed || !message.trim() || !!busyJob || uploading || (!chatConfig.new_chat && (preparingChatTab || !chatSelectedTab))}
                       onClick={() => submit("chat")}
                     >
                       {uploading ? "Uploading…" : "Send"}
@@ -1229,7 +1241,7 @@ function App() {
                     className="primary"
                     icon={BookOpen}
                     onClick={() => submit("summary")}
-                    disabled={!!busyJob}
+                    disabled={!chatgptAllowed || !!busyJob}
                   >
                     Summarize
                   </Button>
@@ -1455,6 +1467,7 @@ function App() {
                 <div className="vocab-input">
                   <textarea
                     placeholder="Mỗi từ/cụm từ một dòng, hoặc ngăn cách bằng dấu phẩy…"
+                    disabled={!chatgptAllowed}
                     value={words}
                     onChange={(e) => setWords(e.target.value)}
                   />
@@ -1488,7 +1501,7 @@ function App() {
                       className="primary"
                       icon={Languages}
                       onClick={() => submit("vocab")}
-                      disabled={!words.trim() || !!busyJob}
+                      disabled={!chatgptAllowed || !words.trim() || !!busyJob}
                     >
                       Translate words
                     </Button>
@@ -1585,7 +1598,7 @@ function App() {
                       </Button>
                     ) : ["error", "cancelled"].includes(j.status) ? (
                       <Button
-                        disabled={!!busyJob || (j.error_code === "chatgpt_tab_closed" && !chatSelectedTab)}
+                        disabled={!!busyJob || (!chatgptAllowed && ["chat", "summary", "vocab", "research"].includes(j.kind)) || (j.error_code === "chatgpt_tab_closed" && !chatSelectedTab)}
                         onClick={() =>
                           action(() => post("/jobs/" + j.id + "/retry",
                             j.error_code === "chatgpt_tab_closed" ? { selected_tab: chatConfigRef.current.selected_tab } : undefined))
@@ -1710,14 +1723,14 @@ function SettingsModal({ settings, boot, close, save, run, canRun }) {
           </Field>
           <h3>Nguồn transcript</h3>
           <Field label="Chọn một nguồn">
-            <select aria-label="Nguồn transcript trong Settings" value={draft.web_capture_source || "windows"}
+            <select aria-label="Nguồn transcript trong Settings" value={draft.chatgpt_login_status === "signed_out" ? "windows" : draft.web_capture_source || "windows"}
               disabled={boot.capture.active} onChange={(e) => set("web_capture_source", e.target.value)}>
               <option value="windows">Windows Live Captions</option>
-              <option value="chatgpt">ChatGPT · Micro (Dictate)</option>
+              <option value="chatgpt" disabled={draft.chatgpt_login_status === "signed_out"}>ChatGPT · Micro (Dictate)</option>
             </select>
           </Field>
           {boot.capture.active && <p className="muted">Bấm Pause và chờ chốt transcript trước khi đổi cấu hình thu âm.</p>}
-          {draft.web_capture_source === "chatgpt" ? <section className="livecaptions-settings">
+          {draft.web_capture_source === "chatgpt" && draft.chatgpt_login_status !== "signed_out" ? <section className="livecaptions-settings">
             <h3>Thu âm realtime bằng ChatGPT</h3>
             <p>ChatGPT dùng micro được chọn trong Chrome và xử lý âm thanh trên máy chủ. Nguồn này không tự thu âm thanh hệ thống như Windows Live Captions.</p>
             <p>Một tab ChatGPT nghe liên tục. App đọc chữ đang cập nhật trong ô nhập; phần đang nói hiện ngay và phần ổn định được lưu vào transcript, đồng thời dùng cho dịch.</p>

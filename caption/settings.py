@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 CHATGPT_PLANS = ('', 'free', 'go', 'plus', 'pro', 'business', 'enterprise', 'edu', 'other')
 CHATGPT_LOGIN_STATUSES = ('', 'signed_in', 'signed_out')
 CHATGPT_ATTACHMENTS_DISABLED = 'App đã tắt đính kèm file, ảnh và chụp màn hình cho ChatGPT Free. Đổi gói trong Settings để bật lại.'
+CHATGPT_SIGNED_OUT = 'Các thao tác ChatGPT đang tắt. Sau khi đăng nhập trên Chrome, hãy chọn “Đã đăng nhập” trong Settings.'
 
 
 @dataclass
@@ -78,10 +79,19 @@ class Settings:
     translation_device: str = field(default_factory=lambda: defaults.get("settings", "translation_device"))
 
     @property
+    def chatgpt_allowed(self) -> bool:
+        return self.chatgpt_login_status != 'signed_out'
+
+    def require_chatgpt(self) -> None:
+        if not self.chatgpt_allowed:
+            raise ValueError(CHATGPT_SIGNED_OUT)
+
+    @property
     def chatgpt_attachments_allowed(self) -> bool:
-        return self.chatgpt_plan != 'free'
+        return self.chatgpt_allowed and self.chatgpt_plan != 'free'
 
     def require_chatgpt_attachments(self) -> None:
+        self.require_chatgpt()
         if not self.chatgpt_attachments_allowed:
             raise ValueError(CHATGPT_ATTACHMENTS_DISABLED)
 
