@@ -29,6 +29,8 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from .chatgpt_source import CONVERSATION_MAPPING, response_position
+from . import chatgpt_tab_usage
+from .settings import Settings
 
 log = logging.getLogger(__name__)
 
@@ -220,6 +222,14 @@ class ChatGPTLoginRequired(ChatGPTError):
 class ChatGPTLoginUnverified(ChatGPTError):
     def __init__(self):
         super().__init__('Chưa xác nhận được đăng nhập ChatGPT. Hãy mở tab ChatGPT trong Chrome của app, chờ tải xong và kiểm tra lại. Có thể mở thanh bên để hiện nút tài khoản.')
+
+
+class ChatGPTTabLimitReached(ChatGPTError):
+    code = 'chatgpt_tab_limit_reached'
+
+    def __init__(self):
+        limit = chatgpt_tab_usage.FREE_REQUEST_LIMIT
+        super().__init__(f'Tab ChatGPT này đã dùng hết {limit}/{limit} lượt gửi của chế độ Free trong app. Chọn một tab khác để tiếp tục.')
 
 
 _OUTSIDE_CONVERSATION = (
@@ -996,6 +1006,8 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
     """Read copied Markdown, never save flattened DOM text as a formatted answer."""
     turn = _turn_locator(page, turn_id)
     source = _response_source(turn, turn_id) if on_response_source else None
+    if on_response_source:
+        on_response_source(source)
     buttons = turn.locator(REPLY_COPY_BUTTON)
     copy_button = buttons.last if copy_last else buttons.first
     try:
@@ -1041,8 +1053,6 @@ def _read_answer(page, turn_id: str, on_response_tab=None, on_response_source=No
                         log.warning('Could not read response tab title', exc_info=True)
                         title = ''
                     on_response_tab(title)
-                if on_response_source:
-                    on_response_source(source)
                 return cleaned
     try:
         title = page.title() if source else ''
@@ -1103,7 +1113,7 @@ def _request_page(browser, selected_tab, use_current_tab, tab_name):
         lock = ProcessLock(CACHE_DIR / 'chatgpt-tabs' / (key + '.lock'))
         lock.acquire()
     try:
-        yield page, created
+        yield page, created, key
     finally:
         lock.release()
 
@@ -1154,8 +1164,11 @@ def ask(
                 "Start Chrome with launch_chrome.bat (remote debugging on port 9222) and try again."
             ) from exc
 
-        with _request_page(browser, selected_tab, use_current_tab, tab_name) as (page, created):
+        with _request_page(browser, selected_tab, use_current_tab, tab_name) as (page, created, tab_key):
             _check_cancel(cancel_event)
+            if (not dry_run and Settings.load().chatgpt_plan == 'free'
+                    and chatgpt_tab_usage.used_requests(tab_key) >= chatgpt_tab_usage.FREE_REQUEST_LIMIT):
+                raise ChatGPTTabLimitReached()
             if not created:
                 require_page_login(page, cancel_event)
             if new_chat or created:
@@ -1218,6 +1231,11 @@ def ask(
             turns_before = _turn_ids(page)
             answered_before = _answered_turn_ids(page)
             require_page_login(page, cancel_event)
+            _check_cancel(cancel_event)
+            # Reserve before handing Send to Chrome. If Chrome loses the
+            # acknowledgement, the click may already have reached ChatGPT.
+            if Settings.load().chatgpt_plan == 'free' and not chatgpt_tab_usage.reserve_request(tab_key):
+                raise ChatGPTTabLimitReached()
             send.click()
             try:
                 page.wait_for_function(

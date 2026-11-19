@@ -94,6 +94,10 @@ class RealtimeChatStore:
                 db.execute(f'UPDATE realtime_chat_settings SET {lane}_cursor=? WHERE conversation_id=(SELECT conversation_id FROM realtime_chat_events WHERE id=?)',
                     (json.dumps(cursor), eid))
 
+    def save_response_source(self, eid, source):
+        with self.conversations._connect() as db:
+            db.execute('UPDATE realtime_chat_events SET response_source=? WHERE id=?', (json.dumps(source), eid))
+
     def latest_actions(self, cid):
         with self.conversations._connect() as db:
             row = db.execute("SELECT answer FROM realtime_chat_events WHERE conversation_id=? AND kind='actions' AND status='done' ORDER BY id DESC LIMIT 1", (cid,)).fetchone()

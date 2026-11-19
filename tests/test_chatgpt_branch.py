@@ -316,7 +316,7 @@ class NativeBranchUITests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'failed request'):
                 with chatgpt._request_page(self.browser, first, False, ''):
                     # A different tab is available while the first tab waits for its response.
-                    with chatgpt._request_page(self.browser, second.key, False, '') as (other, created):
+                    with chatgpt._request_page(self.browser, second.key, False, '') as (other, created, _):
                         self.assertFalse(created)
                         self.assertNotEqual(other, self.original)
                     with self.assertRaises(BusyError):
@@ -328,5 +328,5 @@ class NativeBranchUITests(unittest.TestCase):
                             with chatgpt._request_page(self.browser, None, True, ''):
                                 self.fail('Alias bypassed target reservation')
                     raise RuntimeError('failed request')
-            with chatgpt._request_page(self.browser, first, False, '') as (reopened, _):
+            with chatgpt._request_page(self.browser, first, False, '') as (reopened, _, _):
                 self.assertEqual(reopened, self.original)

@@ -1,8 +1,11 @@
 """The delivery callback must precede answer waiting, but follow send confirmation."""
 from contextlib import ExitStack
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-from caption import chatgpt
+from caption import chatgpt, chatgpt_tab_usage, paths
 
 
 class DeliveryTests(unittest.TestCase):
@@ -14,8 +17,10 @@ class DeliveryTests(unittest.TestCase):
         self.login_check = self.stack.enter_context(patch.object(chatgpt, 'require_page_login'))
         self.fill = self.stack.enter_context(patch.object(chatgpt, '_fill_composer'))
         self.stack.enter_context(patch('playwright.sync_api.sync_playwright'))
-        request = self.stack.enter_context(patch.object(chatgpt, '_request_page'))
-        request.return_value.__enter__.return_value = (self.page, False)
+        self.request = self.stack.enter_context(patch.object(chatgpt, '_request_page'))
+        self.request.return_value.__enter__.return_value = (self.page, False, 'tab-one')
+        self.settings = SimpleNamespace(chatgpt_plan='plus')
+        self.stack.enter_context(patch.object(chatgpt.Settings, 'load', return_value=self.settings))
         for name, result in [('_visible', self.composer), ('_composer_form', Mock()),
                              ('_wait_not_answering', None), ('_clear_attachments', 0),
                              ('_wait_send_enabled', self.send), ('_turn_ids', []),
@@ -48,6 +53,38 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.ask(dry_run=True), '')
         self.send.click.assert_not_called()
         self.ack.assert_not_called()
+
+    def test_free_limit_follows_the_chrome_tab_and_paid_is_uncapped(self):
+        folder = self.stack.enter_context(TemporaryDirectory())
+        self.stack.enter_context(patch.object(paths, 'CACHE_DIR', Path(folder)))
+        self.settings.chatgpt_plan = 'free'
+        for _ in range(10):
+            self.assertEqual(self.ask(), 'Answer')
+        with self.assertRaises(chatgpt.ChatGPTTabLimitReached):
+            self.ask()
+        self.assertEqual(self.send.click.call_count, 10)
+        self.assertEqual(self.fill.call_count, 10)
+        self.assertEqual(chatgpt_tab_usage.used_requests('tab-one'), 10)
+
+        self.request.return_value.__enter__.return_value = (self.page, False, 'tab-two')
+        self.assertEqual(self.ask(), 'Answer')
+        self.assertEqual(chatgpt_tab_usage.used_requests('tab-two'), 1)
+
+        self.settings.chatgpt_plan = 'pro'
+        self.request.return_value.__enter__.return_value = (self.page, False, 'tab-one')
+        self.assertEqual(self.ask(), 'Answer')
+        self.assertEqual(chatgpt_tab_usage.used_requests('tab-one'), 10)
+
+    def test_free_counts_dispatch_even_if_response_fails_but_not_a_dry_run(self):
+        folder = self.stack.enter_context(TemporaryDirectory())
+        self.stack.enter_context(patch.object(paths, 'CACHE_DIR', Path(folder)))
+        self.settings.chatgpt_plan = 'free'
+        self.ask(dry_run=True)
+        self.assertEqual(chatgpt_tab_usage.used_requests('tab-one'), 0)
+        self.wait.side_effect = chatgpt.ChatGPTCancelled('Stopped while waiting')
+        with self.assertRaises(chatgpt.ChatGPTCancelled):
+            self.ask()
+        self.assertEqual(chatgpt_tab_usage.used_requests('tab-one'), 1)
 
     def test_signed_out_target_never_fills_or_sends(self):
         self.login_check.side_effect = chatgpt.ChatGPTLoginRequired()

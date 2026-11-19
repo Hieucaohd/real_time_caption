@@ -4,6 +4,7 @@ import ChatOptions from "./ChatOptions";
 import PromptModal from "./PromptModal";
 import RealtimePrompts from "./RealtimePrompts";
 import AttachmentList from "./AttachmentList";
+import ResponseSource from "./ResponseSource";
 import { FreeAttachmentNotice, SignedOutNotice } from "./ChatGPTProfile";
 import Md from "./MarkdownResponse";
 import "./realtime-chat.css";
@@ -42,12 +43,19 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
   const events = [...new Map([...older, ...(state?.events || [])].map(event => [event.id, event])).values()].sort((a, b) => a.id - b.id);
   const chat = events.filter(event => event.kind === "chat");
   const summaries = events.filter(event => event.kind === "summary" && event.status === "done");
+  const lastSuggestion = events.filter(event => event.kind === "actions" && event.status === "done").at(-1);
   const lanes = state?.lanes || {};
   const working = Object.values(lanes).some(lane => lane.status === "working");
   const active = !!state?.running || working || chat.some(e => e.status === "queued");
   const chatgptAllowed = chatgptEnabled && state?.chatgpt_allowed !== false;
   const settingsLocked = !chatgptAllowed || busy || !!state?.settings_locked || active;
   const attachmentsAllowed = chatgptAllowed && state?.attachments_allowed !== false;
+  const actionsTabFull = state?.free_plan && lanes.actions?.error_code === "chatgpt_tab_limit_reached";
+  function answerSource(event) {
+    const source = event?.response_source;
+    return (source?.response_conversation_url || source?.response_position)
+      ? <ResponseSource response={source} chatgptAllowed={chatgptAllowed} /> : null;
+  }
   useEffect(() => { if (settingsLocked) setEditingPrompt(false); }, [settingsLocked]);
   useLayoutEffect(() => {
     if (follow) for (const ref of [chatScroll, summaryScroll])
@@ -94,7 +102,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     finally { stream?.getTracks().forEach(track => track.stop()); }
   }
   function send(actionId = "") {
-    if (!chatgptAllowed || uploading || (!actionId && !message.trim())) return;
+    if (!chatgptAllowed || actionsTabFull || uploading || (!actionId && !message.trim())) return;
     action(async () => {
       if (!popup && !settingsLocked) await save();
       await post(base + "/messages", { message, action_id: actionId, files: attachmentsAllowed ? files.map(file => file.path) : [] });
@@ -152,7 +160,8 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
       <section className="rt-chat-column" aria-label="Hỏi đáp realtime">
         <div className="rt-suggestions">
           <div className="rt-lane-status"><strong>Gợi ý hành động</strong><small>{lanes.actions?.detail || "Bấm Start để theo dõi cuộc trò chuyện"}</small></div>
-          <div className="rt-action-buttons">{state.actions.map(item => <button key={item.id} title={item.prompt} disabled={!chatgptAllowed || busy || uploading} onClick={() => send(item.id)}>{item.label}</button>)}</div>
+          <div className="rt-action-buttons">{state.actions.map(item => <button key={item.id} title={item.prompt} disabled={!chatgptAllowed || actionsTabFull || busy || uploading} onClick={() => send(item.id)}>{item.label}</button>)}</div>
+          {state.actions.length > 0 && answerSource(lastSuggestion)}
           {!state.actions.length && <small className="muted">Gợi ý sẽ xuất hiện khi ChatGPT nhận transcript mới.</small>}
         </div>
         <div className="chat-scroll scroll" ref={chatScroll}>
@@ -162,6 +171,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
               <AttachmentList cid={cid} files={attachments(event.files)} /></article>
             <article className="message bot"><div className="message-meta">ChatGPT</div>
               {event.answer ? <Md text={event.answer} /> : <p className="muted">{event.detail || (event.status === "queued" ? "Đã xếp hàng, chờ tab hỏi đáp sẵn sàng…" : "Đang chờ ChatGPT…")}</p>}
+              {answerSource(event)}
               {event.status === "done" && <button onClick={() => navigator.clipboard.writeText(event.answer).catch(e => setError(e.message))}><Copy size={14} /> Copy</button>}
               {["error", "cancelled", "interrupted"].includes(event.status) && <button onClick={() => { setMessage(event.question); setFiles(attachments(event.files)); input.current?.focus(); }}>Dùng lại câu hỏi</button>}
             </article>
@@ -181,14 +191,14 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
             <button disabled={uploading || !attachmentsAllowed} onClick={screenshot}><Camera size={16} /> Screenshot</button>
             <button title="Lên đầu" onClick={() => chatScroll.current?.scrollTo({ top: 0 })}><ArrowUp size={16} /></button>
             <button title="Xuống cuối" onClick={() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight })}><ArrowDown size={16} /></button>
-          </div><button className="primary" disabled={!chatgptAllowed || busy || uploading || !message.trim()} onClick={() => send()}><Send size={16} /> Send</button></div>
+          </div><button className="primary" disabled={!chatgptAllowed || actionsTabFull || busy || uploading || !message.trim()} onClick={() => send()}><Send size={16} /> Send</button></div>
         </div>
       </section>
       <section className="rt-summary-column" aria-label="Tóm tắt realtime">
         <div className="rt-lane-status"><strong>Tóm tắt cuộc trò chuyện</strong><small>{lanes.summary?.detail || "Tab riêng · cùng chu kỳ cập nhật"}</small></div>
         <div className="rt-summaries scroll" ref={summaryScroll}>
           {!summaries.length && <p className="muted rt-empty">Mỗi lượt thêm một bản tóm tắt phần mới. Nội dung được lưu vào cuộc hội thoại.</p>}
-          {summaries.map(event => <article className="rt-summary" key={event.id}><time>{stamp(event.created_at)}</time><Md text={event.answer} /></article>)}
+          {summaries.map(event => <article className="rt-summary" key={event.id}><time>{stamp(event.created_at)}</time><Md text={event.answer} />{answerSource(event)}</article>)}
           {lanes.summary?.status === "working" && lanes.summary?.partial && <article className="rt-summary preview"><Md text={lanes.summary.partial} /></article>}
         </div>
       </section>

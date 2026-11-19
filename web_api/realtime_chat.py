@@ -145,6 +145,7 @@ class RealtimeChat:
             return dict(config=config, auto_scroll=defaults.get('web', 'realtime_auto_scroll'), running=self.active == cid, preparing=self.preparing,
                 settings_locked=self.settings_locked(cid), chatgpt_allowed=settings.chatgpt_allowed,
                 attachments_allowed=settings.chatgpt_attachments_allowed,
+                free_plan=settings.chatgpt_plan == 'free',
                 lanes={lane: dict(self.runtime.get((cid, lane), {})) for lane in self.busy},
                 events=events, actions=suggestions)
 
@@ -345,13 +346,17 @@ class RealtimeChat:
             if power is None:  # Conversations saved before separate effort settings.
                 power = config['power']
             Settings.load().require_chatgpt()
+            def save_source(source):
+                response_source.update(source)
+                self.store.save_response_source(eid, response_source)
+
             answer = chatgpt.ask(prompt, attachments, lambda value: self.status(cid, lane, detail=value),
                 selected_tab=config['selected_tab'] if lane == 'actions' else config['summary_tab'],
                 new_chat=fresh, power=None if power < 0 else power, cancel_event=cancel,
                 upload_timeout_s=defaults.get('realtime_chat', 'upload_timeout_seconds'),
                 on_sent=lambda: self.store.update(eid, 'working', detail='ChatGPT đã nhận transcript, đang chờ phản hồi.', cursor=cursor, lane=lane),
                 on_partial=lambda value: self.status(cid, lane, partial=value),
-                on_response_source=response_source.update)
+                on_response_source=save_source)
             if cancel.is_set():
                 raise chatgpt.ChatGPTCancelled('Đã dừng.')
             if not answer.strip():
@@ -377,6 +382,10 @@ class RealtimeChat:
         except Exception as exc:
             status = 'cancelled' if cancel.is_set() else 'error'
             detail = task.get('cancel_detail', str(exc)) if cancel.is_set() else str(exc)
+            if isinstance(exc, chatgpt.ChatGPTCopyError):
+                response_source.update(exc.source)
+            if isinstance(exc, chatgpt.ChatGPTTabLimitReached):
+                detail += ' Trong Chat realtime, bấm Stop, đóng tab đã hết lượt rồi bấm Start để chuẩn bị tab mới.'
             if eid:
                 self.store.update(eid, status, answer=answer, detail=detail, source=response_source)
             self.status(cid, lane, status=status, detail=detail, partial='',

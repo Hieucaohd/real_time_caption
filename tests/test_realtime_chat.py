@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import patch
 
 import test_web_api as fixtures
-from caption.chatgpt import ChromeChatGPTTab, ChatGPTCancelled, ChatGPTVerificationRequired
+from caption.chatgpt import ChromeChatGPTTab, ChatGPTCancelled, ChatGPTCopyError, ChatGPTTabLimitReached, ChatGPTVerificationRequired
+from caption.settings import Settings
 from caption.shared_access import BusyError
 from web_api.realtime_chat import parse_actions
 from web_api.realtime_chat_store import transcript_delta, RealtimeChatStore
@@ -153,6 +154,50 @@ class RealtimeChatTests(unittest.TestCase):
         state = self.client.get(self.base).json()
         self.assertEqual(state['actions'][0]['label'], 'Explain')
         self.assertEqual(self.done('summary')[0]['response_source']['response_position'], 2)
+
+    def test_exhausted_tab_pauses_only_its_lane_and_keeps_transcript_cursor(self):
+        settings = Settings.load()
+        settings.chatgpt_plan = 'free'
+        settings.save()
+        blocked = []
+
+        def ask(*args, **kwargs):
+            if kwargs['selected_tab'] == 'actions-tab':
+                blocked.append(True)
+                raise ChatGPTTabLimitReached()
+            return self.ask(*args, **kwargs)
+
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=ask):
+            self.start()
+            self.wait_for(lambda: self.rt.state(self.cid)['lanes']['actions'].get('status') == 'error')
+            self.wait_for(lambda: self.done('summary'))
+            state = self.rt.state(self.cid)
+            self.assertTrue(state['free_plan'])
+            self.assertEqual(state['lanes']['actions']['error_code'], 'chatgpt_tab_limit_reached')
+            self.assertEqual(self.rt.store.settings(self.cid, {})[1]['actions'], {})
+            self.add_line('New transcript after quota reached')
+            self.due()
+            self.wait_for(lambda: len(self.done('summary')) == 2)
+        self.assertEqual(blocked, [True])
+
+    def test_response_position_survives_a_realtime_copy_failure(self):
+        source = {'response_conversation_url':'https://chatgpt.com/c/test', 'response_position':4}
+
+        def ask(*args, **kwargs):
+            if kwargs['selected_tab'] == 'actions-tab':
+                kwargs['on_sent']()
+                kwargs['on_response_source'](source)
+                event = self.rt.store.history(self.cid)
+                self.assertEqual(next(row for row in event if row['kind'] == 'actions')['response_source'], source)
+                raise ChatGPTCopyError('Copy failed', source)
+            return self.ask(*args, **kwargs)
+
+        with patch('web_api.realtime_chat.chatgpt.ask', side_effect=ask):
+            self.start()
+            self.wait_for(lambda: self.rt.state(self.cid)['lanes']['actions'].get('status') == 'error')
+        event = next(row for row in self.rt.store.history(self.cid) if row['kind'] == 'actions')
+        self.assertEqual(event['detail'], 'Copy failed')
+        self.assertEqual(event['response_source']['response_position'], 4)
 
     def test_prompt_templates_persist_and_each_lane_uses_saved_snapshot(self):
         url = '/api/realtime-prompts'
