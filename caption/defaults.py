@@ -15,7 +15,7 @@ def validate(data):
     schemas = {
         'settings': get_type_hints(Settings),
         'realtime_chat': dict(interval=int, upload_timeout_seconds=int, prompt=(str, type(None)), power=(int, type(None)),
-                             summary_power=(int, type(None)), screenshot=(bool, type(None)),
+                             reply_power=int, summary_power=(int, type(None)), screenshot=(bool, type(None)),
                              actions_prompt=str, summary_prompt=str),
         'research': dict(prompt=(str, type(None)), power=(int, type(None)),
                          attach_transcript=(bool, type(None)), attach_history=(bool, type(None)),
@@ -73,7 +73,7 @@ def validate(data):
     between('settings', 'overlay_alpha', .1, 1)
     between('realtime_chat', 'interval', 5, 3600)
     between('realtime_chat', 'upload_timeout_seconds', 30, 1800)
-    for key in ('power', 'summary_power'):
+    for key in ('power', 'reply_power', 'summary_power'):
         between('realtime_chat', key, -1, 2)
     for key in ('actions_prompt', 'summary_prompt'):
         if not 1 <= len(data['realtime_chat'][key].strip()) <= 200_000:

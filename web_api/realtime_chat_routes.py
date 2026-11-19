@@ -3,6 +3,7 @@ from functools import lru_cache
 from fastapi import APIRouter, Request, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from caption import defaults
 from .server_math import browser_markdown
 
 router = APIRouter(prefix='/api/conversations/{cid}/realtime-chat')
@@ -42,6 +43,7 @@ class RealtimeConfig(BaseModel):
     actions_template: str = Field(default='', max_length=200)
     summary_template: str = Field(default='', max_length=200)
     power: int = Field(default=-1, ge=-1, le=2)
+    reply_power: int = Field(default_factory=lambda: defaults.get('realtime_chat', 'reply_power'), ge=-1, le=2)
     # Missing in older settings/archives: inherit their shared Power once.
     summary_power: int | None = Field(default=None, ge=-1, le=2)
     max_lines: int = Field(default=300, ge=0, le=1_000_000)

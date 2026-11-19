@@ -134,7 +134,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
     </div>
     {!chatgptAllowed && <SignedOutNotice openSettings={openSettings} />}
     {!popup && <details className="chat-settings">
-      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Hỏi đáp: {powerLabel(config.power)} · Tóm tắt: {powerLabel(config.summary_power ?? config.power)} · {config.interval} giây/lượt</span></summary>
+      <summary><Settings2 size={14} /><strong>Tùy chọn Chat realtime</strong><span>Gợi ý {powerLabel(config.power)} · Hỏi đáp {powerLabel(config.reply_power)} · Tóm tắt {powerLabel(config.summary_power)} · {config.interval} giây/lượt</span></summary>
       <ChatOptions value={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
         attachmentsAllowed={attachmentsAllowed}
         prompts={prompts} managedContext
@@ -144,7 +144,7 @@ export default function RealtimeChat({ cid, api, post, prompts, refreshPrompts, 
       </ChatOptions>
       <RealtimePrompts config={config} onChange={patch => setConfig(old => ({ ...old, ...patch }))}
         api={api} post={post} disabled={settingsLocked} />
-      <p className="muted rt-help">Power gợi ý / hỏi đáp và Power tóm tắt áp dụng riêng cho từng tab. “Giữ nguyên” không đổi mức của tab tương ứng. Stop rồi Start dùng lại hai tab cũ nếu còn mở; chưa có transcript mới thì không gửi lượt tự động. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
+      <p className="muted rt-help">Power Gợi ý áp dụng cho lượt lấy gợi ý. Power Hỏi đáp áp dụng khi bấm một gợi ý hoặc gửi câu hỏi. Tóm tắt chạy trên tab riêng và tiếp tục cập nhật khi bạn hỏi đáp. Bấm Stop và chờ dừng xong để chỉnh cài đặt.</p>
     </details>}
     {error && <div className="rt-error" role="alert">{error}<button onClick={() => setError("")}>Đóng</button></div>}
     {Object.entries(lanes).filter(([, lane]) => lane.status === "error" && lane.error_code === "chatgpt_verification_required").map(([key, lane]) => (

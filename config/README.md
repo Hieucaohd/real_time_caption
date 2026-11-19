@@ -170,8 +170,9 @@ Nhóm này áp dụng khi cuộc hội thoại chưa lưu cấu hình Chat realt
 | `realtime_chat.interval` | `30` | Số nguyên 5–3600 giây. Khoảng giữa các lượt kiểm tra/gửi cập nhật tự động cho gợi ý và tóm tắt. |
 | `realtime_chat.upload_timeout_seconds` | `600` | Số nguyên 30–1800 giây. Tổng thời gian chờ file/ảnh xuất hiện và ChatGPT sẵn sàng gửi trong Chat realtime, mặc định 10 phút. App cập nhật trạng thái chờ mỗi 5 giây và cho phép Stop. Áp dụng trực tiếp từ bản build cho cả hội thoại đã lưu; không đổi thời gian chờ câu trả lời hoặc timeout của Chat thường. |
 | `realtime_chat.prompt` | `null` | Tên mẫu trong `prompts/chat/` dành cho câu hỏi/action người dùng gửi. `null` kế thừa `settings.chat_prompt`; `""` chọn mẫu mới nhất. Không phải prompt sinh danh sách gợi ý. |
-| `realtime_chat.power` | `null` | `null` kế thừa `settings.chat_chatgpt_power`; hoặc số nguyên -1–2. Áp dụng cho tab gợi ý và hỏi đáp. |
-| `realtime_chat.summary_power` | `null` | `null` kế thừa Power gợi ý/hỏi đáp của cấu hình Chat realtime đang dùng; hoặc đặt riêng -1–2 cho tab tóm tắt. Không kế thừa `settings.summary_chatgpt_power`. |
+| `realtime_chat.power` | `0` (Instant) | Power của lượt lấy gợi ý tự động. Chọn số nguyên -1–2, hoặc `null` để kế thừa `settings.chat_chatgpt_power`. |
+| `realtime_chat.reply_power` | `1` (Medium) | Power khi người dùng bấm gợi ý hoặc gửi câu hỏi. Chọn số nguyên -1–2. Hội thoại cũ dùng mặc định này cho đến khi có cài đặt Hỏi đáp riêng. |
+| `realtime_chat.summary_power` | `null` | `null` lấy Power Gợi ý khi chưa lưu mức riêng. Có thể chọn số nguyên -1–2 để đặt riêng mức cho tab tóm tắt. |
 | `realtime_chat.screenshot` | `null` | `null` kế thừa `settings.chat_screenshot`; hoặc `true`/`false`. Dùng khi người dùng gửi câu hỏi/action, không chụp ảnh ở mỗi lượt tự động sinh gợi ý/tóm tắt. |
 | `realtime_chat.actions_prompt` | Prompt gợi ý JSON trong file | Chuỗi có 1–200.000 ký tự sau khi bỏ khoảng trắng đầu/cuối. Nội dung chỉ dẫn tạo danh sách nút hành động; phải giữ cấu trúc JSON như ví dụ dưới đây. App tự nối transcript mới vào cuối. |
 | `realtime_chat.summary_prompt` | Prompt tóm tắt tiếng Việt trong file | Chuỗi có 1–200.000 ký tự sau khi bỏ khoảng trắng đầu/cuối. Tóm tắt phần mới, nêu ý chính/quyết định/việc cần làm; app tự nối transcript mới. Không phải tên file trong `prompts/summarize/`. |
@@ -269,6 +270,7 @@ Cài đặt Live Captions đã lưu trong database được ưu tiên. Khi ngu�
   "realtime_chat": {
     "interval": 15,
     "power": 0,
+    "reply_power": 1,
     "summary_power": 1
   },
   "realtime_popup": {
@@ -282,7 +284,7 @@ Cài đặt Live Captions đã lưu trong database được ưu tiên. Khi ngu�
 }
 ```
 
-Bộ này mở tab Chat realtime với theme tối, đặt chu kỳ 15 giây, Power hỏi đáp Instant và tóm tắt Medium; popup dùng chữ 12 px và trong suốt 20%. Nó vẫn cần người dùng Start các chức năng và chuẩn bị quyền micro/gói dịch theo giao diện.
+Bộ này mở tab Chat realtime với theme tối, đặt chu kỳ 15 giây, Power Gợi ý Instant và Power Hỏi đáp, Tóm tắt Medium. Popup dùng chữ 12 px và trong suốt 20%. Người dùng cần bấm Start và chuẩn bị quyền micro hoặc gói dịch theo giao diện.
 
 ## Khi chỉnh mà chưa thấy thay đổi
 

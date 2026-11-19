@@ -14,7 +14,7 @@ from caption.shared_access import BusyError
 from .realtime_chat_store import RealtimeChatStore, transcript_delta
 
 log = logging.getLogger(__name__)
-PREFERENCES = ('prompt', 'power', 'summary_power', 'interval', 'screenshot',
+PREFERENCES = ('prompt', 'power', 'reply_power', 'summary_power', 'interval', 'screenshot',
                'actions_prompt', 'summary_prompt', 'actions_template', 'summary_template')
 _JSON_SPACE_ENTITY = re.compile(r'&(?:#[xX][0-9a-fA-F]+|#\d+|[A-Za-z]+);')
 
@@ -241,18 +241,17 @@ class RealtimeChat:
             if self.preparing or sum(task['cid'] != cid for task in self.manual) >= 20:
                 raise BusyError('Đang chuẩn bị tab hoặc hàng đợi đã đầy.')
             eid = self.store.create(cid, 'chat', message.strip(), files)
-            # A new user request supersedes work for this conversation. Signal
-            # cancellation; the lane worker must release its tab before reusing it.
+            # User requests supersede work on the shared suggestions/reply tab.
             detail = 'Đã hủy để ưu tiên câu hỏi mới của bạn.'
             for task in list(self.manual):
                 if task['cid'] == cid:
                     self.store.update(task['id'], 'cancelled', detail=detail)
                     self.manual.remove(task)
-            for lane, task in self.busy.items():
-                if task and task['cid'] == cid:
-                    task['cancel_detail'] = detail
-                    task['cancel'].set()
-                    self.status(cid, lane, detail='Đang dừng lượt hiện tại để trả lời câu hỏi của bạn…')
+            task = self.busy['actions']
+            if task and task['cid'] == cid:
+                task['cancel_detail'] = detail
+                task['cancel'].set()
+                self.status(cid, 'actions', detail='Đang dừng lượt hiện tại để trả lời câu hỏi của bạn…')
             self.manual.appendleft(dict(id=eid, cid=cid, kind='chat', message=message.strip(), files=files,
                                     config=config, cancel=threading.Event()))
         return {'id': eid}
@@ -264,10 +263,6 @@ class RealtimeChat:
                     task = self.manual.popleft()
                 elif self.active:
                     cid = self.active
-                    # Both automatic lanes yield until the user's reply finishes.
-                    if any(task['cid'] == cid for task in self.manual) or any(
-                            task and task['cid'] == cid and task['kind'] == 'chat' for task in self.busy.values()):
-                        continue
                     runtime = self.runtime[cid, lane]
                     if runtime['status'] == 'error' or runtime['due'] > time.monotonic():
                         continue
@@ -285,10 +280,7 @@ class RealtimeChat:
                 with self.lock:
                     self.busy[lane] = None
                     if task['kind'] == 'chat' and self.active == task['cid']:
-                        for name in self.busy:
-                            runtime = self.runtime.get((task['cid'], name))
-                            if runtime:
-                                runtime['due'] = time.monotonic() + task['config']['interval']
+                        self.runtime[task['cid'], lane]['due'] = time.monotonic() + task['config']['interval']
 
     def status(self, cid, lane, **values):
         with self.lock:
@@ -342,8 +334,9 @@ class RealtimeChat:
             self.status(cid, lane, status='working', kind=task['kind'], detail='Đang gửi tới ChatGPT', partial='', error_code='')
             with self.lock:
                 fresh = self.runtime.get((cid, lane), {}).get('fresh', False)
-            power = config.get('summary_power') if lane == 'summary' else config['power']
-            if power is None:  # Conversations saved before separate effort settings.
+            power = {'actions': config['power'], 'chat': config['reply_power'],
+                     'summary': config.get('summary_power')}[task['kind']]
+            if power is None:  # Older conversations may lack their own summary Power.
                 power = config['power']
             Settings.load().require_chatgpt()
             def save_source(source):

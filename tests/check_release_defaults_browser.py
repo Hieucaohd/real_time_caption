@@ -15,7 +15,7 @@ def main():
     fixture = ReleaseDefaultsTests()
     fixture.setUp()
     fixture.document['web'].update(initial_tab='realtime', theme='dark', realtime_auto_scroll=False)
-    fixture.document['realtime_chat'].update(interval=45, power=0, summary_power=2)
+    fixture.document['realtime_chat'].update(interval=45, power=0, reply_power=-1, summary_power=2)
     fixture.document['realtime_popup']['font_size'] = 9
     fixture.write()
     server = uvicorn.Server(uvicorn.Config(create_app(fixture.service), host='127.0.0.1', port=0, log_level='error'))
@@ -40,7 +40,8 @@ def main():
             expect(panel.get_by_label('Tự cuộn', exact=True)).not_to_be_checked()
             panel.locator('summary').click()
             expect(page.get_by_label('Chu kỳ Chat realtime', exact=True)).to_have_value('45')
-            expect(page.get_by_label('realtime Power', exact=True)).to_have_value('0')
+            expect(page.get_by_label('realtime Suggestions Power', exact=True)).to_have_value('0')
+            expect(page.get_by_label('realtime Reply Power', exact=True)).to_have_value('-1')
             expect(page.get_by_label('realtime Summary Power', exact=True)).to_have_value('2')
             page.get_by_role('button', name='Transcript', exact=True).click()
             page.wait_for_timeout(1500)

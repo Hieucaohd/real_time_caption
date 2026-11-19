@@ -79,11 +79,15 @@ export default function ChatOptions({
           </button>
         </div>
       </label>
-      {(managedContext ? [["power", "Power · Gợi ý / hỏi đáp"], ["summary_power", "Power · Tóm tắt"]] : [["power", "Power"]]).map(([key, label]) => <label className="field" key={key}>
+      {(managedContext ? [
+        ["power", "Power · Gợi ý", "Suggestions Power"],
+        ["reply_power", "Power · Hỏi đáp", "Reply Power"],
+        ["summary_power", "Power · Tóm tắt", "Summary Power"],
+      ] : [["power", "Power", "Power"]]).map(([key, label, control]) => <label className="field" key={key}>
         <span>{label}</span>
         <select
-          aria-label={scope + (key === "power" ? " Power" : " Summary Power")}
-          value={value[key] ?? value.power ?? -1}
+          aria-label={`${scope} ${control}`}
+          value={value[key] ?? -1}
           onChange={(e) => set(key, +e.target.value)}
         >
           {["Giữ nguyên", "Instant", "Medium", "High"].map((p, i) => (

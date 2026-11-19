@@ -1,3 +1,3 @@
 """Local React/FastAPI interface to the shared desktop application services."""
 
-API_VERSION = 5
+API_VERSION = 6

@@ -289,47 +289,57 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertEqual(self.rt.state(self.cid)['actions'][0]['label'], 'Recovered')
         self.assertEqual(self.calls, [])
 
-    def test_user_request_preempts_both_lanes_and_blocks_auto_until_answered(self):
+    def test_user_request_preempts_suggestions_while_summary_keeps_running(self):
         automatic = {key: threading.Event() for key in ('actions-tab', 'summary-tab')}
-        cancelled = {key: threading.Event() for key in automatic}
+        suggestions_cancelled, finish_summary = threading.Event(), threading.Event()
         manual_entered, finish_manual = threading.Event(), threading.Event()
-        normal = self.ask
         def slow(prompt, *args, **kwargs):
             key = kwargs['selected_tab']
             if 'Priority question' in prompt:
                 manual_entered.set()
-                self.assertTrue(finish_manual.wait(4))
-                return normal(prompt, *args, **kwargs)
+                self.assertTrue(finish_manual.wait(8))
             if not automatic[key].is_set():
                 kwargs['on_sent']()
                 automatic[key].set()
-                self.assertTrue(kwargs['cancel_event'].wait(4))
-                cancelled[key].set()
-                raise ChatGPTCancelled('Preempted')
-            return normal(prompt, *args, **kwargs)
+                if key == 'actions-tab':
+                    self.assertTrue(kwargs['cancel_event'].wait(4))
+                    suggestions_cancelled.set()
+                    raise ChatGPTCancelled('Preempted')
+                self.assertTrue(finish_summary.wait(4))
+                self.assertFalse(kwargs['cancel_event'].is_set())
+            return self.ask(prompt, *args, **kwargs)
+
         with patch('web_api.realtime_chat.chatgpt.ask', side_effect=slow):
             self.start()
             self.assertTrue(all(event.wait(3) for event in automatic.values()))
             before = self.rt.store.settings(self.cid, {})[1]
-            self.assertTrue(all(before.values()))
             self.assertEqual(self.post(self.base + '/messages', {'message':'Priority question'}).status_code, 200)
             self.assertTrue(manual_entered.wait(2))
-            self.assertTrue(all(event.wait(2) for event in cancelled.values()))
+            self.assertTrue(suggestions_cancelled.is_set())
             self.assertEqual(self.rt.store.settings(self.cid, {})[1], before)
+            finish_summary.set()
+            self.wait_for(lambda: self.done('summary'))
             self.add_line('Added during priority reply')
             self.due()
-            time.sleep(.5)
-            self.assertFalse(self.calls, 'Automatic lanes ran during user reply')
+            self.wait_for(lambda: len(self.done('summary')) == 2)
+            self.assertFalse(self.done('chat'))
+            self.assertFalse(self.done('actions'))
+            self.assertIn('Added during priority reply', self.calls[-1][1])
+            self.assertNotIn('First new transcript', self.calls[-1][1])
+            with self.rt.lock:
+                summary_runtime = self.rt.runtime[self.cid, 'summary']
+                summary_runtime['due'] = time.monotonic() + 60
+                summary_due = summary_runtime['due']
             finish_manual.set()
             self.wait_for(lambda: self.done('chat') and not any(self.rt.busy.values()))
-            self.assertNotIn('First new transcript', self.calls[0][1])
+            self.assertEqual(summary_runtime['due'], summary_due)
+            self.assertNotIn('First new transcript', self.calls[-1][1])
             self.due()
-            self.wait_for(lambda: self.done('actions') and self.done('summary'))
-        for _, prompt, _, _ in self.calls[1:]:
-            self.assertIn('Added during priority reply', prompt)
-            self.assertNotIn('First new transcript', prompt)
+            self.wait_for(lambda: self.done('actions'))
+        self.assertIn('Added during priority reply', self.calls[-1][1])
+        self.assertNotIn('First new transcript', self.calls[-1][1])
         cancelled_events = [e for e in self.rt.store.history(self.cid) if e['status'] == 'cancelled']
-        self.assertEqual({e['kind'] for e in cancelled_events}, {'actions','summary'})
+        self.assertEqual([e['kind'] for e in cancelled_events], ['actions'])
 
     def test_latest_action_replaces_active_and_queued_questions(self):
         # An already prepared tab accepts user questions even with auto mode stopped.
@@ -537,37 +547,47 @@ class RealtimeChatTests(unittest.TestCase):
             self.assertFalse(fresh)
 
     def test_independent_power_for_suggestions_manual_chat_and_summary(self):
-        self.config.update(power=2, summary_power=0)
+        self.assertEqual((self.config['power'], self.config['reply_power']), (0, 1))
+        self.config.update(power=2, reply_power=1, summary_power=0)
         self.start()
         self.wait_for(lambda: self.done('actions') and self.done('summary'))
         self.assertEqual(dict(self.powers), {'actions-tab':2, 'summary-tab':0})
         aid = self.rt.state(self.cid)['actions'][0]['id']
         self.post(self.base+'/messages', {'action_id':aid})
         self.wait_for(lambda: self.done('chat'))
-        self.assertEqual(self.powers[-1], ('actions-tab',2))
+        self.assertEqual(self.powers[-1], ('actions-tab',1))
+        self.post(self.base+'/messages', {'message':'Manual question'})
+        self.wait_for(lambda: len(self.done('chat')) == 2)
+        self.assertEqual(self.powers[-1], ('actions-tab',1))
         self.post(self.base+'/stop')
         self.wait_for(lambda: not self.rt.state(self.cid)['settings_locked'])
         saved, _ = RealtimeChatStore(self.service.store).settings(self.cid, {})
-        self.assertEqual((saved['power'],saved['summary_power']), (2,0))
-        self.config.update(power=-1, summary_power=1)
+        self.assertEqual((saved['power'], saved['reply_power'], saved['summary_power']), (2, 1, 0))
+        self.config.update(power=-1, reply_power=2, summary_power=1)
         self.assertEqual(self.client.put(self.base+'/settings', json=self.config, headers=self.headers).status_code,200)
         self.add_line('New content with independent effort')
         self.start()
         self.wait_for(lambda: len(self.done('actions'))==2 and len(self.done('summary'))==2)
         self.assertEqual(dict(self.powers[-2:]), {'actions-tab':None, 'summary-tab':1})
+        self.post(self.base+'/messages', {'message':'After changing reply Power'})
+        self.wait_for(lambda: len(self.done('chat')) == 3)
+        self.assertEqual(self.powers[-1], ('actions-tab',2))
 
     def test_legacy_shared_power_is_inherited_and_summary_power_is_validated(self):
-        self.config['power'] = 1
-        self.rt.store.save(self.cid, self.config)  # Old record has no summary_power.
+        self.config['power'] = 2
+        self.config.pop('reply_power')
+        self.rt.store.save(self.cid, self.config)  # Old record has neither Power override.
         state = self.client.get(self.base).json()
-        self.assertEqual(state['config']['summary_power'], 1)
-        for value in (-2,3,True,'High'):
-            self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers,
-                json={**self.config,'summary_power':value}).status_code,422)
+        self.assertEqual(state['config']['summary_power'], 2)
+        self.assertEqual(state['config']['reply_power'], 1)
+        for field in ('reply_power', 'summary_power'):
+            for value in (-2, 3, True, 'High'):
+                self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers,
+                    json={**self.config, field:value}).status_code,422)
         self.start()
         self.wait_for(lambda: self.done('actions') and self.done('summary'))
-        self.assertEqual(dict(self.powers), {'actions-tab':1,'summary-tab':1})
-        self.assertEqual(self.rt.store.settings(self.cid,{})[0]['summary_power'], 1)
+        self.assertEqual(dict(self.powers), {'actions-tab':2,'summary-tab':2})
+        self.assertEqual(self.rt.store.settings(self.cid,{})[0]['summary_power'], 2)
         self.assertEqual(self.client.put(self.base+'/settings', headers=self.headers,
             json={**self.config,'summary_power':0}).status_code,409)
 
@@ -653,7 +673,7 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(self.rt.state(self.cid)['running'])
 
     def test_export_import_preserves_history_attachments_and_resets_device_tabs(self):
-        self.config.update(power=2, summary_power=0,
+        self.config.update(power=2, reply_power=-1, summary_power=0,
             actions_template='Exported actions', actions_prompt='EXPORTED ACTIONS: return "actions" JSON',
             summary_template='Exported summary', summary_prompt='EXPORTED SUMMARY: decisions only')
         self.start()
@@ -671,7 +691,7 @@ class RealtimeChatTests(unittest.TestCase):
         self.assertFalse(state['running'])
         self.assertEqual(state['config']['selected_tab'], '')
         self.assertEqual(state['config']['summary_tab'], '')
-        self.assertEqual((state['config']['power'],state['config']['summary_power']), (2,0))
+        self.assertEqual((state['config']['power'], state['config']['reply_power'], state['config']['summary_power']), (2, -1, 0))
         for key in ('actions_template', 'actions_prompt', 'summary_template', 'summary_prompt'):
             self.assertEqual(state['config'][key], self.config[key])
         chat = next(e for e in state['events'] if e['kind']=='chat')
