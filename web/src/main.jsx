@@ -179,7 +179,8 @@ function App() {
   const tabLoader = useRef(null), tabLoads = useRef(0), chatPreparation = useRef(0);
   if (!tabLoader.current) tabLoader.current = createChatGPTTabLoader(api, post);
   const [chatDraft, setChatDraft] = useState(null);
-  const chatTabInitialized = useRef(false);
+  const [chatTabCheck, setChatTabCheck] = useState(0);
+  const [chatTabWarning, setChatTabWarning] = useState("");
   const [savingChat, setSavingChat] = useState(false);
   const [preparingChatTab, setPreparingChatTab] = useState(false);
   const [message, setMessage] = useState(""),
@@ -219,6 +220,7 @@ function App() {
     active = boot?.capture?.active;
   const needsChatGPTProfile = !settings.chatgpt_plan || !settings.chatgpt_login_status;
   const chatgptAllowed = settings.chatgpt_login_status !== "signed_out";
+  const canCheckChatTab = !!boot && !!cid && !needsChatGPTProfile && chatgptAllowed;
   const attachmentsAllowed = chatgptAllowed && settings.chatgpt_plan !== "free";
   const captureSource = !active && !chatgptAllowed ? "windows" : boot?.capture?.source || settings.web_capture_source || "windows";
   const captureLabel = captureSource === "chatgpt" ? "ChatGPT · Micro" : "Windows Live Captions";
@@ -345,12 +347,10 @@ function App() {
     if (cid) refresh().catch((e) => setError(e.message));
   }, [cid]);
   useEffect(() => {
-    if (tab !== "chat" || !boot || needsChatGPTProfile || !chatgptAllowed || !cid || chatConfig.new_chat || chatTabInitialized.current) return;
-    chatTabInitialized.current = true;
-    // A saved selection is usable without opening Chrome's tab list. Only a
-    // first-time setup with no saved tab discovers/creates a default once.
-    if (!chatConfigRef.current.selected_tab) prepareChatTab();
-  }, [tab, cid, !!boot, chatConfig.new_chat, needsChatGPTProfile, chatgptAllowed]);
+    if (tab !== "chat" || !canCheckChatTab || chatConfig.new_chat) return;
+    prepareChatTab();
+    return () => { chatPreparation.current += 1; };
+  }, [tab, chatTabCheck, canCheckChatTab, chatConfig.new_chat]);
   useEffect(() => {
     if (follow && tab === "transcript")
       transcriptEnd.current?.scrollIntoView({ block: "end" });
@@ -447,12 +447,12 @@ function App() {
     } catch (e) { setError(e.message); }
     finally { transferRef.current = false; setTransferring(""); }
   }
-  async function scanTabs({ ensure = false } = {}) {
+  async function scanTabs({ ensure = false, beforeOpen } = {}) {
     if (!chatgptAllowed) return "Đăng nhập ChatGPT rồi cập nhật Settings.";
     tabLoads.current += 1;
     setLoadingTabs(true);
     try {
-      const tabs = await tabLoader.current({ ensure });
+      const tabs = await tabLoader.current({ ensure, beforeOpen });
       setChromeTabs(tabs);
       return tabs;
     } catch (e) {
@@ -465,14 +465,31 @@ function App() {
   }
   async function prepareChatTab() {
     const revision = ++chatPreparation.current;
+    const { selected_tab: previous, selected_tab_title: previousTitle } = chatConfigRef.current;
+    const oldTab = previousTitle ? `Tab ChatGPT “${previousTitle}”` : "Tab ChatGPT đã chọn";
+    const missing = previous ? `${oldTab} không còn mở. ` : "";
+    let openingTab = false;
     setPreparingChatTab(true);
+    setChatTabWarning("");
     try {
-      const tabs = await scanTabs({ ensure: true });
+      const tabs = await scanTabs({ ensure: true, beforeOpen: () => {
+        if (revision !== chatPreparation.current) return false;
+        openingTab = true;
+        setChatTabWarning(`${missing}Không tìm thấy tab ChatGPT nào. Đang mở tab mới…`);
+        return true;
+      } });
       if (revision !== chatPreparation.current) return;
-      if (!Array.isArray(tabs)) return; // scanTabs already displays the connection error.
-      const chosen = tabs.find((t) => t.key === chatConfigRef.current.selected_tab) || tabs[0];
+      if (!Array.isArray(tabs)) {
+        if (openingTab) setChatTabWarning(`${missing}Không mở được tab ChatGPT mới.`);
+        return;
+      }
+      const chosen = tabs.find((t) => t.key === previous) || tabs[0];
       setChatDraft((old) => ({ ...(old || chatConfigRef.current),
         selected_tab: chosen.key, selected_tab_title: chosen.title }));
+      if (openingTab) setChatTabWarning(`${missing}Đã mở và chọn tab ChatGPT mới “${chosen.title}”.`);
+      else if (previous && chosen.key !== previous) {
+        setChatTabWarning(`${missing}Đã chọn tab đầu tiên trong danh sách: “${chosen.title}”.`);
+      }
     } catch (e) { setError(e.message); }
     finally { if (revision === chatPreparation.current) setPreparingChatTab(false); }
   }
@@ -618,6 +635,7 @@ function App() {
             if ("selected_tab" in patch) {
               chatPreparation.current += 1;
               setPreparingChatTab(false);
+              setChatTabWarning("");
               patch = { ...patch, selected_tab_title: chromeTabs.find((t) => t.key === patch.selected_tab)?.title || "" };
             }
             setChatDraft((old) => ({ ...(old || chatConfigRef.current), ...patch }));
@@ -935,13 +953,22 @@ function App() {
             <button
               key={key}
               className={key === tab ? "active" : ""}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                if (key === "chat" && tab === "chat") setChatTabCheck(n => n + 1);
+                else setTab(key);
+              }}
             >
               <Icon size={17} />
               {label}
             </button>
           ))}
         </nav>
+        {tab === "chat" && chatgptAllowed && !chatConfig.new_chat && chatTabWarning && (
+          <div role="status" className="alert">
+            {chatTabWarning}
+            <button onClick={() => setChatTabWarning("")} aria-label="Đóng thông báo tab ChatGPT"><X size={16} /></button>
+          </div>
+        )}
         {!chatgptAllowed && chatgptTabs.has(tab) && <SignedOutNotice openSettings={() => setSettingsOpen(true)} />}
         {busyJob?.kind === "research" && tab !== "research" && (
           <div className="research-notice">

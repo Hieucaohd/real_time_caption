@@ -29,9 +29,10 @@ def main():
     while not server.started:
         if time.monotonic() > deadline: raise AssertionError('Server did not start')
         time.sleep(.05)
+    available = [tab('closed', 'Old ChatGPT'), tab('first', 'First ChatGPT'), tab('second', 'Second ChatGPT')]
     try:
         with patch('web_api.service.chatgpt.ask', side_effect=[chatgpt.ChatGPTTabClosed('Closed'), 'Answer after manual retry']) as ask, \
-                patch('web_api.service.chatgpt.list_chrome_chatgpt_tabs', return_value=[tab('first', 'First ChatGPT'), tab('second', 'Second ChatGPT')]) as scan, \
+                patch('web_api.service.chatgpt.list_chrome_chatgpt_tabs', side_effect=lambda: list(available)) as scan, \
                 sync_playwright() as p:
             browser = p.chromium.launch(channel='chrome', headless=True)
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
@@ -41,7 +42,9 @@ def main():
             page.locator('.chat-settings summary').click()
             chosen = page.get_by_label('chat ChatGPT tab', exact=True)
             expect(chosen).to_have_value('closed')
-            scan.assert_not_called()
+            expect(chosen.locator('option[value="first"]')).to_have_count(1)
+            scan.assert_called_once()
+            available.pop(0)  # The tab closes between entering Chat and pressing Send.
             page.get_by_label('chat Power', exact=True).select_option('2')
             page.locator('.chat-composer textarea').fill('Keep my question for manual retry')
             page.get_by_role('button', name='Send', exact=True).click()
@@ -50,7 +53,7 @@ def main():
             expect(page.get_by_label('chat Power', exact=True)).to_have_value('2')
             assert Settings.load().chatgpt_selected_tab == 'first'
             page.wait_for_timeout(1500)
-            ask.assert_called_once(); scan.assert_called_once()
+            ask.assert_called_once(); assert scan.call_count == 2
             assert len(fixture.service.jobs) == 1
             # Manual choice overrides the recovered tab only when Retry is clicked.
             chosen.select_option('second')
@@ -63,7 +66,8 @@ def main():
             page.locator('nav button').nth(1).click()
             page.locator('.chat-settings summary').click()
             expect(chosen).to_have_value('first')  # Recovered selection was persisted.
-            scan.assert_called_once()  # Reload does not rediscover tabs/resend questions.
+            expect(chosen.locator('option[value="second"]')).to_have_count(1)
+            assert scan.call_count == 3  # Reload checks the tab without resending the question.
             assert ask.call_count == 2 and not errors, errors
             with patch('web_api.service.chatgpt.open_new_chatgpt_tab', return_value=tab('fresh', 'Fresh ChatGPT')) as open_tab, \
                     patch('web_api.service.chatgpt.ask', return_value='Answer in a fresh tab') as new_ask:
@@ -80,9 +84,9 @@ def main():
                 page.get_by_label('New ChatGPT chat', exact=True).uncheck()
                 expect(chosen).to_be_enabled()
                 expect(chosen).to_have_value('first')
-                scan.assert_called_once()
+                assert scan.call_count == 4
             browser.close()
-            print('Closed Chat tab: persisted first-tab fallback, visible notice, no automatic resend/rescan, explicit Retry and reload passed.')
+            print('Chat tab closed after entry: visible first-tab fallback, manual Retry and reload passed.')
     finally:
         server.should_exit = True; thread.join(10); fixture.tearDown()
 

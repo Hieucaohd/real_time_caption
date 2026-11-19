@@ -34,3 +34,8 @@ test('failed discovery never creates a tab; failed creation can be retried', asy
   await assert.rejects(load({ ensure: true }), /Open failed/);
   assert.deepEqual(await load({ ensure: true }), [{ key: 'retry' }]);
 });
+
+test('an outdated Chat check cannot create a tab when discovery returns empty', async () => {
+  const load = createChatGPTTabLoader(async () => [], async () => assert.fail('unexpected creation'));
+  assert.deepEqual(await load({ ensure: true, beforeOpen: () => false }), []);
+});
